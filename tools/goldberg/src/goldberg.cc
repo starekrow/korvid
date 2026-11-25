@@ -1415,7 +1415,7 @@ int host_lock(lua_State* L) {
     // when the process ends, however it ends, so there is no stale lock to clear.
     i32 err = 0;
     bool taken = io_lock_file(luaL_checkstring(L, 1), luaL_checkstring(L, 2), &s.lock, holder, sizeof holder, &err);
-    if (!taken && err != EWOULDBLOCK) { lua_pushnil(L); return 1; } // the file cannot be made
+    if (!taken && err != Err::WouldBlock) { lua_pushnil(L); return 1; } // the file cannot be made
     lua_pushboolean(L, taken);
     lua_pushstring(L, holder);
     return 2;

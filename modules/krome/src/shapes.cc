@@ -227,8 +227,8 @@ void free_job(KromeModule& s, KromeShapeJob* j) {
 // On a task worker: the job touches only itself.
 i32 shape_task(void* arg, const IoTaskCtl& ctl) {
     KromeShapeJob& j = *(KromeShapeJob*)arg;
-    if (ctl.cancelled()) return 125; // ECANCELED
-    return patherizer_draw(j.shape, PathTarget{j.px, j.w, j.h, j.w * 4, false}, j.options) ? 0 : 12; // ENOMEM
+    if (ctl.cancelled()) return Err::Cancelled;
+    return patherizer_draw(j.shape, PathTarget{j.px, j.w, j.h, j.w * 4, false}, j.options) ? 0 : Err::NoMemory;
 }
 
 IoQueue* job_queue(KromeModule& s) {

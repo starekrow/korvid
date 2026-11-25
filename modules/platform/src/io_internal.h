@@ -13,6 +13,8 @@ struct IoEntry {
     IoPriority priority;
     IoStatus   status;
     u64        user;
+    const void* owner;    // whose list its completion goes on; null: the shared one
+    bool       dropped;   // drain's: its completion is freed as it comes, nobody is waiting
     u64        sequence;  // submission order, for stable priority ordering
     bool       write;     // a write: `buf` holds the copy to write, `size` its length
     bool       stat;      // a stat: on the ring, `buf` holds the kernel's answer and a copy of the path
@@ -48,5 +50,11 @@ struct IoMount {
     char      prefix[64] = {}; // only the archive's entries under this are seen, without it ("assets/")
     PackTable table;
 };
+
+// A request has finished: its completion onto its owner's list (or freed, for one a drain
+// dropped). Every backend ends a request here.
+void io_complete(IoQueue& q, IoCompletion c);
+// Counts a request just made as its owner's, making the owner's list at its first.
+void io_owner_took(IoQueue& q, const void* owner);
 
 } // namespace kv

@@ -31,21 +31,11 @@ bool asset_startup(Engine& e, ModuleInstance& self) {
 void asset_shutdown(Engine& e, ModuleInstance& self) {
     AssetState_* s = self.state_as<AssetState_>();
     if (!s) return;
-    // Reads still out (a load cut short by the exit) are the module's to collect: cancel
-    // what has not started, let the rest finish, and free what any of them brought.
+    // Reads still out (a load cut short by the exit) are the module's to collect: what has
+    // not started is cancelled, the rest finish, and what any of them brought is freed.
     if (IoQueue* io = platform_io(e)) {
         const u16 kinds[] = {s->font_kind, s->sound_kind, s->blob_kind, s->stream_kind, s->shape_kind};
-        auto ours = [&](u64 user) { for (u16 k : kinds) if (asset_is_kind(*s, user, k)) return true; return false; };
-        for (u32 round = 0; round < 1000; ++round) {
-            for (u32 i = 0; i < io->completions().len;) {
-                IoCompletion c = io->completions()[i];
-                if (!ours(c.user)) { ++i; continue; }
-                io->reap(c.request);
-                c.bytes.free();
-            }
-            if (!io->pending()) break;
-            io->pump();
-        }
+        for (u16 k : kinds) io->drain(asset_io_owner(k));
     }
     asset_scopes_shutdown(e, *s);
     asset_streams_shutdown(e, *s);

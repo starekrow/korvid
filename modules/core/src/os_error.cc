@@ -72,4 +72,40 @@ const char* os_error_text(i32 err) {
     return unknown;
 }
 
+const char* os_error_name(i32 err) {
+    switch (err) {
+    case Err::None:         return "None";
+    case Err::NotFound:     return "NotFound";
+    case Err::Denied:       return "Denied";
+    case Err::Exists:       return "Exists";
+    case Err::NotDir:       return "NotDir";
+    case Err::IsDir:        return "IsDir";
+    case Err::NotEmpty:     return "NotEmpty";
+    case Err::NameTooLong:  return "NameTooLong";
+    case Err::CrossDevice:  return "CrossDevice";
+    case Err::NoSpace:      return "NoSpace";
+    case Err::TooManyOpen:  return "TooManyOpen";
+    case Err::Busy:         return "Busy";
+    case Err::Io:           return "Io";
+    case Err::Malformed:    return "Malformed";
+    case Err::Invalid:      return "Invalid";
+    case Err::BadHandle:    return "BadHandle";
+    case Err::NoMemory:     return "NoMemory";
+    case Err::NotSupported: return "NotSupported";
+    case Err::Cancelled:    return "Cancelled";
+    case Err::WouldBlock:   return "WouldBlock";
+    case Err::Interrupted:  return "Interrupted";
+    case Err::TimedOut:     return "TimedOut";
+    case Err::Pipe:         return "Pipe";
+    case Err::AddrInUse:    return "AddrInUse";
+    case Err::Refused:      return "Refused";
+    case Err::Reset:        return "Reset";
+    case Err::NotConnected: return "NotConnected";
+    case Err::Unreachable:  return "Unreachable";
+    default: break;
+    }
+    if (err == Err::Again) return "WouldBlock"; // one thing under two numbers on Windows
+    return "Error";
+}
+
 } // namespace kv

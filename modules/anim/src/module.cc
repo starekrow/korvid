@@ -84,8 +84,8 @@ void anim_pump(TickContext& ctx) {
     anim_sheets_pump(e, s);
     IoQueue* io = platform_io(e);
     if (!io) return;
-    for (u32 i = 0; i < io->completions().len;) {
-        IoCompletion c = io->completions()[i];
+    for (u32 i = 0; i < io->completions(asset_io_owner(s.kind)).len;) {
+        IoCompletion c = io->completions(asset_io_owner(s.kind))[i];
         if (Handle{c.user}.kind() != s.kind || !s.kind) { ++i; continue; }
         Handle h{c.user};
         AnimClip* clip = s.clips.get(h);
@@ -93,7 +93,7 @@ void anim_pump(TickContext& ctx) {
         io->reap(c.request);
         clip->io = Handle{};
         if (c.status != IoStatus::Done) {
-            fail_clip(e, s, h, *clip, c.status == IoStatus::Failed && c.error == 2 ? AssetError::NotFound : AssetError::Read, nullptr);
+            fail_clip(e, s, h, *clip, c.not_found() ? AssetError::NotFound : AssetError::Read, nullptr);
             continue;
         }
         AnimClip parsed;
@@ -263,10 +263,10 @@ void anim_shutdown(Engine& e, ModuleInstance& self) {
     anim_sheets_shutdown(e, *s);
     asset_kind_unregister(e, s->kind);
     IoQueue* io = platform_io(e);
+    if (io) io->drain(asset_io_owner(s->kind)); // reads still out: none lands after the clips are gone
     for (u32 i = 0; i < s->clips.len; ++i) {
         if (!s->clips.is_alive(i)) continue;
         AnimClip& c = s->clips.items[i];
-        if (io && !c.io.is_null()) io->cancel(c.io);
         c.tracks.free();
         c.keys.free();
     }
@@ -381,6 +381,7 @@ Handle anim_load(Engine& e, const char* path, Handle scope) {
     req.path  = path;
     req.alloc = s->general;
     req.user  = h.bits;
+    req.owner = asset_io_owner(h.kind());
     Handle iq = io->read_asset(req);
     AnimClip* rec = s->clips.get(h);
     if (iq.is_null()) { fail_clip(e, *s, h, *rec, AssetError::Read, "could not submit"); return held(e, scope, h); }

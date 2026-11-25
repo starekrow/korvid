@@ -443,7 +443,7 @@ bool demand_frame(Engine& engine, FrameLoopState& s) {
     bool want = engine.frame_wanted || engine.ticks_wanted || s.demand_tail > 0; // ticks come with frames here
     if (in && memcmp(&before, &in->raw, sizeof before) != 0) want = true;
     if (s.window && (s.window->width() != s.presented_w || s.window->height() != s.presented_h)) want = true;
-    if (IoQueue* io = platform_io(engine)) if (io->pending() || io->completions().len) want = true;
+    if (IoQueue* io = platform_io(engine)) if (io->pending() || io->completed_count()) want = true;
     if (engine_holds(engine) & HoldLoading) want = true;
     if (engine_wake(engine)) want = true; // a module's socket had something (engine_add_waker)
     if (s.woke) want = true;              // a watched socket: a tick (with its frame), for the CLI's
@@ -524,7 +524,7 @@ bool decoupled_pass(Engine& engine, FrameLoopState& s, bool& slept, bool tick_al
         return true;
     }
     IoQueue* io = platform_io(engine);
-    bool io_busy = io && (io->pending() || io->completions().len);
+    bool io_busy = io && (io->pending() || io->completed_count());
     // A watched socket's wake: a tick, so a system that reads it in the Input phase (the
     // CLI's) sees what came without waiting for the heartbeat.
     bool tick = tick_always || engine.ticks_wanted || io_busy || engine_work_pending(engine) || s.woke || now - s.demand_last >= k_demand_heartbeat;
@@ -853,7 +853,11 @@ int frameloop_run(int argc, char** argv, void*) {
         KV_INFO("frameloop", "rate %g", g_rate);
     }
     FrameLoopState* s = engine_module_state_as<FrameLoopState>(engine, "frameloop");
-    if (s) run(engine, *s);
+    if (s) {
+        io_warn_blocking_in_ticks(true); // paced from here: a system that blocks is told (dev builds)
+        run(engine, *s);
+        io_warn_blocking_in_ticks(false);
+    }
     replay_finish(engine);
     engine_shutdown(engine);
     if (prof_enabled()) { prof_collect(); if (g_prof_report) prof_log_summary(10); }

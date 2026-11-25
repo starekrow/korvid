@@ -195,7 +195,7 @@ f64 platform_idle_time(Engine& e, f64 most) {
     if (PlatformState* s = state(e)) {
         // A request queued or on the ring moves only when the pump runs; a completion not
         // yet taken is somebody's to take on the next pass. Tasks wake the loop themselves.
-        if (s->io.queued.len || s->io.in_flight || s->io.completions().len) ask = true;
+        if (s->io.queued.len || s->io.in_flight || s->io.completed_count()) ask = true;
         if (s->members.len && platform_members_soon(e, *s)) ask = true; // standing members the thread cannot hear
 
     }

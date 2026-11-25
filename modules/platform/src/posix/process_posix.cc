@@ -1,4 +1,5 @@
 #include "korvid/platform/process.h"
+#include "../blocking.h"
 #include "korvid/core/os_error.h"
 #include "korvid/core/format.h"
 #include "korvid/core/memory.h"
@@ -242,6 +243,7 @@ bool Process::spawn(const ProcessDesc& desc, i32* err) {
 }
 
 void Process::wait(f64 seconds) {
+    BlockingCall blocking("Process::wait", nullptr);
     if (pid < 0) misuse_process(*this, "wait");
     pollfd fds[3];
     nfds_t n = 0;

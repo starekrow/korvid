@@ -182,8 +182,8 @@ void asset_materials_pump(TickContext& ctx) {
     IoQueue* io = platform_io(e);
     if (!io) return;
     asset_render_reap_orphans(e, s, s.material_kind);
-    for (u32 i = 0; i < io->completions().len;) {
-        IoCompletion c = io->completions()[i];
+    for (u32 i = 0; i < io->completions(asset_io_owner(s.material_kind)).len;) {
+        IoCompletion c = io->completions(asset_io_owner(s.material_kind))[i];
         if (Handle{c.user}.kind() != s.material_kind) { ++i; continue; }
         Handle h{c.user};
         MaterialAsset* m = s.materials.get(h);
@@ -193,7 +193,7 @@ void asset_materials_pump(TickContext& ctx) {
         bool re = m->reread;
         m->reread = false;
         if (c.status != IoStatus::Done) {
-            AssetError err = c.status == IoStatus::Failed && c.error == 2 ? AssetError::NotFound : AssetError::Read;
+            AssetError err = c.not_found() ? AssetError::NotFound : AssetError::Read;
             if (re) asset_reload_failed(e, h, m->path, err, nullptr);
             else fail_material(e, s, h, *m, err, nullptr);
             asset_reread_after(e, s.general, h, asset_reread_of(*m));
@@ -279,6 +279,7 @@ Handle material_load(Engine& e, AssetRenderState& st, const char* path) {
     req.path  = path;
     req.alloc = s->general;
     req.user  = h.bits;
+    req.owner = asset_io_owner(h.kind());
     Handle iq = io->read_asset(req);
     MaterialAsset* rec = s->materials.get(h);
     if (iq.is_null()) { fail_material(e, *s, h, *rec, AssetError::Read, "could not submit"); return h; }

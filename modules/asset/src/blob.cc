@@ -39,7 +39,7 @@ void land(Engine& e, AssetState_& s, Handle h, BlobAsset& b, IoCompletion c) {
     bool re = b.reread;
     b.reread = false;
     if (c.status != IoStatus::Done) {
-        AssetError err = c.status == IoStatus::Failed && c.error == 2 ? AssetError::NotFound : AssetError::Read;
+        AssetError err = c.not_found() ? AssetError::NotFound : AssetError::Read;
         if (re) asset_reload_failed(e, h, b.path, err, nullptr);
         else fail_blob(e, s, h, b, err);
         return;
@@ -92,8 +92,8 @@ void asset_blobs_pump(TickContext& ctx) {
     IoQueue* io = platform_io(e);
     if (!io) return;
     asset_reap_orphans(e, s, s.blob_kind);
-    for (u32 i = 0; i < io->completions().len;) {
-        IoCompletion c = io->completions()[i];
+    for (u32 i = 0; i < io->completions(asset_io_owner(s.blob_kind)).len;) {
+        IoCompletion c = io->completions(asset_io_owner(s.blob_kind))[i];
         if (!asset_is_kind(s, c.user, s.blob_kind)) { ++i; continue; }
         Handle h{c.user};
         BlobAsset* b = s.blobs.get(h);
@@ -120,6 +120,7 @@ Handle blob_load(Engine& e, AssetState_& s, const char* path) {
     req.path  = path;
     req.alloc = s.general;
     req.user  = h.bits;
+    req.owner = asset_io_owner(h.kind());
     Handle iq = io->read_asset(req);
     BlobAsset* rec = s.blobs.get(h);
     if (iq.is_null()) { fail_blob(e, s, h, *rec, AssetError::Read); return h; }

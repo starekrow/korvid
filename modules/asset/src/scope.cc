@@ -191,8 +191,8 @@ void asset_bury_samples(AssetState_& s, f32* samples, usize bytes) {
 void asset_reap_orphans(Engine& e, AssetState_& s, u16 kind) {
     IoQueue* io = platform_io(e);
     if (!io) return;
-    for (u32 i = 0; i < io->completions().len;) {
-        IoCompletion c = io->completions()[i];
+    for (u32 i = 0; i < io->completions(asset_io_owner(kind)).len;) {
+        IoCompletion c = io->completions(asset_io_owner(kind))[i];
         if (!asset_is_kind(s, c.user, kind) || asset_refs_of(s, Handle{c.user})) { ++i; continue; }
         io->reap(c.request);
         c.bytes.free();

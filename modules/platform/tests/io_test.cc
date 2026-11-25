@@ -1,4 +1,7 @@
 #include "korvid/platform/io.h"
+#include "korvid/platform/module.h"
+#include "korvid/core/engine.h"
+#include "korvid/core/phase.h"
 #include "korvid/core/format.h"
 #include "korvid/core/os_process.h"
 #include "korvid/core/sha256.h"
@@ -663,6 +666,68 @@ void test_io_take(kv::TestCtx& c) {
     KV_CHECK(c, io_remove_tree(dir));
 }
 
+// Whose a completion is: each owner's list holds its own and nobody else's, a request with
+// no owner goes on the shared one, and a drain leaves nothing of the owner's behind, with
+// the others' untouched. And an error is compared by name.
+void test_io_owners(kv::TestCtx& c) {
+    using namespace kv;
+    char dir[256], path[400], missing[400];
+    KV_CHECK(c, io_make_temp_dir("kv-io-owners", dir, sizeof dir));
+    format(path, sizeof path, "%s/text.txt", dir);
+    format(missing, sizeof missing, "%s/none.txt", dir);
+    KV_CHECK(c, io_write_file(path, "twelve bytes", 12));
+
+    const IoBackend backends[] = {IoBackend::Sync, IoBackend::Auto};
+    for (IoBackend backend : backends) {
+        IoQueue q;
+        KV_CHECK(c, q.init(mem_general(), 32, backend));
+        int a = 0, b = 0; // two owners: any address of one's own
+        IoRequest r; r.path = path;
+        r.owner = &a; r.user = 1; Handle ha1 = q.read_file(r);
+        r.user = 2;               Handle ha2 = q.read_file(r);
+        r.owner = &b; r.user = 3; Handle hb = q.read_file(r);
+        r.path = missing; r.user = 4; Handle hbm = q.read_file(r);
+        r.owner = nullptr; r.path = path; r.user = 5; Handle hn = q.read_file(r);
+        KV_CHECK(c, q.pending(&a) == 2 && q.pending(&b) == 2 && q.pending() == 5 && q.completed_count() == 0);
+        for (u32 i = 0; i < 2000 && q.pending(); ++i) { q.pump(); time_sleep(0.001); }
+        KV_CHECK(c, q.completed_count() == 5 && q.pending(&a) == 0 && q.pending(&b) == 0);
+        KV_CHECK(c, q.completions(&a).len == 2 && q.completions(&b).len == 2 && q.completions().len == 1);
+        for (const IoCompletion& done : q.completions(&a)) KV_CHECK(c, done.owner == &a && (done.user == 1 || done.user == 2));
+        for (const IoCompletion& done : q.completions(&b)) KV_CHECK(c, done.owner == &b && (done.user == 3 || done.user == 4));
+        KV_CHECK(c, q.completions()[0].user == 5 && q.completions()[0].owner == nullptr);
+        int nobody = 0;
+        KV_CHECK(c, q.completions(&nobody).len == 0 && q.pending(&nobody) == 0);
+
+        // By handle, whichever list it is on; and the error by its name.
+        IoCompletion done;
+        KV_CHECK(c, !q.is_pending(ha1) && q.take(ha1, &done) && done.status == IoStatus::Done && done.bytes.size == 12 && !done.not_found());
+        done.bytes.free();
+        KV_CHECK(c, q.completions(&a).len == 1 && !q.take(ha1, &done));
+        KV_CHECK(c, q.take(hbm, &done) && done.not_found() && done.error == Err::NotFound);
+        KV_CHECK(c, strcmp(os_error_name(done.error), "NotFound") == 0 && strcmp(os_error_name(0), "None") == 0);
+        KV_CHECK(c, strcmp(os_error_name(Err::Refused), "Refused") == 0 && strcmp(os_error_name(-7), "Error") == 0);
+        KV_CHECK(c, q.completed_count() == 3);
+
+        // A drain: what `a` had finished is freed, what it has out is cancelled and waited
+        // for, and nothing of its is left; b's and the shared list's stay.
+        r.owner = &a; r.path = path; r.user = 6;
+        Handle ha3 = q.read_file(r);
+        KV_CHECK(c, !ha3.is_null() && q.pending(&a) == 1);
+        q.drain(&a);
+        KV_CHECK(c, q.pending(&a) == 0 && q.completions(&a).len == 0 && !q.is_pending(ha3) && !q.take(ha2, &done) && !q.take(ha3, &done));
+        KV_CHECK(c, q.completed_count() == 2 && q.completions(&b).len == 1 && q.completions().len == 1 && q.pending() == 0);
+        q.drain(&a); // again, with nothing: nothing
+        // An owner can come back after a drain.
+        Handle ha4 = q.read_file(r);
+        for (u32 i = 0; i < 2000 && q.pending(); ++i) { q.pump(); time_sleep(0.001); }
+        KV_CHECK(c, q.completions(&a).len == 1 && q.take(ha4, &done) && done.status == IoStatus::Done && done.user == 6);
+        done.bytes.free();
+        KV_CHECK(c, q.take(hb, nullptr) && q.take(hn, nullptr) && q.completed_count() == 0);
+        q.free();
+    }
+    KV_CHECK(c, io_remove_tree(dir));
+}
+
 // A lock between processes by a file's name: taken once, refused with the holder's line
 // while it is held (a second open of the file is another holder, to the OS), free again
 // once let go. And the process's environment, set and taken away the same way on every OS.
@@ -743,4 +808,30 @@ void test_os_handles(kv::TestCtx& c) {
     // An entity's handle, or any that is not the OS's, is simply not an OS handle.
     KV_CHECK(c, os_handle_kind(Handle::make(1, 1, 0)) == OsKind::None && !os_handle_open(Handle{}));
     KV_CHECK(c, io_remove_tree(dir) && os_handles_open() == open_before);
+}
+
+// A blocking call from a system: nothing said in a loop that is not paced (a tool's, a
+// test's); in one that is, a dev or debug build warns once for the system and the call.
+namespace {
+void blocker_blocks(kv::TickContext&) { kv::io_is_file("."); kv::io_is_dir("."); }
+constinit const kv::SystemDesc k_blocker_systems[] = {{.name = ".blocks", .phase = kv::Phase::Sim, .fn = blocker_blocks}};
+const kv::ModuleDesc k_blocker = {.name = "blocker", .systems = k_blocker_systems};
+} // namespace
+
+void test_io_blocking_in_ticks(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("blocking calls in a tick");
+    const ModuleDesc* const list[] = {&platform_module, &k_blocker};
+    Engine e;
+    KV_CHECK(c, engine_init(e, list));
+    u32 before = io_blocking_warnings();
+    u32 ticks = 0;
+    for (u32 i = 0; i < 10; ++i) ticks += engine_frame(e, 1.0 / 60.0);
+    KV_CHECK(c, ticks > 0 && io_blocking_warnings() == before); // not paced: a system may block
+    io_warn_blocking_in_ticks(true);
+    for (u32 i = 0; i < 10; ++i) engine_frame(e, 1.0 / 60.0);
+    KV_CHECK(c, io_blocking_warnings() == before + (KV_DEV ? 2u : 0u)); // io_is_file and io_is_dir, once each
+    KV_CHECK(c, io_is_dir(".") && io_blocking_warnings() == before + (KV_DEV ? 2u : 0u)); // outside any system: fine
+    io_warn_blocking_in_ticks(false);
+    engine_shutdown(e);
 }

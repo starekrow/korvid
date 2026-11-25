@@ -16,10 +16,15 @@ enum class AssetState : u8 { Pending, Ready, Failed };
 
 constexpr u32 KV_ASSET_PATH_MAX = 128; // bytes, NUL included, for asset paths
 
-// Why a load failed. NotFound and Read come from the I/O queue (ENOENT, anything else);
+// Why a load failed. NotFound and Read come from the I/O queue (Err::NotFound, anything else);
 // Decode is a file's decoder (PNG, TrueType, WAV, Ogg, kshape); Upload the renderer; Parse a
 // text file's parser. A failed asset keeps its handle, so nothing downstream has to care.
 enum class AssetError : u8 { None, NotFound, Read, Decode, Upload, Parse, Count };
+
+// Whose requests an asset kind's are on the I/O queue (IoRequest::owner): one owner a kind,
+// by the kind's handle kind, so each kind's pump sees its own completions and no other's.
+// What a module that adds a kind (reload.h) submits its reads under, and asks for them by.
+inline const void* asset_io_owner(u16 kind) { return (const void*)(usize)kind; }
 
 // "not found", "decode error", ...; "none" for AssetError::None.
 const char* asset_error_name(AssetError err);

@@ -182,8 +182,8 @@ void asset_sounds_pump(TickContext& ctx) {
     IoQueue* io = platform_io(e);
     if (!io) return;
     asset_reap_orphans(e, s, s.sound_kind);
-    for (u32 i = 0; i < io->completions().len;) {
-        IoCompletion c = io->completions()[i];
+    for (u32 i = 0; i < io->completions(asset_io_owner(s.sound_kind)).len;) {
+        IoCompletion c = io->completions(asset_io_owner(s.sound_kind))[i];
         if (!asset_is_kind(s, c.user, s.sound_kind)) { ++i; continue; }
         Handle h{c.user};
         SoundAsset* snd = s.sounds.get(h);
@@ -191,7 +191,7 @@ void asset_sounds_pump(TickContext& ctx) {
         io->reap(c.request);
         snd->io = Handle{};
         if (c.status != IoStatus::Done) {
-            fail_sound(e, s, h, *snd, c.status == IoStatus::Failed && c.error == 2 ? AssetError::NotFound : AssetError::Read, nullptr);
+            fail_sound(e, s, h, *snd, c.not_found() ? AssetError::NotFound : AssetError::Read, nullptr);
             continue;
         }
         const char* why = nullptr;
@@ -243,6 +243,7 @@ Handle sound_load(Engine& e, AssetState_& st, const char* path) {
     req.path  = path;
     req.alloc = s->general;
     req.user  = h.bits;
+    req.owner = asset_io_owner(h.kind());
     Handle iq = io->read_asset(req);
     SoundAsset* rec = s->sounds.get(h);
     if (iq.is_null()) { fail_sound(e, *s, h, *rec, AssetError::Read, "could not submit"); return h; }

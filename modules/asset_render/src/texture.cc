@@ -45,7 +45,7 @@ void land(Engine& e, AssetRenderState& s, Renderer* r, Handle h, TextureAsset& t
     bool re = t.reread;
     t.reread = false;
     if (c.status != IoStatus::Done) {
-        AssetError err = c.status == IoStatus::Failed && c.error == 2 ? AssetError::NotFound : AssetError::Read;
+        AssetError err = c.not_found() ? AssetError::NotFound : AssetError::Read;
         if (re) asset_reload_failed(e, h, t.path, err, nullptr);
         else fail_asset(e, s, h, t, err, nullptr);
         return;
@@ -92,8 +92,8 @@ void asset_textures_pump(TickContext& ctx) {
     asset_render_reap_orphans(e, s, s.kind);
     // Scan what has finished, take what is ours. Reaping removes the entry, so the index
     // only advances past entries that stay.
-    for (u32 i = 0; i < io->completions().len;) {
-        IoCompletion c = io->completions()[i];
+    for (u32 i = 0; i < io->completions(asset_io_owner(s.kind)).len;) {
+        IoCompletion c = io->completions(asset_io_owner(s.kind))[i];
         if (Handle{c.user}.kind() != s.kind) { ++i; continue; }
         Handle h{c.user};
         TextureAsset* t = s.textures.get(h);
@@ -209,6 +209,7 @@ Handle texture_load(Engine& e, AssetRenderState& st, const char* path) {
     req.path  = path;
     req.alloc = s->general;
     req.user  = h.bits;
+    req.owner = asset_io_owner(h.kind());
     Handle iq = io->read_asset(req);
     if (iq.is_null()) {
         TextureAsset* rec = s->textures.get(h);

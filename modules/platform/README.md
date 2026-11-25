@@ -1,4 +1,4 @@
-# platform
+`user`, `owner`, `error` (errno, by `Err`'s names), `not_found()`, `stat` (a `stat_file`'s answer) |# platform
 
 The operating system as an engine sees it with no display and no devices: a file read
 queue with its mounts, the executable's and the user's directories, and TCP sockets. It
@@ -16,7 +16,8 @@ store's writer.
 **One shape for all of it.** What the OS opened is a `Handle`, the engine's own, as an
 entity or a texture is: it knows what kind of thing it names, describes itself
 (`kv_handle_describe`), and goes stale in every copy when what it names is closed. What is opened is closed (`open`, `close`, `is_open`). A blocking call that
-can fail takes a last `i32* err`, an errno on every OS. A read gives an `IoBytes`,
+can fail takes a last `i32* err`, an errno on every OS, compared by name (`Err::NotFound`,
+`core/os_error.h`) and never by number. A read gives an `IoBytes`,
 whether it was asked for now or later. What a waiting loop is woken by goes in a
 `PlatformWatch`, whatever it is. Times are seconds, paths are UTF-8 with `/`.
 
@@ -193,19 +194,22 @@ if (platform_io(engine)->take(h, &c)) {          // false while it is on its way
 }
 ```
 
-A consumer of many requests (the asset module) scans the list for its own instead, by the
-`user` word it submitted with, and reaps each:
+A consumer of many requests (the asset module) submits them under an owner, any address
+that is its own, and gets a list of its own: `completions(owner)` holds what is its and
+nobody else's, so no module walks another's completions. At its shutdown it says
+`drain(owner)`: what it has out is cancelled and waited for, and what came is freed.
 
 ```cpp
-IoRequest req; req.path = full_path; req.alloc = &self.general; req.user = my_handle.bits;
+IoRequest req; req.path = full_path; req.alloc = &self.general; req.user = my_handle.bits; req.owner = &state;
 platform_io(engine)->read_file(req);
 
 IoQueue* io = platform_io(*ctx.engine);
-for (u32 i = 0; i < io->completions().len;) {
-    IoCompletion c = io->completions()[i];
-    if (!is_mine(c.user)) { ++i; continue; }   // other consumers' completions stay in the list
+for (u32 i = 0; i < io->completions(&state).len;) {
+    IoCompletion c = io->completions(&state)[i];
+    if (!ready_for(c.user)) { ++i; continue; } // stays on the list for a later pass
     io->reap(c.request);                       // the bytes are yours now
     if (c.status == IoStatus::Done) use(c.bytes.data, c.bytes.size);
+    else if (c.not_found()) missing();         // by name: c.error == Err::NotFound
     c.bytes.free();
 }
 ```
@@ -275,7 +279,10 @@ pack. A tool mounts nothing.
 so text is a C string; `free()` returns them), `io_write_file(path, data, size)` writes one
 whole, and an `IoFileWriter` (`open`, `write`, `print`, `close`, a failure that sticks)
 writes one in pieces. `io_is_file` and `io_is_dir` say what a path names. Each that can fail
-takes a last `i32* err`: an errno on every OS, set on failure. They stand on
+takes a last `i32* err`: an errno on every OS, set on failure, with `Err`'s names for the
+common ones (the numbers differ from OS to OS; `os_error_name` and `os_error_text` say one).
+A dev or debug build warns when a system of a paced loop (the frame loop's) makes one of
+these calls, once for the system and the call: a tick asks the queue. They stand on
 the queue's own OS layer, UTF-8 paths and all, so nothing in the engine needs `<stdio.h>`
 to touch a file. `io_list_files(dir, fn, user)` walks a directory (sorted, hidden entries
 skipped) and `io_make_dirs(path)` is `mkdir -p`. `io_list_dir(dir, flags, fn, user, &err)`
@@ -302,7 +309,7 @@ Header `korvid/platform/io.h`:
 | `IoDirEntry` | record | `name`, `st`, `is_link`, `hidden`, `utf8`: one entry of `io_list_dir` |
 | `io_list_dir(dir, flags, fn, user, err)` | function | one directory's entries in name order; flags (`IoListFlags`) `IoListHidden`, `IoListSizes`; false with the errno |
 | `IoCompletion` | record | `request`, `status`, `bytes` (a read's `IoBytes`: `data`, `size`, a NUL after, `free()`), `written`, `user`, `error` (errno), `stat` (a `stat_file`'s answer) |
-| `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `stat_file(req)`, `read_asset(req)`, `mount_dir(dir)`, `mount_pack(path, prefix)`, `mount_pack_at(path, offset, size)`, `mount_count()`, `mount_table(i)`, `capacity()`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `take(h, &c)`, `is_pending(h)`, `completions()`, `reap(h)`, `pending()`, `budget`, `backend_name()`, `stat_on_tasks` (a test of the workers' stat); counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes`, `stats_done`, `stats_failed` |
+| `IoQueue` | record | `init(storage, max, backend)`, `free()`, `read_file(req)`, `stat_file(req)`, `read_asset(req)`, `mount_dir(dir)`, `mount_pack(path, prefix)`, `mount_pack_at(path, offset, size)`, `mount_count()`, `mount_table(i)`, `capacity()`, `write_file(IoWriteRequest{path, data, size})`, `cancel(h)`, `pump()`, `pump_idle(bytes)`, `idle_bytes_for(seconds)`, `take(h, &c)`, `is_pending(h)`, `completions(owner)`, `completed_count()`, `reap(h)`, `pending()`, `pending(owner)`, `drain(owner)`, `budget`, `backend_name()`, `stat_on_tasks` (a test of the workers' stat); counters `pumps`, `pumps_capped`, `bytes_submitted`, `idle_bytes`, `stats_done`, `stats_failed` |
 | `io_read_file(path, &bytes, alloc, &err)`, `io_write_file`, `io_copy_file`, `io_stat_file`, `io_read_each` | functions | the blocking twins of the queue's requests, for tools, startup and tests |
 | `io_make_dirs`, `io_remove`, `io_remove_tree`, `io_rename`, `io_make_temp_dir`, `io_list_files`, `io_current_dir`, `io_is_file`, `io_is_dir` | functions | directories and names, blocking; each that can fail takes a last `i32* err` |
 | `io_lock_file(path, who, &lock, holder, cap, &err)`, `io_unlock_file(lock)` | functions | a lock between processes by a file's name, asked for without waiting; `EWOULDBLOCK` and the holder's line when another has it |
@@ -390,6 +397,7 @@ What the module registers with the engine:
   on an NVMe here against 34 ms unbounded. `pumps_capped` says how often the budget held
   something back.
 - **Completions you do not reap are leaked at shutdown with a warning** naming the path.
+  An owner that is going away says `drain(owner)` and leaves none.
 - **Sockets never block and never stall**, but for `write_now`. A queue past `out_limit`
   drops and counts; `closed` says the peer went away. Served from a tick system, a
   connection's throughput is bounded by what the kernel buffers hold per tick.

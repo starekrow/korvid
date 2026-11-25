@@ -194,6 +194,7 @@ Handle IoQueue::run_task(const IoTaskRequest& req) {
     e.priority = req.priority;
     e.status   = IoStatus::Pending;
     e.user     = req.user;
+    e.owner    = req.owner;
     e.sequence = next_sequence++;
     e.fd = Handle{};
     e.in_flight = true; // the workers have it; nothing of the ring's applies
@@ -209,6 +210,7 @@ Handle IoQueue::run_task(const IoTaskRequest& req) {
     task->lane = req.lane;
     task->prio = (u32)req.priority;
     task->seq = e.sequence;
+    io_owner_took(*this, req.owner);
     enqueue(*this, task);
     return h;
 }
@@ -266,7 +268,7 @@ void io_tasks_complete(IoQueue& q) {
         else if (c.status == IoStatus::Done) ++q.tasks_done;
         else if (c.status == IoStatus::Failed) ++q.tasks_failed;
         --q.tasks_pending;
-        q.completed.push(c);
+        io_complete(q, c);
         mem_free(task);
     }
 }

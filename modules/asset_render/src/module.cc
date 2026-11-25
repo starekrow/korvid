@@ -13,8 +13,8 @@ AssetRenderState* asset_render_state(Engine& e) { return engine_module_state_as<
 void asset_render_reap_orphans(Engine& e, AssetRenderState& s, u16 kind) {
     IoQueue* io = platform_io(e);
     if (!io) return;
-    for (u32 i = 0; i < io->completions().len;) {
-        IoCompletion c = io->completions()[i];
+    for (u32 i = 0; i < io->completions(asset_io_owner(kind)).len;) {
+        IoCompletion c = io->completions(asset_io_owner(kind))[i];
         Handle h{c.user};
         bool gone = kind != 0 && h.kind() == kind && (kind == s.kind ? !s.textures.get(h) : !s.materials.get(h));
         if (!gone) { ++i; continue; }
@@ -40,20 +40,11 @@ void shutdown(Engine& e, ModuleInstance& self) {
     AssetRenderState* s = self.state_as<AssetRenderState>();
     if (!s) return;
     asset_render_fonts_shutdown(e);
-    // Reads still out (a load cut short by the exit) are the module's to collect: cancel
-    // what has not started, let the rest finish, and free what any of them brought.
+    // Reads still out (a load cut short by the exit) are the module's to collect: what has
+    // not started is cancelled, the rest finish, and what any of them brought is freed.
     if (IoQueue* io = platform_io(e)) {
-        auto ours = [&](u64 user) { u16 k = Handle{user}.kind(); return k != 0 && (k == s->kind || k == s->material_kind); };
-        for (u32 round = 0; round < 1000; ++round) {
-            for (u32 i = 0; i < io->completions().len;) {
-                IoCompletion c = io->completions()[i];
-                if (!ours(c.user)) { ++i; continue; }
-                io->reap(c.request);
-                c.bytes.free();
-            }
-            if (!io->pending()) break;
-            io->pump();
-        }
+        const u16 kinds[] = {s->kind, s->material_kind};
+        for (u16 k : kinds) io->drain(asset_io_owner(k));
     }
     asset_materials_shutdown(e, *s);
     asset_textures_shutdown(e, *s);

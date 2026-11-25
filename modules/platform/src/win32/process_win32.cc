@@ -16,6 +16,7 @@
 // - The environment is the parent's with desc.env over it, names compared as Windows does,
 //   without case.
 #include "korvid/platform/process.h"
+#include "../blocking.h"
 #include "korvid/core/array.h"
 #include "korvid/core/format.h"
 #include "korvid/core/time.h"
@@ -306,6 +307,7 @@ bool Process::running() {
 // quiet costs about 60 looks a second. WaitForSingleObject's own milliseconds, and
 // GetTickCount64, would round each step up to the scheduler's 15.6 ms.
 void Process::wait(f64 seconds) {
+    BlockingCall blocking("Process::wait", nullptr);
     if (pid < 0) misuse_process(*this, "wait");
     auto has = [](Handle fd) {
         HANDLE h = as_handle(fd);

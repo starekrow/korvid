@@ -110,8 +110,8 @@ void test_asset_scopes(kv::TestCtx& c) {
     Handle cc = asset_load_sound(e, "audio_scope_test/c.wav", brief);
     asset_scope_release(e, brief);
     run(4);
-    settle([&] { return platform_io(e)->pending() == 0 && platform_io(e)->completions().len == 0; });
-    KV_CHECK(c, asset_sound(e, cc) == nullptr && platform_io(e)->completions().len == 0 && platform_io(e)->pending() == 0);
+    settle([&] { return platform_io(e)->pending() == 0 && platform_io(e)->completed_count() == 0; });
+    KV_CHECK(c, asset_sound(e, cc) == nullptr && platform_io(e)->completed_count() == 0 && platform_io(e)->pending() == 0);
 
     // Refusals: the global scope, a stale scope, a stale asset.
     KV_CHECK(c, !asset_scope_release(e, asset_scope_global(e)));

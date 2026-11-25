@@ -256,7 +256,7 @@ int tool_run(int argc, char** argv, Span<const ModuleDesc* const> modules, const
                 f64 now = time_now();
                 // Reads queued or on their way move only when the pump runs; a task on the
                 // queue's workers wakes the loop itself as it finishes, so it asks nothing.
-                bool io_busy = io && (io->queued.len || io->in_flight || io->completions().len);
+                bool io_busy = io && (io->queued.len || io->in_flight || io->completed_count());
                 bool tick = woke || max_ticks || e.ticks_wanted || io_busy || engine_work_pending(e) || now - last_tick >= k_heartbeat;
                 if (engine_wake(e)) tick = true; // the wakers: what came, and what each waits on next
                 if (!tick) {
@@ -273,7 +273,7 @@ int tool_run(int argc, char** argv, Span<const ModuleDesc* const> modules, const
                 ++ticks;
                 if (max_ticks && ticks >= max_ticks) { KV_ERROR("tool", "not finished after %llu ticks", (unsigned long long)ticks); break; }
                 // A tick that only waits on the disk yields the core briefly.
-                if (io && (io->queued.len || io->in_flight) && io->completions().len == 0 && !engine_work_pending(e)) time_sleep(0.0001);
+                if (io && (io->queued.len || io->in_flight) && io->completed_count() == 0 && !engine_work_pending(e)) time_sleep(0.0001);
             }
             print_flush_lines();
             code = s->finished ? s->code : 2;

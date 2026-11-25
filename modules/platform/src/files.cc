@@ -1,5 +1,9 @@
 // Korvid platform: blocking file I/O (io.h), on the same OS layer as the queue's.
 #include "os_file.h"
+#include "blocking.h"
+#include "korvid/core/atomic.h"
+#include "korvid/core/log.h"
+#include "korvid/core/phase.h"
 #include "korvid/core/format.h"
 #include "korvid/core/memory.h"
 #include <errno.h>
@@ -13,6 +17,7 @@ void IoBytes::free() {
 }
 
 bool io_read_file(const char* path, IoBytes* out, Allocator* alloc, i32* err) {
+    BlockingCall blocking("io_read_file", path);
     *out = IoBytes{};
     i32 e = 0;
     Handle f = os_file_open(path, false, &e);
@@ -38,6 +43,7 @@ bool io_read_file(const char* path, IoBytes* out, Allocator* alloc, i32* err) {
 }
 
 bool io_write_file(const char* path, const void* data, usize size, i32* err) {
+    BlockingCall blocking("io_write_file", path);
     IoFileWriter w;
     bool ok = w.open(path) && w.write(data, size);
     ok = w.close() && ok;
@@ -46,6 +52,7 @@ bool io_write_file(const char* path, const void* data, usize size, i32* err) {
 }
 
 bool IoFileWriter::open(const char* path) {
+    BlockingCall blocking("IoFileWriter::open", path);
     error = 0;
     file = os_file_open(path, true, &error);
     return os_handle_open(file);
@@ -81,6 +88,7 @@ bool IoFileWriter::close() {
 }
 
 bool io_stat_file(const char* path, IoStat* out, i32* err) {
+    BlockingCall blocking("io_stat_file", path);
     OsStat st;
     *out = IoStat{};
     if (!os_path_stat(path, &st, err)) return false;
@@ -88,14 +96,23 @@ bool io_stat_file(const char* path, IoStat* out, i32* err) {
     return true;
 }
 
-bool io_rename(const char* from, const char* to, i32* err) { return os_rename(from, to, err); }
+bool io_rename(const char* from, const char* to, i32* err) {
+    BlockingCall blocking("io_rename", from);
+    return os_rename(from, to, err);
+}
 
 bool io_path_is_remote(const char* path) { return path && path[0] && os_path_is_remote(path); }
 
 bool io_current_dir(char* out, u32 cap, i32* err) { return os_current_dir(out, cap, err); }
 
-bool io_is_file(const char* path) { return os_path_kind(path) == OsPathKind::File; }
-bool io_is_dir(const char* path) { return os_path_kind(path) == OsPathKind::Dir; }
+bool io_is_file(const char* path) {
+    BlockingCall blocking("io_is_file", path);
+    return os_path_kind(path) == OsPathKind::File;
+}
+bool io_is_dir(const char* path) {
+    BlockingCall blocking("io_is_dir", path);
+    return os_path_kind(path) == OsPathKind::Dir;
+}
 
 } // namespace kv
 
@@ -112,5 +129,51 @@ bool io_lock_file(const char* path, const char* who, Handle* lock, char* holder,
 }
 
 void io_unlock_file(Handle lock) { os_file_close(lock); }
+
+} // namespace kv
+
+// ---- blocking calls in a tick (blocking.h) ------------------------------------------------
+namespace kv {
+
+namespace {
+u32 g_warn_blocking = 0; // atomic: a paced loop is running
+u32 g_blocking_warnings = 0; // atomic
+}
+
+void io_warn_blocking_in_ticks(bool on) { atomic_store(&g_warn_blocking, on ? 1u : 0u, MO_RELAXED); }
+u32  io_blocking_warnings() { return atomic_load(&g_blocking_warnings, MO_RELAXED); }
+
+#if KV_DEV
+namespace {
+thread_local u32 t_blocking_depth = 0;
+struct BlockingSeen { const ScheduledSystem* unit; const char* call; };
+BlockingSeen g_blocking_seen[64];
+u32 g_blocking_count = 0;
+u32 g_blocking_lock = 0; // a spin lock: taken once per call from a system, held for a scan
+
+// True the first time this system makes this call (and for every one past the table's end:
+// said again rather than not at all).
+bool blocking_first(const ScheduledSystem* unit, const char* call) {
+    u32 free = 0;
+    while (!atomic_compare_exchange(&g_blocking_lock, &free, 1u, false, MO_ACQ_REL, MO_ACQUIRE)) free = 0;
+    bool first = true;
+    for (u32 i = 0; i < g_blocking_count && first; ++i)
+        if (g_blocking_seen[i].unit == unit && g_blocking_seen[i].call == call) first = false;
+    if (first && g_blocking_count < 64) g_blocking_seen[g_blocking_count++] = BlockingSeen{unit, call};
+    atomic_store(&g_blocking_lock, 0u, MO_RELEASE);
+    return first;
+}
+} // namespace
+
+BlockingCall::BlockingCall(const char* call, const char* what) {
+    if (t_blocking_depth++ || !atomic_load(&g_warn_blocking, MO_RELAXED)) return;
+    const ScheduledSystem* unit = ctx_running();
+    if (!unit || !blocking_first(unit, call)) return;
+    atomic_fetch_add(&g_blocking_warnings, 1u, MO_RELAXED);
+    KV_WARN("io", "%s%s%s%s blocks, and the system %s called it in a tick: a tick asks the I/O queue (read_file, stat_file, write_file; run_task for the rest) and takes the answer when it comes",
+            call, what ? "('" : "", what ? what : "", what ? "')" : "", unit->name());
+}
+BlockingCall::~BlockingCall() { --t_blocking_depth; }
+#endif
 
 } // namespace kv

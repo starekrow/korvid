@@ -22,10 +22,19 @@
 // from the request's allocator, and a path the OS refuses (past 4,096 bytes on Linux)
 // completes Failed with the OS's error. Mounts are the exception: a mount's path is 255
 // bytes at most.
+//
+// Whose a request is. Many modules share the platform's queue, so a request names its
+// owner: any address that is the submitter's own (its state), the same `const void* owner`
+// a watch is stated under (module.h). Its completion goes on that owner's list and nobody
+// else's: completions(owner) is only what is yours, in the order it finished, and a module
+// that shuts down with requests out says drain(owner). A request with no owner (null) goes
+// on the one list such requests share: right for a queue with one user (a tool's own, a
+// test's) and for a holder that asks for its request by handle (take).
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/core/atomic.h"
 #include "korvid/core/handle.h"
+#include "korvid/core/os_error.h"
 #include "korvid/core/pool.h"
 #include "korvid/pack/zip.h"
 #include "korvid/platform/os_handle.h"
@@ -51,6 +60,7 @@ struct IoRequest {
     Allocator*  alloc    = nullptr;             // the completion's bytes come from here; null: general
     IoPriority  priority = IoPriority::Normal;
     u64         user     = 0;                   // handed back untouched
+    const void* owner    = nullptr;             // whose list the completion goes on (above); null: the shared one
     // A part of the file, for read_file: `length` bytes from `offset`. 0: to the end of the
     // file, so the defaults are the whole file. The file's end ends a range that runs past
     // it (the completion's size says how many came), and an offset past the end is Done
@@ -98,6 +108,7 @@ struct IoWriteRequest {
     Allocator*  alloc    = nullptr;             // the copy lives here until the write is done; null: general
     IoPriority  priority = IoPriority::Normal;
     u64         user     = 0;
+    const void* owner    = nullptr;             // as IoRequest's
 };
 
 // ---- Tasks ----------------------------------------------------------------------------
@@ -110,8 +121,8 @@ struct IoWriteRequest {
 // is pumped. Within the lanes with room, higher priority first, then submission order.
 //
 // A task touches only its `arg`, which is the caller's and stays where it is until the
-// completion is reaped (the queue never frees it). It returns 0 (Done) or an errno-like
-// code (Failed, in the completion's `error`). A task cancelled before it starts never
+// completion is reaped (the queue never frees it). It returns 0 (Done) or an error by
+// name (Err::NoMemory: Failed, in the completion's `error`). A task cancelled before it starts never
 // runs; one cancelled while it runs sees ctl.cancelled() and may stop early. Either way
 // it completes as Cancelled.
 struct IoTaskCtl {
@@ -126,6 +137,7 @@ struct IoTaskRequest {
     u8          lane     = 0;                   // [0, kIoLanes)
     IoPriority  priority = IoPriority::Normal;  // Idle runs last, but runs: tasks have no idle pump
     u64         user     = 0;
+    const void* owner    = nullptr;             // as IoRequest's
 };
 constexpr u32 kIoLanes = 8;
 struct IoTask;  // the workers' node (io_task.cc)
@@ -139,8 +151,18 @@ struct IoCompletion {
     IoBytes  bytes;            // a read's contents, as io_read_file gives them: the taker's, to bytes.free(). Empty for a write, a stat, a task
     usize    written = 0;      // a write's bytes
     u64      user    = 0;
-    i32      error   = 0;      // errno on failure
+    i32      error   = 0;      // why it failed: compared by name (Err::Denied, core/os_error.h)
     IoStat   stat;             // a stat_file's answer: all false and zero for a path where nothing is
+    const void* owner = nullptr; // the request's
+    // Failed because nothing is there: no such file, or no mount has the asset.
+    bool not_found() const { return status == IoStatus::Failed && error == Err::NotFound; }
+};
+
+// One owner's finished requests, and how many it still has out.
+struct IoOwned {
+    const void*         owner = nullptr;
+    Array<IoCompletion> done;    // finished, not yet reaped: oldest first
+    u32                 out = 0; // submitted, not yet finished
 };
 
 struct IoQueue {
@@ -151,7 +173,9 @@ struct IoQueue {
     u32                 tasks_pending = 0, tasks_done = 0, tasks_failed = 0;
     Array<IoMount>*     mounts = nullptr; // searched last first: the queue's own (mount_count, mount_table)
     Array<Handle>       queued;    // submitted, not yet performed or handed to the ring
-    Array<IoCompletion> completed; // finished, not yet reaped
+    Array<IoCompletion> completed; // finished, not yet reaped: the requests with no owner
+    Array<IoOwned>*     owned = nullptr; // each owner's list, made at its first request
+    u32                 unreaped = 0; // completions on every list
     IoRing*             ring = nullptr; // the io_uring backend when in use
     IoBudget            budget;
     u64                 next_sequence = 0;
@@ -247,9 +271,26 @@ struct IoQueue {
     bool   take(Handle request, IoCompletion* out);
     // Whether the request is still queued or in flight: no completion yet, and one to come.
     bool   is_pending(Handle request) const;
-    // Unreaped completions, oldest first: for a consumer of many requests, which scans for
-    // its own (by `user`) and reaps each. One request's holder asks take().
-    Span<const IoCompletion> completions() const { return completed.span(); }
+    // The owner's unreaped completions, oldest first, and nobody else's: for a consumer of
+    // many requests, which reaps each (reap, or take). With no owner, the list the requests
+    // with none share. One request's holder asks take().
+    //     for (u32 i = 0; i < io->completions(&s).len;) {
+    //         IoCompletion c = io->completions(&s)[i];
+    //         if (not ready for it) { ++i; continue; }   // stays for a later pass
+    //         io->reap(c.request);  use(c);  c.bytes.free();
+    //     }
+    Span<const IoCompletion> completions(const void* owner = nullptr) const;
+    // Completions nobody has reaped yet, on every list: what a loop asks to know whether a
+    // tick has something to collect.
+    u32    completed_count() const { return unreaped; }
+    // The owner's requests that have not finished: queued, in flight or on the workers.
+    u32    pending(const void* owner) const;
+    // For an owner that is going away (a module's shutdown): its unreaped completions are
+    // freed, what it has queued is cancelled, and the queue is pumped until nothing of its
+    // is out, so no read lands in an allocator that is gone and no task is left running on
+    // an `arg` about to be freed. A task under way runs to its end (it sees ctl.cancelled()).
+    // It waits as long as that takes. Nothing of the owner's is left to reap after it.
+    void   drain(const void* owner);
     // Takes a completion off the list; its bytes (a copy of the completion holds them) are
     // the caller's to free from now on. Returns false if it was not there (already reaped).
     bool   reap(Handle request);
@@ -323,6 +364,10 @@ bool io_temp_dir(char* out, u32 cap, i32* err = nullptr);
 
 // ---- Blocking file I/O ----------------------------------------------------------------
 // For tools, startup, shutdown and tests: never for a tick, which goes through the queue.
+// A dev or debug build holds a paced loop to that: once it has said it is one, a blocking
+// call made from one of its systems (these, the listings above, and the waits of net.h and
+// process.h) logs a warning naming the call and the system, once for each pair. A tool's
+// loop is not paced, and its systems may block.
 // The same OS layer as the queue's (UTF-8 paths, CreateFileW on Windows), so a file reads
 // and writes alike either way. Errors are errno values, as IoCompletion::error (Errors, above).
 
@@ -394,6 +439,13 @@ bool io_is_dir(const char* path);
 // Windows, on a byte past the end so the line stays readable.
 bool io_lock_file(const char* path, const char* who, Handle* lock, char* holder = nullptr, u32 holder_cap = 0, i32* err = nullptr);
 void io_unlock_file(Handle lock);
+
+// Says the loop now running is paced (the frame loop does, for as long as it runs): the
+// blocking calls warn when a system makes them (above). Off by default, and in a ship build
+// it does nothing.
+void io_warn_blocking_in_ticks(bool on);
+// How many such warnings there have been: for a test, and a run's last line. 0 in a ship build.
+u32  io_blocking_warnings();
 
 // The platform module's queue, or null if the module is not started.
 IoQueue* platform_io(Engine& e);

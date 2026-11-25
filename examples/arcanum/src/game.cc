@@ -557,7 +557,7 @@ void files(TickContext& ctx) {
         g.load_data = (u8*)c.bytes.data;
         g.load_size = c.bytes.size;
         const char* why = nullptr;
-        if (c.status != IoStatus::Done) why = c.error == 2 ? "There is no saved game" : "The save could not be read";
+        if (c.status != IoStatus::Done) why = c.not_found() ? "There is no saved game" : "The save could not be read";
         else {
             MemScope scope;
             JsonDoc doc;

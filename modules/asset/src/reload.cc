@@ -18,6 +18,7 @@ bool asset_reread(Engine& e, Allocator* alloc, Handle h, const AssetReread& r) {
     req.path  = r.path;
     req.alloc = alloc;
     req.user  = h.bits;
+    req.owner = asset_io_owner(h.kind());
     Handle q = io->read_asset(req);
     if (q.is_null()) { KV_WARN("asset", "'%s': could not read it again", r.path); return false; }
     *r.io = q;

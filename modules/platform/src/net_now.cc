@@ -3,6 +3,7 @@
 // timeout are the same everywhere.
 #include "net_internal.h"
 #include "misuse.h"
+#include "blocking.h"
 #include "korvid/core/time.h"
 #include <errno.h>
 #include <string.h>
@@ -69,6 +70,7 @@ bool send_now(NetSocket& s, const u8* bytes, u32 size, f64 seconds) {
 } // namespace
 
 bool NetSocket::write_now(const void* data, u32 size, f64 seconds) {
+    BlockingCall blocking("NetSocket::write_now", nullptr);
     if (!os_handle_open(fd) || closed) { misuse_socket(*this, "write_now"); return false; }
     bool all = send_now(*this, (const u8*)data, size, seconds);
     net_mark_queued(*this); // what a watch of it reads, on every way out
@@ -76,6 +78,7 @@ bool NetSocket::write_now(const void* data, u32 size, f64 seconds) {
 }
 
 Handle NetListener::accept(f64 seconds) {
+    BlockingCall blocking("NetListener::accept(seconds)", nullptr);
     f64 deadline = seconds >= 0.0 ? time_now() + seconds : -1.0;
     for (;;) {
         Handle h = accept();
@@ -88,6 +91,7 @@ Handle NetListener::accept(f64 seconds) {
 }
 
 i32 NetSocket::read(void* buf, u32 cap, f64 seconds) {
+    BlockingCall blocking("NetSocket::read(seconds)", nullptr);
     f64 deadline = seconds >= 0.0 ? time_now() + seconds : -1.0;
     for (;;) {
         i32 n = read(buf, cap);
@@ -102,6 +106,7 @@ i32 NetSocket::read(void* buf, u32 cap, f64 seconds) {
 }
 
 bool net_connect_local_now(u16 port, NetSocket* out, f64 seconds, i32* err) {
+    BlockingCall blocking("net_connect_local_now", nullptr);
     i32 why = 0;
     if (!net_connect_local(port, out, &why)) { if (err) *err = why; return false; }
     f64 deadline = seconds >= 0.0 ? time_now() + seconds : -1.0;

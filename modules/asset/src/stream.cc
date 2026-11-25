@@ -188,15 +188,15 @@ void asset_streams_pump(TickContext& ctx) {
     IoQueue* io = platform_io(e);
     if (!io) return;
     asset_reap_orphans(e, s, s.stream_kind);
-    for (u32 i = 0; i < io->completions().len;) {
-        IoCompletion c = io->completions()[i];
+    for (u32 i = 0; i < io->completions(asset_io_owner(s.stream_kind)).len;) {
+        IoCompletion c = io->completions(asset_io_owner(s.stream_kind))[i];
         if (!asset_is_kind(s, c.user, s.stream_kind)) { ++i; continue; }
         Handle h{c.user};
         StreamAsset* st = s.streams.get(h);
         if (!st || st->io != c.request) { ++i; continue; }
         io->reap(c.request);
         st->io = Handle{};
-        if (c.status != IoStatus::Done) { fail_stream(e, s, h, *st, c.status == IoStatus::Failed && c.error == 2 ? AssetError::NotFound : AssetError::Read, nullptr); continue; }
+        if (c.status != IoStatus::Done) { fail_stream(e, s, h, *st, c.not_found() ? AssetError::NotFound : AssetError::Read, nullptr); continue; }
         st->bytes = (u8*)c.bytes.data;
         st->size  = c.bytes.size;
         const char* why = nullptr;
@@ -223,6 +223,7 @@ Handle stream_load(Engine& e, AssetState_& s, const char* path) {
     req.path  = path;
     req.alloc = s.general;
     req.user  = h.bits;
+    req.owner = asset_io_owner(h.kind());
     Handle iq = io->read_asset(req);
     StreamAsset* rec = s.streams.get(h);
     if (iq.is_null()) { fail_stream(e, s, h, *rec, AssetError::Read, "could not submit"); return h; }

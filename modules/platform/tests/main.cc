@@ -11,6 +11,8 @@ void test_io_tasks(kv::TestCtx&);
 void test_io_long_ranged_stat(kv::TestCtx&);
 void test_io_errors(kv::TestCtx&);
 void test_io_take(kv::TestCtx&);
+void test_io_owners(kv::TestCtx&);
+void test_io_blocking_in_ticks(kv::TestCtx&);
 void test_io_lock(kv::TestCtx&);
 void test_os_handles(kv::TestCtx&);
 void test_alert(kv::TestCtx&);
@@ -44,6 +46,8 @@ int main(int argc, char** argv) {
     test_io_long_ranged_stat(c);
     test_io_errors(c);
     test_io_take(c);
+    test_io_owners(c);
+    test_io_blocking_in_ticks(c);
     test_io_lock(c);
     test_os_handles(c);
     test_alert(c);

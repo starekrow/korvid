@@ -9,6 +9,7 @@
 #include "korvid/inflate/inflate.h"
 #include "io_ring.h"
 #include "io_internal.h"
+#include "blocking.h"
 #include "io_task.h"
 #include "os_file.h"
 #include "os_paths.h"
@@ -66,6 +67,44 @@ void entry_free_path(IoEntry& e) {
     if (e.long_path) free_in(entry_alloc(e), e.long_path, strlen(e.long_path) + 1);
     e.long_path = nullptr;
 }
+
+IoOwned* owned_of(const IoQueue& q, const void* owner) {
+    if (!owner || !q.owned) return nullptr;
+    for (IoOwned& o : *q.owned) if (o.owner == owner) return &o;
+    return nullptr;
+}
+
+} // namespace
+
+void io_owner_took(IoQueue& q, const void* owner) {
+    if (!owner) return;
+    IoOwned* o = owned_of(q, owner);
+    if (!o) {
+        IoOwned fresh;
+        fresh.owner = owner;
+        fresh.done.alloc = q.completed.alloc;
+        q.owned->push(fresh);
+        o = &(*q.owned)[q.owned->len - 1];
+    }
+    ++o->out;
+}
+
+void io_complete(IoQueue& q, IoCompletion c) {
+    IoEntry* e = q.entries->get(c.request);
+    c.owner = e ? e->owner : nullptr;
+    IoOwned* o = owned_of(q, c.owner);
+    if (o && o->out) --o->out;
+    if (e && e->dropped) { // a drain's: nobody is waiting for it
+        if (c.bytes.data) c.bytes.free();
+        entry_free_path(*e);
+        q.entries->destroy(c.request);
+        return;
+    }
+    (o ? o->done : q.completed).push(c);
+    ++q.unreaped;
+}
+
+namespace {
 
 // A stat on the ring: the kernel's answer, then a copy of the path, which must not move
 // while the request is in flight (the pool's entries do, when it grows).
@@ -240,22 +279,22 @@ void perform_sync(IoQueue& q, Handle h, IoCompletion& out) {
 // Stage one: opens and sizes the file, so the budget can decide. False (with a completion
 // pushed) when the file cannot be opened.
 bool ring_open(IoQueue& q, Handle h, IoEntry& e) {
-    if (e.fail_errno) { IoCompletion c{}; complete_failed(q, h, e, c, e.fail_errno); q.completed.push(c); return false; }
+    if (e.fail_errno) { IoCompletion c{}; complete_failed(q, h, e, c, e.fail_errno); io_complete(q, c); return false; }
     if (os_handle_open(e.fd)) return true; // opened for sizing earlier, or a pack's borrowed descriptor
     i32 err = 0;
     if (e.write) {
         Handle fd = os_file_open(entry_file(e), true, &err);
-        if (!os_handle_open(fd)) { IoCompletion c{}; complete_failed(q, h, e, c, err); drop_write_copy(e); q.completed.push(c); return false; }
+        if (!os_handle_open(fd)) { IoCompletion c{}; complete_failed(q, h, e, c, err); drop_write_copy(e); io_complete(q, c); return false; }
         e.fd = fd;
         e.done = 0;
         return true;
     }
     Handle fd = os_file_open(entry_file(e), false, &err);
-    if (!os_handle_open(fd)) { IoCompletion c{}; complete_failed(q, h, e, c, err); q.completed.push(c); return false; }
-    if (e.clip && !clip_range(e, fd, &err)) { os_file_close(fd); IoCompletion c{}; complete_failed(q, h, e, c, err); q.completed.push(c); return false; }
+    if (!os_handle_open(fd)) { IoCompletion c{}; complete_failed(q, h, e, c, err); io_complete(q, c); return false; }
+    if (e.clip && !clip_range(e, fd, &err)) { os_file_close(fd); IoCompletion c{}; complete_failed(q, h, e, c, err); io_complete(q, c); return false; }
     if (e.ranged) { e.fd = fd; e.size = e.length; e.done = 0; return true; }
     u64 size = 0;
-    if (!os_file_size(fd, &size, &err)) { os_file_close(fd); IoCompletion c{}; complete_failed(q, h, e, c, err); q.completed.push(c); return false; }
+    if (!os_file_size(fd, &size, &err)) { os_file_close(fd); IoCompletion c{}; complete_failed(q, h, e, c, err); io_complete(q, c); return false; }
     e.fd   = fd;
     e.size = (usize)size;
     e.done = 0;
@@ -266,7 +305,7 @@ bool ring_open(IoQueue& q, Handle h, IoEntry& e) {
 bool ring_start(IoQueue& q, Handle h, IoEntry& e) {
     if (!e.write) {
         e.buf = (u8*)alloc_in(entry_alloc(e), e.size + 1); // and one for the NUL
-        if (!e.buf) { os_file_close(e.fd); e.fd = Handle{}; IoCompletion c{}; complete_failed(q, h, e, c, ENOMEM); q.completed.push(c); return false; }
+        if (!e.buf) { os_file_close(e.fd); e.fd = Handle{}; IoCompletion c{}; complete_failed(q, h, e, c, ENOMEM); io_complete(q, c); return false; }
     }
     e.in_flight = true;
     ++q.in_flight;
@@ -294,7 +333,7 @@ void ring_finish_stat(IoQueue& q, Handle h, IoEntry& e, i32 res) {
     drop_stat_block(e);
     e.in_flight = false;
     --q.in_flight;
-    q.completed.push(c);
+    io_complete(q, c);
 }
 
 void ring_finish(IoQueue& q, Handle h, IoEntry& e, IoStatus status, i32 err, usize size) {
@@ -311,7 +350,7 @@ void ring_finish(IoQueue& q, Handle h, IoEntry& e, IoStatus status, i32 err, usi
     q.bytes_in_flight -= e.size;
     e.fd = Handle{}; e.buf = nullptr; e.in_flight = false; e.status = status;
     --q.in_flight;
-    q.completed.push(c);
+    io_complete(q, c);
 }
 
 // Takes every completion the ring has: whole reads finish, short reads continue.
@@ -351,19 +390,19 @@ usize admit(IoQueue& q, usize budget, bool idle, bool* capped) {
             IoCompletion c{};
             c.request = h; c.user = e->user; c.status = IoStatus::Cancelled;
             drop_write_copy(*e);
-            q.completed.push(c);
+            io_complete(q, c);
             continue;
         }
         if (e->priority == IoPriority::Idle && !idle) break; // sorted last: nothing admissible follows
         if (e->stat && q.ring && (!io_ring_can_stat(q.ring) || q.stat_on_tasks) && q.tasks) {
-            if (!io_tasks_stat(q, h, *e)) { IoCompletion c{}; complete_failed(q, h, *e, c, ENOMEM); q.completed.push(c); }
+            if (!io_tasks_stat(q, h, *e)) { IoCompletion c{}; complete_failed(q, h, *e, c, ENOMEM); io_complete(q, c); }
             continue;
         }
         if (!q.ring || (e->stat && (!io_ring_can_stat(q.ring) || q.stat_on_tasks))) {
             // The synchronous path learns the size by reading; it stops once the budget is passed.
             IoCompletion c{};
             perform_sync(q, h, c);
-            q.completed.push(c);
+            io_complete(q, c);
             submitted += c.bytes.size + c.written;
             q.bytes_submitted += c.bytes.size + c.written;
             if (budget && submitted >= budget) { ++taken; break; }
@@ -372,7 +411,7 @@ usize admit(IoQueue& q, usize budget, bool idle, bool* capped) {
         if (!io_ring_can_push(q.ring)) break;
         if (e->stat) {
             e->buf = (u8*)alloc_in(mem_general(), stat_block_size(*e));
-            if (!e->buf) { IoCompletion c{}; complete_failed(q, h, *e, c, ENOMEM); q.completed.push(c); continue; }
+            if (!e->buf) { IoCompletion c{}; complete_failed(q, h, *e, c, ENOMEM); io_complete(q, c); continue; }
             char* path = (char*)e->buf + io_ring_stat_size();
             memcpy(path, entry_file(*e), strlen(entry_file(*e)) + 1);
             e->in_flight = true;
@@ -412,6 +451,8 @@ bool IoQueue::init(Allocator* storage, u32 max_in_flight, IoBackend backend) {
     entries = new (mem_alloc(sizeof(Pool<IoEntry>))) Pool<IoEntry>{};
     mounts  = new (mem_alloc(sizeof(Array<IoMount>))) Array<IoMount>{};
     queued.alloc = completed.alloc = mounts->alloc = storage;
+    owned   = new (mem_alloc(sizeof(Array<IoOwned>))) Array<IoOwned>{};
+    owned->alloc = storage;
     kv_handle_kind_desc desc{};
     desc.name     = "platform.io";
     desc.type_key = type_key<IoEntry>();
@@ -462,6 +503,19 @@ void IoQueue::free() {
             b.free();
         }
     }
+    for (IoOwned& o : *owned) {
+        for (const IoCompletion& c : o.done) {
+            IoEntry* e = entries->get(c.request);
+            if (c.bytes.data) {
+                KV_WARN("io", "completion for '%s' was never reaped", e ? e->path : "?");
+                IoBytes b = c.bytes;
+                b.free();
+            }
+        }
+        o.done.free();
+    }
+    owned->free();
+    mem_free(owned);
     for (u32 i = 0; i < entries->len; ++i) {
         if (!entries->is_alive(i)) continue;
         IoEntry& e = entries->items[i];
@@ -498,6 +552,7 @@ Handle queue_entry(IoQueue& q, IoEntry& e) {
         return h;
     }
     q.queued.push(h);
+    io_owner_took(q, e.owner);
     return h;
 }
 
@@ -521,6 +576,7 @@ bool entry_start(IoQueue& q, IoEntry& e, const char* path, Allocator* alloc, IoP
 Handle IoQueue::read_file(const IoRequest& req) {
     IoEntry e;
     if (!entry_start(*this, e, req.path, req.alloc, req.priority, req.user, "read")) return Handle{};
+    e.owner = req.owner;
     if (req.offset || req.length) {
         e.ranged = true;
         e.clip   = true;
@@ -533,6 +589,7 @@ Handle IoQueue::read_file(const IoRequest& req) {
 Handle IoQueue::stat_file(const IoRequest& req) {
     IoEntry e;
     if (!entry_start(*this, e, req.path, nullptr, req.priority, req.user, "stat")) return Handle{};
+    e.owner = req.owner;
     e.stat = true;
     return queue_entry(*this, e);
 }
@@ -541,6 +598,7 @@ Handle IoQueue::write_file(const IoWriteRequest& req) {
     if (req.size && !req.data) { KV_ERROR("io", "write of '%s' has no data", req.path ? req.path : "(null)"); return Handle{}; }
     IoEntry e;
     if (!entry_start(*this, e, req.path, req.alloc, req.priority, req.user, "write")) return Handle{};
+    e.owner = req.owner;
     e.write    = true;
     e.size     = req.size;
     e.buf      = (u8*)alloc_in(entry_alloc(e), req.size ? req.size : 1);
@@ -571,6 +629,7 @@ IoEntry entry_for(IoQueue& q, const IoRequest& req) {
     e.priority = req.priority;
     e.status   = IoStatus::Pending;
     e.user     = req.user;
+    e.owner    = req.owner;
     e.sequence = q.next_sequence++;
     e.fd       = Handle{};
     return e;
@@ -739,6 +798,7 @@ void io_bundle_close() {
 }
 
 bool io_read_bundled(const char* name, IoBytes* out, Allocator* alloc, i32* err) {
+    BlockingCall blocking("io_read_bundled", name);
     *out = IoBytes{};
     i32 unused = 0;
     if (!err) err = &unused;
@@ -789,6 +849,7 @@ bool io_read_bundled(const char* name, IoBytes* out, Allocator* alloc, i32* err)
 }
 
 bool io_archive_entry(const char* archive, const char* name, u64* offset, u64* size, i32* err) {
+    BlockingCall blocking("io_archive_entry", archive);
     IoMount m{};
     if (!archive_open(m, mem_general(), archive, 0, 0, nullptr, true, err)) return false;
     char norm[KV_PACK_PATH_MAX];
@@ -907,6 +968,7 @@ bool name_only(void* user, const char* relative, const IoStat&) { NameOnly* c = 
 } // namespace
 
 i32 io_list_files_stat(const char* dir, bool (*fn)(void* user, const char* relative, const IoStat& st), void* user, i32* err) {
+    BlockingCall blocking("io_list_files", dir);
     char full[1024];
     usize n = dir ? strlen(dir) : 0;
     if (!n || n >= sizeof full) { if (err) *err = n ? ENAMETOOLONG : ENOENT; return -1; }
@@ -917,6 +979,7 @@ i32 io_list_files_stat(const char* dir, bool (*fn)(void* user, const char* relat
 }
 
 i32 io_list_files(const char* dir, bool (*fn)(void* user, const char* relative), void* user, i32* err) {
+    BlockingCall blocking("io_list_files", dir);
     NameOnly c{fn, user};
     return io_list_files_stat(dir, name_only, &c, err);
 }
@@ -949,6 +1012,7 @@ int dir_item_cmp(const void* a, const void* b, void* ctx) {
 } // namespace
 
 bool io_list_dir(const char* dir, u32 flags, bool (*fn)(void* user, const IoDirEntry& e), void* user, i32* err) {
+    BlockingCall blocking("io_list_dir", dir);
     if (!dir || !dir[0]) { if (err) *err = ENOENT; return false; }
     DirList l{};
     l.flags = flags;
@@ -969,6 +1033,7 @@ bool io_list_dir(const char* dir, u32 flags, bool (*fn)(void* user, const IoDirE
 }
 
 bool io_read_each(const char* path, bool (*fn)(void* user, const u8* data, usize n), void* user, usize chunk, i32* err) {
+    BlockingCall blocking("io_read_each", path);
     i32 e = 0;
     Handle f = os_file_open(path, false, &e);
     if (!os_handle_open(f)) { if (err) *err = e; return false; }
@@ -1009,6 +1074,7 @@ bool copy_piece(void* user, const u8* data, usize n) {
 } // namespace
 
 bool io_copy_file(const char* from, const char* to, u8 hash[32], i32* err) {
+    BlockingCall blocking("io_copy_file", from);
     i32 e = 0;
     Handle out = os_file_open(to, true, &e);
     if (!os_handle_open(out)) { if (err) *err = e; return false; }
@@ -1023,6 +1089,7 @@ bool io_copy_file(const char* from, const char* to, u8 hash[32], i32* err) {
 }
 
 bool io_make_dirs(const char* path, i32* err) {
+    BlockingCall blocking("io_make_dirs", path);
     // A copy to cut, on the stack when it fits and from the heap when not: a path is as
     // long as the OS allows, as everywhere else in io.
     char small[1024];
@@ -1059,6 +1126,7 @@ bool io_make_dirs(const char* path, i32* err) {
 }
 
 bool io_remove(const char* path, i32* err) {
+    BlockingCall blocking("io_remove", path);
     if (!path || !path[0]) { if (err) *err = ENOENT; return false; }
     i32 why = 0;
     if (os_remove(path, &why) || os_path_kind(path) == OsPathKind::None) return true;
@@ -1111,6 +1179,7 @@ bool remove_tree(Array<char>& full, u32 len, i32* why) {
 } // namespace
 
 bool io_remove_tree(const char* path, i32* err) {
+    BlockingCall blocking("io_remove_tree", path);
     usize n = path ? strlen(path) : 0;
     if (!n) { if (err) *err = ENOENT; return false; }
     Array<char> full;
@@ -1147,38 +1216,81 @@ bool IoQueue::cancel(Handle request) {
     return true;
 }
 
-bool IoQueue::take(Handle request, IoCompletion* out) {
-    if (!entries) return false;
-    for (u32 i = 0; i < completed.len; ++i) {
-        if (completed[i].request != request) continue;
-        if (out) *out = completed[i];
-        else if (completed[i].bytes.data) completed[i].bytes.free(); // nobody to own it
-        completed[i] = completed[completed.len - 1]; // order among the rest does not matter
-        --completed.len;
-        if (IoEntry* e = entries->get(request)) entry_free_path(*e);
-        entries->destroy(request);
+namespace {
+
+// The request's completion off the list it is on, into *out if given. False if it is not there.
+bool remove_completion(IoQueue& q, Handle request, IoCompletion* out) {
+    if (!q.entries) return false;
+    IoEntry* e = q.entries->get(request);
+    if (!e) return false;
+    IoOwned* o = owned_of(q, e->owner);
+    Array<IoCompletion>& list = o ? o->done : q.completed;
+    for (u32 i = 0; i < list.len; ++i) {
+        if (list[i].request != request) continue;
+        if (out) *out = list[i];
+        list[i] = list[list.len - 1]; // order among the rest does not matter
+        --list.len;
+        --q.unreaped;
+        entry_free_path(*e);
+        q.entries->destroy(request);
         return true;
     }
     return false;
 }
 
-bool IoQueue::reap(Handle request) {
-    if (!entries) return false;
-    for (u32 i = 0; i < completed.len; ++i) {
-        if (completed[i].request != request) continue;
-        completed[i] = completed[completed.len - 1]; // order among the rest does not matter
-        --completed.len;
-        if (IoEntry* e = entries->get(request)) entry_free_path(*e);
-        entries->destroy(request);
-        return true;
-    }
-    return false;
+} // namespace
+
+bool IoQueue::take(Handle request, IoCompletion* out) {
+    IoCompletion c;
+    if (!remove_completion(*this, request, &c)) return false;
+    if (out) *out = c;
+    else if (c.bytes.data) c.bytes.free(); // nobody to own it
+    return true;
 }
+
+bool IoQueue::reap(Handle request) { return remove_completion(*this, request, nullptr); }
 
 bool IoQueue::is_pending(Handle request) const {
     if (!entries) return false;
-    for (const IoCompletion& c : completed) if (c.request == request) return false;
-    return entries->get(request) != nullptr;
+    const IoEntry* e = entries->get(request);
+    if (!e) return false;
+    const IoOwned* o = owned_of(*this, e->owner);
+    for (const IoCompletion& c : o ? o->done : completed) if (c.request == request) return false;
+    return true;
+}
+
+Span<const IoCompletion> IoQueue::completions(const void* owner) const {
+    if (!owner) return completed.span();
+    const IoOwned* o = owned_of(*this, owner);
+    return o ? o->done.span() : Span<const IoCompletion>{};
+}
+
+u32 IoQueue::pending(const void* owner) const {
+    const IoOwned* o = owned_of(*this, owner);
+    return o ? o->out : 0;
+}
+
+void IoQueue::drain(const void* owner) {
+    if (!entries || !owner || !owned_of(*this, owner)) return;
+    // What has finished goes first, so every request of the owner's still alive is one that is out.
+    for (IoOwned* o = owned_of(*this, owner); o->done.len;)
+        if (!take(o->done[o->done.len - 1].request, nullptr)) { --o->done.len; --unreaped; } // no entry behind it: cannot be
+    for (u32 i = 0; i < entries->len; ++i) {
+        if (!entries->is_alive(i) || entries->items[i].owner != owner) continue;
+        entries->items[i].dropped = true;
+        cancel(entries->handle_at(i)); // queued: gone at the next pump; in flight or running: when it ends
+    }
+    f64 began = time_now();
+    bool told = false;
+    while (u32 out = pending(owner)) {
+        pump();
+        if (!pending(owner)) break;
+        time_sleep(0.0002); // the disk's, or a task's worker's, to finish
+        if (!told && time_now() - began > 5.0) {
+            told = true;
+            KV_WARN("io", "drain: still waiting for %u request(s) after 5 seconds (a task that does not look at ctl.cancelled()?)", out);
+        }
+    }
 }
 
 const char* IoQueue::backend_name() const { return io_ring_name(ring); }

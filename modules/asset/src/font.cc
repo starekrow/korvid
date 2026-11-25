@@ -71,6 +71,7 @@ FontFace* face_for(Engine& e, AssetState_& s, const char* path, u64 user) {
     req.path  = path;
     req.alloc = s.general;
     req.user  = user;
+    req.owner = asset_io_owner(Handle{user}.kind());
     f->io = io ? io->read_asset(req) : Handle{};
     if (f->io.is_null()) { f->failed = true; KV_WARN("asset", "font file '%s': could not submit its read", path); }
     return f;
@@ -382,8 +383,8 @@ void asset_fonts_pump(TickContext& ctx) {
     if (!io) return;
     bool landed = false;
     // Faces first, by their request: a face outlives the font whose handle it was read under.
-    for (u32 i = 0; i < io->completions().len;) {
-        IoCompletion c = io->completions()[i];
+    for (u32 i = 0; i < io->completions(asset_io_owner(s.font_kind)).len;) {
+        IoCompletion c = io->completions(asset_io_owner(s.font_kind))[i];
         FontFace* face = nullptr;
         for (FontFace* f : s.faces) if (!f->io.is_null() && f->io == c.request) face = f;
         if (!face) { ++i; continue; }
@@ -391,7 +392,7 @@ void asset_fonts_pump(TickContext& ctx) {
         if (c.status != IoStatus::Done) {
             face->io = Handle{};
             face->failed = true;
-            face->missing = c.status == IoStatus::Failed && c.error == 2;
+            face->missing = c.not_found();
             KV_WARN("asset", "font file '%s': %s", face->path, face->missing ? "not found" : "could not be read");
             c.bytes.free();
         } else if (!face_take(s, *face, (u8*)c.bytes.data, c.bytes.size)) {
