@@ -301,7 +301,8 @@ save a run's input and play it back, comparing hashes as they go.
 `frameloop` is the loop for a game with a window. Two other loops exist:
 
 - **A command-line tool** uses [tool](../../modules/tool/README.md): `tool_main` runs ticks
-  and Work as fast as the work allows, with no window, until a system calls `tool_finish`.
+  and Work when something asks for them and sleeps when nothing does, with no window,
+  until a system calls `tool_finish`.
 - **A test, or a program with its own loop**, calls the engine directly:
   `engine_init(e, modules, config)`, then per frame `engine_frame(e, dt)` (and
   `engine_frame_cycle` / `engine_work` if it uses those cycles), then `engine_shutdown(e)`.

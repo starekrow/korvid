@@ -38,6 +38,8 @@ bool platform_startup(Engine&, ModuleInstance& self) {
         s->base_path[0] = 0;
     }
     if (!s->io.init(&self.general, 4096, g_mounts.io_backend)) return false;
+    // A task that finishes on the queue's workers ends a loop's wait: nobody polls for it.
+    s->io.set_wake([](void* st) { platform_wake_state(*(PlatformState*)st); }, s);
     // A program whose files are inside an archive (an Android app's package): what would
     // be assets/ beside the executable is the archive's entries under <prefix>assets/, and
     // <exe>.kpak a stored entry mounted where it lies. There is no directory to look in.
@@ -166,6 +168,20 @@ PlatformWoken platform_wait(Engine& e, f64 seconds) {
 
 void platform_wake(Engine& e) {
     if (PlatformState* s = state(e)) platform_wake_state(*s);
+}
+
+f64 platform_idle_time(Engine& e, f64 most) {
+    f64 wait = most;
+    f64 now = time_now();
+    if (e.wake_due > 0.0 && e.wake_due - now < wait) wait = e.wake_due - now;
+    bool ask = e.wakers_polled != 0;
+    if (PlatformState* s = state(e)) {
+        // A request queued or on the ring moves only when the pump runs; a completion not
+        // yet taken is somebody's to take on the next pass. Tasks wake the loop themselves.
+        if (s->io.queued.len || s->io.in_flight || s->io.completions().len) ask = true;
+    }
+    if (ask && wait > kPlatformSoon) wait = kPlatformSoon;
+    return wait;
 }
 
 void platform_wake_state(PlatformState& st) {

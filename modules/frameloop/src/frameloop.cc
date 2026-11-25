@@ -480,11 +480,13 @@ f64 idle_wait_time(Engine& engine, FrameLoopState& s, f64 now, bool ticks) {
         if (t < wait) wait = t;
     }
     if (engine.frame_due > 0.0 && engine.frame_due - now < wait) wait = engine.frame_due - now;
-    if (engine.wake_due > 0.0 && engine.wake_due - now < wait) wait = engine.wake_due - now;
     f64 end = s.run_start + s.config.run_seconds - now; // once passed, the next run_time_check fires it
     if (s.config.run_seconds >= 0.0 && !s.timer_fired && end > 0.0 && end < wait) wait = end;
-    IoQueue* io = platform_io(engine);
-    bool poll = (io && (io->pending() || io->completions().len)) || (engine_holds(engine) & HoldLoading) || engine.wakers_polled;
+    // The wakers' time, and a poll's length while something can only be found by asking
+    // (a waker not watched, a read the pump has yet to move): the platform's answer, which
+    // a tool's loop waits by too. A load holding the sim is polled for as well.
+    wait = platform_idle_time(engine, wait);
+    bool poll = (engine_holds(engine) & HoldLoading) != 0;
     if (engine.wakers_polled && !s.waker_said) {
         KV_INFO("frameloop", "%u waker%s registered that the platform does not watch: an idle wait is a %.0f ms poll", engine.wakers_polled,
                 engine.wakers_polled == 1 ? "" : "s", k_demand_poll * 1e3);

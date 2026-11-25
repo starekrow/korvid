@@ -9,7 +9,11 @@
 // starts the work and returns, as every command does; the work runs in the module's
 // systems over as many ticks as it takes (I/O completes across pumps, jobs fan out), and
 // a system calls tool_finish(e, code) when it is done. A command with nothing to wait for
-// calls tool_finish itself. The same commands work in any engine that links the module,
+// calls tool_finish itself. The loop ticks when something asks for a tick (the I/O queue
+// busy, Work pending, engine_want_ticks, a waker's PlatformWatch stirring or its time
+// coming) and sleeps in platform_wait when nothing does, a quarter-second heartbeat apart
+// at the slowest: a tool that waits on a socket or a child uses no CPU while it waits, and
+// a system that advances only by being ticked says engine_want_ticks. The same commands work in any engine that links the module,
 // from its CLI.
 //
 // Exit status: the code given to tool_finish; 2 for a request the CLI refused (unknown

@@ -21,10 +21,21 @@ the `main` such a tool needs and the rule for when it is done.
    The CLI never reads stdin in a tool: a build's pipes are not a session.
 4. Runs the request. Its lines go to stdout; a failure goes to stderr and the exit status
    is 2.
-5. Ticks the engine as fast as the work allows, and gives the Work cycle (`engine_work`,
-   [cycles](../../docs/concepts/cycles.md)) 5 ms after each tick, until a system calls
-   `tool_finish(e, code)` or `--max-ticks` is reached. A tool's work may be in either
-   cycle. A tick waiting only on the disk sleeps 100 microseconds.
+5. Ticks the engine when something asks for a tick, and sleeps when nothing does, until a
+   system calls `tool_finish(e, code)` or `--max-ticks` is reached. The Work cycle
+   (`engine_work`, [cycles](../../docs/concepts/cycles.md)) gets 5 ms after each tick; a
+   tool's work may be in either cycle. What asks for a tick is what asks the frame loop:
+   - the platform's I/O queue with requests on their way or completions to take;
+   - Work pending;
+   - a module calling `engine_want_ticks(e)`, each tick it wants the next;
+   - a waker (`engine_add_watched_waker`) whose `PlatformWatch` stirs, or whose time
+     comes ([platform](../platform/README.md), "What wakes it");
+   - the heartbeat, a quarter of a second after the last tick.
+   So a tool that waits on a socket, a child process or a watched directory uses no CPU
+   while it waits, and one that works through the queue runs flat out, with nothing to
+   set up either way. A system that advances by being ticked, with none of the above
+   pending, calls `engine_want_ticks`: without it, it runs at the heartbeat's pace.
+   `--max-ticks` ticks without waiting.
 6. Shuts the engine down. In debug and dev builds, memory still live after shutdown makes
    the exit status 3. kormake builds tools for the host in the host config (dev by
    default), so a tool a build runs makes the check too.
@@ -86,8 +97,8 @@ What the module registers with the engine: its state, nothing else.
 - **Finishing is the tool's job.** A command that starts nothing and never calls
   `tool_finish` runs until `--max-ticks`, or forever. Every path through a tool's work,
   failures included, ends in a finish.
-- **Ticks are not time.** A tool ticks as fast as it can at the engine's tick length, so
-  anything that counts ticks counts work, not seconds.
+- **Ticks are not time.** A tool ticks when there is something to do, each tick the
+  engine's tick length, so anything that counts ticks counts work, not seconds.
 
 ## Not in this module
 

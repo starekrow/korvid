@@ -85,6 +85,8 @@ bool tool_running(Engine& e) {
 // What a tool gives its Work cycle between two ticks: enough for a slice of real work, little
 // enough that a tool's tick systems keep their pace.
 constexpr f64 k_work_slice = 0.005;
+// How long an idle tool goes between ticks nobody asked for: the frame loop's heartbeat.
+constexpr f64 k_heartbeat = 0.25;
 
 int tool_run(int argc, char** argv, Span<const ModuleDesc* const> modules, const ToolConfig& config) {
     // A tool's output is read by programs (tests, scripts, another tool) as often as by
@@ -162,21 +164,48 @@ int tool_run(int argc, char** argv, Span<const ModuleDesc* const> modules, const
         } else if (help) {
             code = 0; // the CLI's own command: it printed, there is nothing to wait for
         } else {
-            // The work runs in the tool's systems: tick until it says it is done, as fast as
-            // the work allows; a tick that only waits on the disk yields the core briefly.
+            // The work runs in the tool's systems, over as many ticks as it takes. A tick
+            // runs when something asks for one, and the loop sleeps when nothing does: the
+            // same contract a game's modules have with the frame loop, so a tool that waits
+            // on a socket or a child uses no CPU while it waits, with nothing to set up.
+            // What asks:
+            //   - the platform's queue having requests on their way or completions to take;
+            //   - Work pending (docs/design/cycles.md);
+            //   - a module: engine_want_ticks, each tick it wants the next;
+            //   - a waker (engine_add_watched_waker) saying something came, the time it
+            //     asked for (PlatformWatch::at, soon) arriving, or what it watches stirring;
+            //   - the heartbeat, k_heartbeat after the last tick, so a module that asked
+            //     for nothing still runs, slowly enough to be noticed.
+            // --max-ticks is a bounded run for a test: it ticks without waiting.
             const f64 dt = e.clock.tick_dt;
             u64 ticks = 0;
             IoQueue* io = platform_io(e);
+            bool woke = true; // the first pass ticks: the command has just started its work
+            f64 last_tick = time_now();
             while (!s->finished) {
                 if (profiling) prof_frame(ticks);
                 platform_pump(e);
+                f64 now = time_now();
+                bool io_busy = io && (io->pending() || io->completions().len);
+                bool tick = woke || max_ticks || e.ticks_wanted || io_busy || engine_work_pending(e) || now - last_tick >= k_heartbeat;
+                if (engine_wake(e)) tick = true; // the wakers: what came, and what each waits on next
+                if (!tick) {
+                    f64 wait = platform_idle_time(e, k_heartbeat - (now - last_tick));
+                    if (wait > 0.0) platform_wait(e, wait);
+                    woke = true; // whatever ended the wait, a tick looks at it
+                    continue;
+                }
+                woke = false;
+                last_tick = now;
                 engine_frame(e, dt);
-                engine_work(e, k_work_slice); // the Work cycle (docs/design/cycles.md) between ticks
+                engine_work(e, k_work_slice); // the Work cycle between ticks
                 if (profiling) prof_collect();
                 ++ticks;
                 if (max_ticks && ticks >= max_ticks) { KV_ERROR("tool", "not finished after %llu ticks", (unsigned long long)ticks); break; }
+                // A tick that only waits on the disk yields the core briefly.
                 if (io && io->pending() && io->completions().len == 0 && !engine_work_pending(e)) time_sleep(0.0001);
             }
+            print_flush_lines();
             code = s->finished ? s->code : 2;
         }
         s->running = false;

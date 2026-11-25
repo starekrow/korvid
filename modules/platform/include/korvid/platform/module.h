@@ -74,6 +74,13 @@ enum class PlatformWoken : u8 { Time, Window, Wake };
 PlatformWoken platform_wait(Engine& e, f64 seconds);
 // Ends the wait under way, or the next to begin. Any thread; not a signal handler.
 void platform_wake(Engine& e);
+// How long a loop with nothing to do may sleep in platform_wait, `most` at the longest:
+// the one answer the frame loop and a tool's loop both wait by. No later than the earliest
+// time a waker asked for (engine_want_wake_at, PlatformWatch::at), and no longer than
+// kPlatformSoon while something can only be found by asking: a waker the platform does
+// not watch (engine_add_waker), or a read the queue's pump has yet to hand over or collect
+// (the queue's task workers wake the loop themselves). 0 or less: do not wait.
+f64 platform_idle_time(Engine& e, f64 most);
 // The window's wait: platform_hid sets it at startup and clears it (null) at shutdown.
 void platform_set_waiter(Engine& e, const PlatformWaiter* w);
 // What ended the waits so far: for a loop's last line, and a measurement.

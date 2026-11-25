@@ -2043,7 +2043,13 @@ constinit const CliCommandDesc k_commands[] = {
     {.name = "berg-set", .help = "berg-set FILE PATH... VALUE: set a rule file's value (JSON) in place, its comments and order kept", .fn = cmd_berg_set},
     {.name = "goldberg replay", .help = "goldberg replay LOG [--dump FILE]: feed a recorded event log to a fresh session, with no file system under it", .fn = cmd_replay},
 };
-void pump(TickContext& ctx) { if (!ctx.state_as<GoldbergState>().window) pump_body(ctx, false); }
+// Headless, the session paces itself (its share, and a short sleep when a tick found nothing):
+// it asks for every tick, where its window is woken by what it watches (goldberg_wake).
+void pump(TickContext& ctx) {
+    if (ctx.state_as<GoldbergState>().window) return;
+    engine_want_ticks(*ctx.engine);
+    pump_body(ctx, false);
+}
 
 void sink_line(void*, const char* line) { print("%s\n", line); print_flush(); }
 
