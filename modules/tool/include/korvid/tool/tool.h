@@ -9,14 +9,16 @@
 // starts the work and returns, as every command does; the work runs in the module's
 // systems over as many ticks as it takes (I/O completes across pumps, jobs fan out), and
 // a system calls tool_finish(e, code) when it is done. A command with nothing to wait for
-// calls tool_finish itself. The loop ticks when something asks for a tick (the I/O queue
-// busy, Work pending, engine_want_ticks, a waker's PlatformWatch stirring or its time
-// coming) and sleeps in platform_wait when nothing does, a quarter-second heartbeat apart
-// at the slowest: a tool that waits on a socket or a child uses no CPU while it waits, once
-// its module names them in a watched waker's PlatformWatch (engine_add_watched_waker), and
-// a system that advances only by being ticked says engine_want_ticks. Nothing watches a
-// handle no module named. modules/tool/README.md, "A tool that waits", has the whole
-// pattern. The same commands work in any engine that links the module, from its CLI.
+// calls tool_finish itself; one whose work is easiest written top to bottom hands it to
+// tool_task (below). The loop ticks when something asks for a tick (reads or writes on the
+// I/O queue, Work pending, engine_want_ticks, a standing watch or a waker's PlatformWatch
+// stirring or its time coming, a tool_task returning) and sleeps in platform_wait when
+// nothing does, a quarter-second heartbeat apart at the slowest: a tool that waits on a
+// socket or a child uses no CPU while it waits, once its module watches them
+// (platform_watch_add), and a system that advances only by being ticked says
+// engine_want_ticks. Nothing watches a handle no module named. modules/tool/README.md, "A
+// tool that waits" and "Straight-line work", has both shapes. The same commands work in
+// any engine that links the module, from its CLI.
 //
 // Exit status: the code given to tool_finish; 2 for a request the CLI refused (unknown
 // command, bad arguments, ctx.fail: the run ends there, before any tick) or a run stopped
@@ -38,6 +40,7 @@
 // while that command runs, stdin is a CLI session too, terminal or not, and the CLI's
 // `quit` is the tool's to answer (Engine::quit_requested).
 #pragma once
+#include "korvid/core/atomic.h"
 #include "korvid/core/engine.h"
 
 namespace kv {
@@ -58,5 +61,29 @@ void tool_finish(Engine& e, int code);
 // True while a tool run has not finished (and in an engine with no tool module running,
 // false): for commands that work both in a tool and in a game's CLI.
 bool tool_running(Engine& e);
+
+// ---- straight-line work ---------------------------------------------------------------
+// Runs fn(arg, ctl) on a thread of its own, where blocking is fine (NetSocket::write_now,
+// Process::wait, io_read_file, a loop that sleeps), while the engine goes on ticking: its
+// systems and timers, the CLI and --cli-port, the I/O queue. When fn returns, the run
+// finishes with what it returned as the exit status, as tool_finish(e, code) would (the
+// first finish stands). For a tool whose work is easiest written as one function from top
+// to bottom; modules/tool/README.md, "Straight-line work", has the shape.
+//
+// fn touches only `arg`, which stays where it is until the run ends, and what any thread
+// may call: the platform's blocking calls and objects it owns, print and print_err (each
+// call whole), the log. Not the engine, its ktables or another module's state. When the run
+// ends otherwise (another finish, --max-ticks, a quit), ctl.cancelled() turns true, and
+// the run waits for fn to return before it shuts down: a loop in fn looks at it, and a
+// blocking call in fn has a timeout (write_now's seconds, Process::wait's).
+//
+// From a command or a system while a tool run is driving the engine (tool_running): false
+// otherwise, and with eight running, or when no thread can be had.
+struct ToolTaskCtl {
+    u32  flag = 0; // set by the tool when the run is ending: atomic
+    bool cancelled() const { return atomic_load(&flag, MO_RELAXED) != 0; }
+};
+typedef i32 (*ToolTaskFn)(void* arg, const ToolTaskCtl& ctl);
+bool tool_task(Engine& e, ToolTaskFn fn, void* arg, const char* name = "task");
 
 } // namespace kv

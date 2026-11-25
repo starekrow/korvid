@@ -74,6 +74,51 @@ bool os_cond_timed_wait(OsCond* c, OsMutex* m, f64 seconds) {
 void os_cond_signal(OsCond* c)              { pthread_cond_signal(native(c)); }
 void os_cond_broadcast(OsCond* c)           { pthread_cond_broadcast(native(c)); }
 
+// A flag under a mutex, with a condition to wait on: pthreads' timed wait already keeps to
+// the time asked for.
+namespace {
+struct EventParts { OsMutex lock; OsCond cond; bool set; };
+}
+static_assert(sizeof(EventParts) <= sizeof(OsEvent::storage), "OsEvent is too small for its parts");
+static EventParts* parts(OsEvent* ev) { return reinterpret_cast<EventParts*>(ev->storage); }
+
+void os_event_init(OsEvent* ev) {
+    EventParts* p = parts(ev);
+    os_mutex_init(&p->lock);
+    os_cond_init(&p->cond);
+    p->set = false;
+}
+void os_event_destroy(OsEvent* ev) {
+    os_cond_destroy(&parts(ev)->cond);
+    os_mutex_destroy(&parts(ev)->lock);
+}
+void os_event_set(OsEvent* ev) {
+    EventParts* p = parts(ev);
+    os_mutex_lock(&p->lock);
+    p->set = true;
+    os_cond_signal(&p->cond);
+    os_mutex_unlock(&p->lock);
+}
+bool os_event_wait(OsEvent* ev, f64 seconds) {
+    EventParts* p = parts(ev);
+    os_mutex_lock(&p->lock);
+    if (!p->set && seconds > 0) {
+        timespec start;
+        clock_gettime(CLOCK_MONOTONIC, &start);
+        f64 left = seconds;
+        while (!p->set && left > 0) {
+            os_cond_timed_wait(&p->cond, &p->lock, left);
+            timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            left = seconds - ((f64)(now.tv_sec - start.tv_sec) + (f64)(now.tv_nsec - start.tv_nsec) * 1e-9);
+        }
+    }
+    bool was = p->set;
+    p->set = false;
+    os_mutex_unlock(&p->lock);
+    return was;
+}
+
 static void* thread_start(void* arg) {
     OsThread* t = (OsThread*)arg;
     t->fn(t->arg);

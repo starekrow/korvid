@@ -108,9 +108,19 @@ called from any thread, not a signal handler, and a wake that arrives before the
 begins ends it at once. A frame loop with nothing to do waits here between passes
 (`frameloop`); `platform_waits(e)` counts what ended them.
 
-**What wakes it.** One way to say it, whatever the thing is. An owner (a module with a
-waker: `engine_add_watched_waker`, the owner its `user`) fills a `PlatformWatch` each time
-its waker is asked and hands it over, replacing what it said before:
+**What wakes it.** One way to say it, whatever the thing is, handed over in one of two
+ways. A **standing watch**: each thing added once, watched until it closes, with no waker
+and nothing stated again; the tick that follows a stir is the owner's systems' to read it
+in.
+
+```cpp
+platform_watch_add(e, &me, listener);   // and the socket once accepted, the child once started
+platform_unwatch(e, &me);               // at shutdown, before closing them
+```
+
+A **stated watch**: an owner with a waker (`engine_add_watched_waker`, the owner its
+`user`) fills a `PlatformWatch` each time its waker is asked and hands it over, replacing
+what it stated before. For a set worked out afresh each pass, or one with a time in it:
 
 ```cpp
 PlatformWatch w(e);
@@ -119,26 +129,26 @@ w.at(next_retry);
 platform_watch(e, &me, w);        // platform_unwatch(e, &me) at shutdown
 ```
 
-How each is heard is the platform's business. A socket or a listener goes to one thread
-of the platform's, started at the first handle and blocked in `poll` (`WSAPoll` on
-Windows), which calls `platform_wake` when one can be read and leaves it out till the next
-`platform_wait`, by when the pass it woke has read it: a socket nobody drains wakes each
-wait, not the thread for ever. An `FsWatcher` gives that thread inotify's descriptor, or
-has the OS call (`ReadDirectoryChangesW`, FSEvents), and a polled root gives the time of
-its next walk. A `Process`'s pipes go to the thread where a pipe can be polled (POSIX);
-the child's exit is not watched anywhere, so an owner whose child's pipes have ended
-asks `soon()` until `running()` says it is over. An
-`IoQueue`'s task workers wake the loop as each task finishes. A socket with output still
-queued, a read on the ring, and whatever this OS cannot watch (a pipe on Windows, whose
-watch takes sockets only) are asked about again in `kPlatformSoon` (4 ms) instead: the
-owner's code is the same on every OS, and only how promptly it hears differs: with no
-window the wait is a condition's, which Windows rounds up to its scheduler tick (15.6 ms
-unless something raised the timer resolution), so "soon" there comes about 60 times a
-second, not 250. 64 handles
+An owner may have both. How each is heard is the platform's business. A socket or a
+listener goes to one thread of the platform's, started at the first handle and blocked in
+`poll` (`WSAPoll` on Windows), which calls `platform_wake` when one can be read and leaves
+it out till the next `platform_wait`, by when the pass it woke has read it: a socket
+nobody drains wakes each wait, not the thread for ever. An `FsWatcher` gives that thread
+inotify's descriptor, or has the OS call (`ReadDirectoryChangesW`, FSEvents), and a polled
+root gives the time of its next walk. A `Process`'s pipes go to the thread where a pipe can
+be polled (POSIX), and its exit wherever the OS gives a handle for it: a pidfd (Linux from
+5.3, Android) or a kqueue (Apple) on the thread, a one-shot wait in the thread pool on
+Windows. The exit is heard once. An `IoQueue`'s task workers wake the loop as each task
+finishes. A socket with output still queued, a read on the ring, and whatever this OS
+cannot watch (a pipe on Windows, whose watch takes sockets only) are asked about again in
+`kPlatformSoon` (4 ms) instead: the owner's code is the same on every OS, and only how
+promptly it hears differs. The wait keeps to the time asked for on every OS (an
+`OsEvent`, a high-resolution timer on Windows), so soon is 250 times a second. 64 handles
 in all; past that, soon. A handle knows its kind (`os_handle_kind`), so the wrong one
 cannot be watched by mistake: a file's is refused with an error line. A handle closed
 while it is watched is stale, and left out: its number is never polled for whatever has
-it next.
+it next, and a standing member that closed is let go. Why it is shaped this way:
+[waiting](../../docs/design/waiting.md).
 
 **Alerts** (`alert.h`). An entity with an `Alertable` component names an OS handle, and is
 sent an `Alerted` event in the Input phase every tick that handle has something to read;
@@ -148,10 +158,12 @@ not data: `Alertable` is a cosmetic component and nothing of it is recorded, so 
 tools, UI and debug channels, not for gameplay that must replay (`docs/design/handles.md`,
 "Alerts", has what would change that).
 
-**Which to use.** An `Alertable` when an entity reads one handle in a handler: nothing to
-register. A watched waker and `PlatformWatch` when the owner must also wake for what an
-alert does not say: output still queued on a socket (backpressure), a time, a child whose
-pipes have ended, an `IoQueue`. A tool's pump is the second kind
+**Which to use.** A standing watch (`platform_watch_add`) for a module that waits on
+things it opens and closes: a listener, its connections, a child, its exit; nothing to
+state again, and closing ends it. A stated watch (a watched waker and `PlatformWatch`)
+when what to wait on is worked out each pass, or includes a time (`at`), an
+`FsWatcher`'s or an `IoQueue`'s. An `Alertable` when an entity reads one handle in a
+handler, as an event. A tool's pump is the first kind
 ([tool](../tool/README.md#a-tool-that-waits) has it whole).
 
 **Looking at it.** In a program with the CLI, `ls /dev/handles` lists the kinds of OS
@@ -337,7 +349,7 @@ Header `korvid/platform/net.h`:
 | name | kind | what |
 |---|---|---|
 | `NetListener` | record | `open(port, scope, &err)` (port 0: the OS picks, see `port`; `NetScope::Loopback` or `Any`; `error` keeps why it failed), `close()`, `is_open()`, `accept()` (a `Handle`, or null) |
-| `NetSocket` | record | `adopt(handle)`, `read(buf, cap)` (bytes, 0, or -1 closed), `write(data, size)`, `write_str(s)`, `write_now(data, size)` (blocks till the kernel has it all, or false: over), `flush()`, `pending()`, `room()`, `close()`, `is_open()`, `link()`, `out_limit`, `closed`, `error`, `bytes_in`, `bytes_out`, `dropped` |
+| `NetSocket` | record | `adopt(handle)`, `read(buf, cap)` (bytes, 0, or -1 closed), `write(data, size)`, `write_str(s)`, `write_now(data, size, seconds)` (blocks till the kernel has it all; false: over, or with `seconds`, the time ran out and the rest is queued), `flush()`, `pending()`, `room()`, `close()`, `is_open()`, `link()`, `out_limit`, `closed`, `error`, `bytes_in`, `bytes_out`, `dropped` |
 | `net_connect_local(port, &sock)` | function | a non-blocking connect to loopback, for tools and tests |
 
 Header `korvid/platform/module.h`:
@@ -352,7 +364,8 @@ Header `korvid/platform/module.h`:
 | `platform_wake(engine)` | function | ends the wait under way or the next; any thread |
 | `platform_set_waiter(engine, w)`, `PlatformWaiter` | function, record | the window's `wait(user, seconds)` (1 early, 0 the time, -1 cannot now) and `wake(user)`; null clears |
 | `platform_waits(engine)`, `PlatformWaits` | function, record | `waits`, and of them ended by the `window`, `woken`, `timed` |
-| `PlatformWatch`, `platform_watch(engine, owner, w)`, `platform_unwatch(engine, owner)` | record, functions | what an owner's waiting loop is woken by: `add` a listener, a socket, an `FsWatcher`, a `Process`, an `IoQueue` or a `Handle`, `at(when)`, `soon()`; replaces what the owner said; what this OS cannot watch is asked again in `kPlatformSoon` |
+| `platform_watch_add(engine, owner, thing)`, `platform_watch_remove(engine, owner, thing)` | functions | a standing watch: a listener, a socket, a `Process` (pipes and exit) or a `Handle`, watched till it closes, no waker |
+| `PlatformWatch`, `platform_watch(engine, owner, w)`, `platform_unwatch(engine, owner)` | record, functions | what an owner's waiting loop is woken by: `add` a listener, a socket, an `FsWatcher`, a `Process`, an `IoQueue` or a `Handle`, `at(when)`, `soon()`; replaces what the owner stated (its standing members stay); `platform_unwatch` forgets both; what this OS cannot watch is asked again in `kPlatformSoon` |
 
 What the module registers with the engine:
 
@@ -380,11 +393,12 @@ What the module registers with the engine:
 - **Sockets never block and never stall**, but for `write_now`. A queue past `out_limit`
   drops and counts; `closed` says the peer went away. Served from a tick system, a
   connection's throughput is bounded by what the kernel buffers hold per tick.
-- **A program that does one thing at a time** can write straight-line code: `write_now`
-  sends everything or says the connection is over, `Process::wait` sleeps till the child
-  writes, `io_read_file` and `io_write_file` block. A loop of `write` and `flush` that
-  retries until the bytes are taken never ends once the peer has gone: `write` refuses a
-  closed socket for good.
+- **Straight-line code** has its blocking calls: `write_now` sends everything or says the
+  connection is over (or, given `seconds`, that the peer is not reading), `Process::wait`
+  sleeps till the child writes or exits, `io_read_file` and `io_write_file` block. In a
+  tool, run it with `tool_task` and the engine goes on ticking beside it. A loop of
+  `write` and `flush` that retries until the bytes are taken never ends once the peer has
+  gone: `write` refuses a closed socket for good.
 - **Used after it is over, a socket, listener or process tells you**, in a dev or debug
   build: a warning, once per object, when code writes to a connection that is over, reads
   a socket after `close()`, accepts on a listener whose open failed (with the reason), or

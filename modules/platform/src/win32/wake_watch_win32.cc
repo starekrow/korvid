@@ -21,10 +21,21 @@ constexpr u32 kMaxWatched = 64;
 
 } // namespace
 
+struct WakeWatch;
+
+// A child's exit, which WSAPoll cannot wait for: a one-shot wait in the thread pool on a
+// duplicate of the process handle (the Process may close its own while this one waits).
+struct ExitWait {
+    WakeWatch* w = nullptr;
+    HANDLE     dup = nullptr;
+    HANDLE     wait = nullptr;
+};
+
 struct WakeWatch {
     PlatformState* s = nullptr;
     OsMutex  lock;
-    struct Entry { const void* owner; Handle fd; bool armed; };
+    // `once`: a child's exit, which happens once: heard once, never rearmed.
+    struct Entry { const void* owner; Handle fd; bool armed; bool once; ExitWait* exit; };
     Entry    list[kMaxWatched];
     u32      count = 0;
     bool     fired = false; // something was left out of the poll since the last rearm
@@ -99,11 +110,50 @@ SOCKET self_socket() {
     return s;
 }
 
+// The thread pool's call when a watched child exits: its entry heard, the loop woken.
+void CALLBACK exit_heard(PVOID arg, BOOLEAN) {
+    ExitWait* x = (ExitWait*)arg;
+    WakeWatch& w = *x->w;
+    bool woke = false;
+    os_mutex_lock(&w.lock);
+    for (u32 i = 0; i < w.count; ++i)
+        if (w.list[i].exit == x && w.list[i].armed) { w.list[i].armed = false; w.fired = true; woke = true; }
+    os_mutex_unlock(&w.lock);
+    if (woke) platform_wake_state(*w.s);
+}
+
+// A wait on the exit of the child `fd` names, or null if it cannot be had (logged).
+ExitWait* exit_wait_start(WakeWatch& w, Handle fd) {
+    i64 v = os_handle_value(fd, OsKind::Process);
+    if (v < 0) return nullptr;
+    ExitWait* x = new (mem_alloc(sizeof(ExitWait))) ExitWait{};
+    x->w = &w;
+    HANDLE self = GetCurrentProcess();
+    if (!DuplicateHandle(self, (HANDLE)(intptr_t)v, self, &x->dup, SYNCHRONIZE, FALSE, 0) ||
+        !RegisterWaitForSingleObject(&x->wait, x->dup, exit_heard, x, INFINITE, WT_EXECUTEONLYONCE)) {
+        KV_ERROR("platform", "a child's exit cannot be watched (%lu); it is asked about again soon", (unsigned long)GetLastError());
+        if (x->dup) CloseHandle(x->dup);
+        mem_free(x);
+        return nullptr;
+    }
+    return x;
+}
+
+// Ends the wait, its call finished if it was under way, and frees it. Not under the
+// watch's lock: the call takes it.
+void exit_wait_end(ExitWait* x) {
+    if (!x) return;
+    UnregisterWaitEx(x->wait, INVALID_HANDLE_VALUE);
+    CloseHandle(x->dup);
+    mem_free(x);
+}
+
 } // namespace
 
 bool wake_watch_supported() { return true; }
-// WSAPoll takes sockets and nothing else: a pipe's or a console's handle is not one.
-bool wake_watch_takes(OsKind k) { return k == OsKind::Socket; }
+// WSAPoll takes sockets and nothing else: a pipe's or a console's handle is not one. A
+// child's exit is a wait of the thread pool's (exit_wait_start).
+bool wake_watch_takes(OsKind k) { return k == OsKind::Socket || k == OsKind::Process; }
 
 bool wake_watch_readable(Handle h) {
     OsKind kind = os_handle_kind(h);
@@ -120,6 +170,7 @@ bool wake_watch_readable(Handle h) {
         DWORD avail = 0;
         return !PeekNamedPipe((HANDLE)(intptr_t)v, nullptr, 0, nullptr, &avail, nullptr) || avail > 0; // data, or the end
     }
+    if (kind == OsKind::Process) return WaitForSingleObject((HANDLE)(intptr_t)v, 0) == WAIT_OBJECT_0; // it has exited
     return false;
 }
 
@@ -152,6 +203,7 @@ void wake_watch_destroy(WakeWatch* w) {
         poke(*w);
         os_thread_join(&w->thread);
     }
+    for (u32 i = 0; i < w->count; ++i) exit_wait_end(w->list[i].exit); // the pool's calls finished first
     closesocket(w->ctl);
     os_mutex_destroy(&w->lock);
     w->~WakeWatch();
@@ -161,14 +213,17 @@ void wake_watch_destroy(WakeWatch* w) {
 
 bool wake_watch_set(WakeWatch* w, const void* owner, const Handle* fds, u32 n) {
     bool changed = false, fits = true;
+    ExitWait* ended[kMaxWatched];
+    u32 ended_count = 0;
     os_mutex_lock(&w->lock);
-    // The owner's sockets no longer given go; those still given keep whether they are armed.
+    // The owner's handles no longer given go; those still given keep whether they are armed.
     for (u32 i = 0; i < w->count;) {
         WakeWatch::Entry& e = w->list[i];
         bool kept = false;
         if (e.owner == owner)
             for (u32 k = 0; k < n; ++k) if (fds[k] == e.fd) kept = true;
         if (e.owner != owner || kept) { ++i; continue; }
+        if (e.exit) ended[ended_count++] = e.exit;
         e = w->list[--w->count];
         changed = true;
     }
@@ -178,11 +233,15 @@ bool wake_watch_set(WakeWatch* w, const void* owner, const Handle* fds, u32 n) {
         for (u32 i = 0; i < w->count; ++i) if (w->list[i].owner == owner && w->list[i].fd == fds[k]) have = true;
         if (have) continue;
         if (w->count == kMaxWatched) { fits = false; continue; }
-        w->list[w->count++] = WakeWatch::Entry{owner, fds[k], true};
+        bool exit = os_handle_kind(fds[k]) == OsKind::Process;
+        WakeWatch::Entry& e = w->list[w->count++];
+        e = WakeWatch::Entry{owner, fds[k], true, exit, nullptr};
+        if (exit && !(e.exit = exit_wait_start(*w, fds[k]))) fits = false;
         changed = true;
     }
     bool start = !w->running && w->count;
     os_mutex_unlock(&w->lock);
+    for (u32 i = 0; i < ended_count; ++i) exit_wait_end(ended[i]);
     if (start) {
         if (os_thread_start(&w->thread, watch_main, w)) w->running = true;
         else { KV_ERROR("platform", "the socket watch's thread did not start"); return false; }
@@ -196,7 +255,7 @@ void wake_watch_rearm(WakeWatch* w) {
     os_mutex_lock(&w->lock);
     bool again = w->fired;
     if (again) {
-        for (u32 i = 0; i < w->count; ++i) w->list[i].armed = true;
+        for (u32 i = 0; i < w->count; ++i) if (!w->list[i].once) w->list[i].armed = true;
         w->fired = false;
     }
     os_mutex_unlock(&w->lock);

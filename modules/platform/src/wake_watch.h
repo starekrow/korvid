@@ -21,6 +21,10 @@ bool platform_wake_set(Engine& e, const void* owner, const Handle* handles, u32 
 // Whether a handle of this kind can be watched here: a socket everywhere; a pipe or a
 // notify descriptor on POSIX only (Windows' watch is WSAPoll, which takes sockets).
 bool platform_watches_kind(Engine& e, OsKind kind);
+// Standing members (watch.cc): those closed since are let go, and true if one asks to be
+// looked at again soon: a kind the thread cannot watch, or a socket with output queued.
+// platform_idle_time asks before each wait.
+bool platform_members_soon(Engine& e, PlatformState& s);
 
 bool       wake_watch_supported();
 // Whether a handle of this kind can be watched here: wake_watch_set is given only those.

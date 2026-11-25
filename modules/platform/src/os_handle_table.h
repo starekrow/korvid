@@ -22,4 +22,12 @@ i64    os_handle_release(Handle h);
 // Bytes moved through an open handle, for its description. Dev and debug; nothing in ship.
 void   os_handle_count(Handle h, u64 in, u64 out);
 
+// What a handle says of itself to whoever watches it, in every build. Cleared when the
+// slot is made; a stale handle has none. Any thread.
+enum OsHandleFlag : u32 {
+    kOsQueued = 1u << 0, // a socket with output its owner queued and the kernel has yet to take
+};
+void   os_handle_set_flag(Handle h, u32 flag, bool on);
+bool   os_handle_flag(Handle h, u32 flag);
+
 } // namespace kv

@@ -121,8 +121,12 @@ void test_wait(kv::TestCtx& c) {
             pw.add(file);                                  // a mistake on any OS: one error line, not watched
             KV_CHECK(c, pw.count == 0 && pw.due == 0.0);
             f64 before = time_now();
-            pw.add(child);                                 // its pipes watched (POSIX), or asked again soon (Windows): never both
-            KV_CHECK(c, (pw.count == 2) != (pw.due > 0.0));
+            pw.add(child);                                 // its pipes watched (POSIX) or asked again soon (Windows), and its exit watched
+#if defined(_WIN32)
+            KV_CHECK(c, pw.count == 1 && pw.due > 0.0);    // the exit; the pipes soon
+#else
+            KV_CHECK(c, pw.due == 0.0 && (pw.count == 3 || (pw.count == 2 && !os_handle_open(child.process)))); // no exit handle: a kernel before 5.3
+#endif
             KV_CHECK(c, pw.due == 0.0 || (pw.due >= before && pw.due <= time_now() + kPlatformSoon));
             pw.at(100.0);
             pw.at(50.0);
@@ -195,6 +199,76 @@ void test_wait(kv::TestCtx& c) {
         KV_CHECK(c, q.take(task, &done) && done.status == IoStatus::Done);
         q.free();
         platform_unwatch(e, &owner);
+
+        // A child's exit ends the wait by itself, its pipes not watched at all, and is heard
+        // once: the next wait, the same watch still stated, lasts its time.
+        Process quiet;
+#if defined(_WIN32)
+        KV_CHECK(c, quiet.shell("ping -n 2 127.0.0.1 >nul")); // about a second
+#else
+        KV_CHECK(c, quiet.shell("sleep 0.3"));
+#endif
+        if (os_handle_open(quiet.process) && os_handle_kind(quiet.process) == OsKind::Process) {
+            {
+                PlatformWatch pw(e);
+                pw.add(quiet.process);
+                KV_CHECK(c, pw.count == 1 && pw.due == 0.0);
+                platform_watch(e, &owner, pw);
+            }
+            t0 = time_now();
+            PlatformWoken ended = platform_wait(e, 10.0);
+            f64 heard = time_now() - t0;
+            KV_CHECK(c, ended == PlatformWoken::Wake && heard >= 0.2 && heard < 5.0);
+            for (u32 i = 0; i < 1000 && quiet.running(); ++i) time_sleep(0.001); // the exit is seen as it is heard
+            KV_CHECK(c, !quiet.running() && quiet.code == 0);
+            KV_CHECK(c, platform_wait(e, 0.1) == PlatformWoken::Time);
+            KV_INFO("test", "a child's exit ended the wait %.3f s in", heard);
+        } else {
+            KV_INFO("test", "this OS gives no handle for a child's exit: not watched");
+        }
+        platform_unwatch(e, &owner);
+        quiet.close();
+
+        // A standing watch: added once, no waker, nothing stated again. What arrives ends
+        // the wait; read, the next wait lasts its time; a stated watch beside it leaves it
+        // standing; a socket with output queued asks to be looked at soon; closed, it is let
+        // go, and its owner's set is the smaller for it.
+        {
+            int stands = 0;
+            platform_watch_add(e, &stands, server);
+            platform_watch_add(e, &stands, server); // twice is once
+            client.write_str("s");
+            client.flush();
+            KV_CHECK(c, platform_wait(e, 5.0) == PlatformWoken::Wake);
+            KV_CHECK(c, server.read(buf, sizeof buf) == 1);
+            KV_CHECK(c, platform_wait(e, 0.1) == PlatformWoken::Time);
+            {
+                PlatformWatch pw(e);
+                pw.at(time_now() + 60.0);
+                platform_watch(e, &stands, pw); // a stated set of nothing: the standing one stays
+            }
+            client.write_str("t");
+            client.flush();
+            KV_CHECK(c, platform_wait(e, 5.0) == PlatformWoken::Wake);
+            KV_CHECK(c, server.read(buf, sizeof buf) == 1);
+            KV_CHECK(c, platform_idle_time(e, 1.0) > kPlatformSoon);
+            server.write_str("queued");     // the kernel takes it at the flush; until then, soon
+            KV_CHECK(c, platform_idle_time(e, 1.0) <= kPlatformSoon);
+            server.flush();
+            KV_CHECK(c, server.pending() == 0 && platform_idle_time(e, 1.0) > kPlatformSoon);
+            platform_watch_remove(e, &stands, server); // taken back: what arrives wakes nothing
+            client.write_str("u");
+            client.flush();
+            KV_CHECK(c, platform_wait(e, 0.1) == PlatformWoken::Time);
+            KV_CHECK(c, server.read(buf, sizeof buf) == 1);
+            NetListener lone;
+            KV_CHECK(c, lone.open(0));
+            platform_watch_add(e, &stands, lone);
+            lone.close();                   // closed while standing: let go, no wake, no error
+            KV_CHECK(c, platform_idle_time(e, 0.2) > kPlatformSoon);
+            KV_CHECK(c, platform_wait(e, 0.1) == PlatformWoken::Time);
+            platform_unwatch(e, &stands);
+        }
         server.close();
         client.close();
         l.close();

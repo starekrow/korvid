@@ -2,6 +2,7 @@
 #include "korvid/core/os_error.h"
 #include "../os_err.h"
 #include "../misuse.h"
+#include "../net_internal.h"
 #include "../os_handle_table.h"
 #include "korvid/core/log.h"
 #include "korvid/core/format.h"
@@ -165,47 +166,33 @@ bool NetSocket::write(const void* data, u32 size) {
     if (!os_handle_open(fd) || closed) { misuse_socket(*this, "write"); return false; }
     if (out.len + size > out_limit) { dropped += size; return false; }
     memcpy(out.push_n(size), data, size);
+    net_mark_queued(*this);
     return true;
 }
 
-namespace {
-// Until `fd` can be written or a quarter-second passes: a connect settled either way, room
-// in the kernel's buffer, or an error for the next send to find.
-void wait_writable(int fd) {
-    struct pollfd p = {fd, POLLOUT, 0};
-    ::poll(&p, 1, 250);
-}
-
-// All of `data` to the kernel, waiting for room as it goes; false when the connection is over.
-bool send_waiting(NetSocket& sock, const u8* data, u32 size) {
-    int fd = (int)os_handle_value(sock.fd);
-    u32 sent = 0;
-    while (sent < size) {
-        ssize_t n = ::send(fd, data + sent, size - sent, kSendFlags);
+// write_now's two parts (net_internal.h, net_now.cc).
+NetSend net_send_some(NetSocket& sock, const u8* data, u32 size, u32* sent) {
+    *sent = 0;
+    for (;;) {
+        ssize_t n = ::send((int)os_handle_value(sock.fd), data, size, kSendFlags);
         if (n > 0) {
-            sent += (u32)n;
+            *sent = (u32)n;
             sock.bytes_out += (u64)n;
             os_handle_count(sock.fd, 0, (u64)n);
-            continue;
+            return NetSend::Some;
         }
-        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) { wait_writable(fd); continue; }
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return NetSend::Again;
         sock.error = n < 0 ? errno : 0;
         sock.closed = true;
-        return false;
+        return NetSend::Over;
     }
-    return true;
 }
-} // namespace
 
-bool NetSocket::write_now(const void* data, u32 size) {
-    if (!os_handle_open(fd) || closed) { misuse_socket(*this, "write_now"); return false; }
-    while (link() == NetLink::Connecting) wait_writable((int)os_handle_value(fd));
-    if (closed) return false; // the connect failed: `error` says why
-    if (out.len) {
-        if (!send_waiting(*this, out.data, out.len)) return false;
-        out.len = 0;
-    }
-    return size == 0 || send_waiting(*this, (const u8*)data, size);
+void net_wait_writable(NetSocket& sock, f64 seconds) {
+    struct pollfd p = {(int)os_handle_value(sock.fd), POLLOUT, 0};
+    int ms = seconds <= 0.0 ? 0 : (int)(seconds * 1000.0 + 0.999);
+    ::poll(&p, 1, ms);
 }
 
 bool NetSocket::write_str(const char* s) { return write(s, (u32)strlen(s)); }
@@ -227,6 +214,7 @@ void NetSocket::flush() {
     if (sent) {
         memmove(out.data, out.data + sent, out.len - sent);
         out.len -= sent;
+        net_mark_queued(*this);
     }
 }
 

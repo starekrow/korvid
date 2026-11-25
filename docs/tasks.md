@@ -11,9 +11,10 @@ the [module catalog](README.md#modules) has everything.
 - **Keep my game in its own repository:** [Modules](concepts/modules.md#the-files), `korvid.config`
 - **Write a module:** [Modules](concepts/modules.md#writing-one), `ModuleDesc`, `KV_MODULE_DEFINE`
 - **Write a command-line tool on the engine:** [tool](../modules/tool/README.md), `tool_main`, `tool_finish`
-- **Wait on a socket or a child process without polling:** [tool](../modules/tool/README.md#a-tool-that-waits), `engine_add_watched_waker`, `PlatformWatch`
+- **Wait on a socket or a child process without polling:** [tool](../modules/tool/README.md#a-tool-that-waits), `platform_watch_add`
 - **Run a command and read its output:** [platform](../modules/platform/README.md), `Process::spawn`, `Process::shell`
-- **Write a tool that does one thing at a time, with blocking calls:** [tool](../modules/tool/README.md#using-it), `NetSocket::write_now`, `Process::wait`, `output_flush`
+- **Write a tool top to bottom, with blocking calls, and keep the engine running:** [tool](../modules/tool/README.md#straight-line-work), `tool_task`, `NetSocket::write_now`, `Process::wait`
+- **Know when a child process exits, without polling:** [platform](../modules/platform/README.md), `platform_watch_add`, `PlatformWatch::add(Process)`
 - **Add a command-line flag to my game:** [frameloop](../modules/frameloop/README.md#using-it), `FrameLoopConfig::flags`, `frameloop_flag`, `frameloop_option`
 
 ## When code runs

@@ -75,7 +75,13 @@ struct NetSocket {
     // blocks the calling thread while the peer is not reading, and waits out a connect
     // still under way. For a tool that does one thing at a time; code that must not block
     // uses write, room() and flush.
-    bool write_now(const void* data, u32 size);
+    //
+    // With `seconds` 0 or more it waits no longer than that, and false may also mean the
+    // time ran out: then is_open() is still true, and what the kernel had not taken is
+    // queued in `out` (past out_limit if need be), so a later write_now or flush goes on
+    // where this one stopped. 0 sends what the kernel takes now and queues the rest. So:
+    //     if (!s.write_now(buf, n, 5.0)) { if (s.is_open()) /* a peer not reading */; else /* gone: s.error */; }
+    bool write_now(const void* data, u32 size, f64 seconds = -1.0);
     // Backpressure, for a caller that would rather hold its data than have write drop it:
     // what is queued and not yet sent, and how much more write will take. Two reads of
     // fields: nothing is asked of the OS.

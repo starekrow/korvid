@@ -32,6 +32,7 @@ struct OsSlot {
     u32 gen;        // the generation, with kAlive while it is open: atomic
     u32 next_free;  // the free list, oldest first
     u8  kind;       // OsKind
+    u32 flags;      // OsHandleFlag bits: atomic
 #if KV_OS_HANDLE_INFO
     u16  by;        // mem_owner() at the open: the module index + 1, 0 outside any
     f64  opened_at;
@@ -143,6 +144,7 @@ Handle os_handle_make(OsKind kind, i64 os, const char* what) {
     OsSlot& s = t.slots[i];
     s.os        = os;
     s.kind      = (u8)kind;
+    atomic_store(&s.flags, 0u, MO_RELAXED);
     s.next_free = kNone;
 #if KV_OS_HANDLE_INFO
     s.by        = mem_owner();
@@ -200,6 +202,21 @@ void os_handle_count(Handle h, u64 in, u64 out) {
 #else
     (void)h; (void)in; (void)out;
 #endif
+}
+
+void os_handle_set_flag(Handle h, u32 flag, bool on) {
+    OsSlot* s = slot_of(h);
+    if (!s) return;
+    u32 was = atomic_load(&s->flags, MO_RELAXED);
+    for (;;) {
+        u32 want = on ? (was | flag) : (was & ~flag);
+        if (want == was || atomic_compare_exchange(&s->flags, &was, want, true, MO_RELEASE, MO_RELAXED)) return;
+    }
+}
+
+bool os_handle_flag(Handle h, u32 flag) {
+    OsSlot* s = slot_of(h);
+    return s && (atomic_load(&s->flags, MO_ACQUIRE) & flag) != 0;
 }
 
 OsKind os_handle_kind(Handle h) {

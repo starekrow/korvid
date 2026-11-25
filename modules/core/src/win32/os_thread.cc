@@ -44,6 +44,35 @@ bool os_cond_timed_wait(OsCond* c, OsMutex* m, f64 seconds) {
 void os_cond_signal(OsCond* c)           { WakeConditionVariable(native(c)); }
 void os_cond_broadcast(OsCond* c)        { WakeAllConditionVariable(native(c)); }
 
+// An auto-reset event, and for the timed wait a high-resolution waitable timer of the
+// waiting thread's own: WaitForSingleObject's milliseconds round up to the scheduler's
+// tick, the timer does not.
+static HANDLE* native(OsEvent* ev) { return reinterpret_cast<HANDLE*>(ev->storage); }
+static_assert(sizeof(HANDLE) <= sizeof(OsEvent::storage), "OsEvent is too small for a HANDLE");
+
+void os_event_init(OsEvent* ev)    { *native(ev) = CreateEventW(nullptr, FALSE, FALSE, nullptr); }
+void os_event_destroy(OsEvent* ev) { if (*native(ev)) CloseHandle(*native(ev)); *native(ev) = nullptr; }
+void os_event_set(OsEvent* ev)     { SetEvent(*native(ev)); }
+
+bool os_event_wait(OsEvent* ev, f64 seconds) {
+    HANDLE h = *native(ev);
+    if (!h) { if (seconds > 0) Sleep((DWORD)(seconds * 1000.0)); return false; } // no event was made: a plain sleep, never a spin
+    if (!(seconds > 0)) return WaitForSingleObject(h, 0) == WAIT_OBJECT_0;
+    static thread_local HANDLE timer = nullptr;
+    if (!timer) timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    LARGE_INTEGER due;
+    due.QuadPart = -(LONGLONG)(seconds * 1e7); // relative, in 100 ns units
+    if (timer && seconds < 1e6 && SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE)) {
+        HANDLE both[2] = {h, timer};
+        DWORD r = WaitForMultipleObjects(2, both, FALSE, INFINITE);
+        if (r == WAIT_OBJECT_0) { CancelWaitableTimer(timer); return true; }
+        return false;
+    }
+    f64 ms = seconds * 1000.0; // no timer: the scheduler's rounding, as before
+    DWORD wait = ms >= 4294967294.0 ? 4294967294u : (DWORD)ms + 1;
+    return WaitForSingleObject(h, wait) == WAIT_OBJECT_0;
+}
+
 static DWORD WINAPI thread_start(LPVOID arg) {
     OsThread* t = (OsThread*)arg;
     t->fn(t->arg);

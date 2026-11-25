@@ -278,7 +278,9 @@ void engine_remove_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);
 //         return false;
 //     }
 //
-// Added at the owner's startup; false when eight are registered.
+// Added at the owner's startup; false when eight are registered. An owner whose set does
+// not change with each pass needs no waker at all: platform_watch_add (platform/module.h)
+// keeps each thing watched until it closes.
 bool engine_add_watched_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);
 // The wakers asked by `when` (time_now's clock): a reconnect due, a file settling. The
 // earliest asked for stands until engine_wake, which clears it before it asks them.

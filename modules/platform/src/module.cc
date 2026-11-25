@@ -35,7 +35,8 @@ bool platform_startup(Engine&, ModuleInstance& self) {
     self.set_state(s);
     os_mutex_init(&s->wait_lock);
     s->alert_sources.alloc = &self.general;
-    os_cond_init(&s->wait_cond);
+    s->members.alloc = &self.general;
+    os_event_init(&s->wait_event);
     if (!os_bundle_archive() && !os_base_path(s->base_path, sizeof s->base_path)) {
         KV_WARN("platform", "the executable's directory is unknown; assets resolve from the working directory");
         s->base_path[0] = 0;
@@ -86,12 +87,13 @@ void platform_shutdown(Engine& e, ModuleInstance& self) {
     if (s->pump_count) KV_WARN("platform", "%u pump hooks still added at shutdown", s->pump_count);
     wake_watch_destroy(s->watch); // the thread stopped before what it wakes goes
     s->watch = nullptr;
+    s->members.free(); // what owners left watched: the thread that watched it is gone
     settings_close(s->settings); // what was set, written
     s->settings = nullptr;
     s->io.free();
     io_bundle_close();
     if (s->waiter.wait) KV_WARN("platform", "a waiter still set at shutdown");
-    os_cond_destroy(&s->wait_cond);
+    os_event_destroy(&s->wait_event);
     os_mutex_destroy(&s->wait_lock);
 }
 
@@ -164,16 +166,15 @@ PlatformWoken platform_wait(Engine& e, f64 seconds) {
     if (atomic_exchange(&s->woken, 0u, MO_ACQ_REL)) { ++s->waits.woken; return PlatformWoken::Wake; }
     int ended = s->waiter.wait ? s->waiter.wait(s->waiter.user, seconds) : -1;
     if (ended < 0) {
-        // No window to wait on: the condition, till woken or the time is up.
+        // No window to wait on: the event, till woken or the time is up. A set left from a
+        // wake already taken ends one wait early, and the loop waits out the rest.
         f64 until = time_now() + seconds;
-        os_mutex_lock(&s->wait_lock);
         for (;;) {
             if (atomic_load(&s->woken, MO_ACQUIRE)) break;
             f64 left = until - time_now();
             if (left <= 0.0) break;
-            os_cond_timed_wait(&s->wait_cond, &s->wait_lock, left);
+            os_event_wait(&s->wait_event, left);
         }
-        os_mutex_unlock(&s->wait_lock);
         ended = 0;
     }
     if (atomic_exchange(&s->woken, 0u, MO_ACQ_REL)) { ++s->waits.woken; return PlatformWoken::Wake; }
@@ -195,6 +196,8 @@ f64 platform_idle_time(Engine& e, f64 most) {
         // A request queued or on the ring moves only when the pump runs; a completion not
         // yet taken is somebody's to take on the next pass. Tasks wake the loop themselves.
         if (s->io.queued.len || s->io.in_flight || s->io.completions().len) ask = true;
+        if (s->members.len && platform_members_soon(e, *s)) ask = true; // standing members the thread cannot hear
+
     }
     if (ask && wait > kPlatformSoon) wait = kPlatformSoon;
     return wait;
@@ -203,10 +206,11 @@ f64 platform_idle_time(Engine& e, f64 most) {
 void platform_wake_state(PlatformState& st) {
     PlatformState* s = &st;
     atomic_store(&s->woken, 1u, MO_RELEASE);
-    // Under the lock, so a waiter between its check and its wait cannot miss the signal,
-    // and the window's waiter is not cleared while it is called.
+    // The event stays set for a wait that has yet to begin, so nothing is missed between a
+    // waiter's check and its wait. The lock keeps the window's waiter from being cleared
+    // while it is called.
+    os_event_set(&s->wait_event);
     os_mutex_lock(&s->wait_lock);
-    os_cond_signal(&s->wait_cond);
     if (s->waiter.wake) s->waiter.wake(s->waiter.user);
     os_mutex_unlock(&s->wait_lock);
 }

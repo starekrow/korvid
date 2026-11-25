@@ -14,13 +14,19 @@ struct PlatformState {
     struct SettingsStore* settings = nullptr;    // platform_settings, once asked for
     struct  Pump { PlatformPumpFn fn; void* user; } pumps[KV_PLATFORM_PUMP_MAX];
     u32     pump_count = 0;
-    // platform_wait's: the window's wait if one is set, else a condition of its own.
+    // platform_wait's: the window's wait if one is set, else an event of its own (os_event_wait: to the
+    // time asked for, where a condition's wait on Windows rounds up to 15.6 ms).
     PlatformWaiter waiter;
     PlatformWaits  waits;
     u32     woken = 0;      // atomic: platform_wake since the last wait took it
     OsMutex wait_lock;
-    OsCond  wait_cond;
+    OsEvent wait_event;
     struct WakeWatch* watch = nullptr; // platform_wake_set's thread and its sockets, once one is given
+    // What each owner is watched for (watch.cc): what it stated last (platform_watch), and
+    // what stands until it closes or the owner takes it back (platform_watch_add). The
+    // thread is given the two together.
+    struct WatchMember { const void* owner; Handle h; bool standing; };
+    Array<WatchMember> members;
     // Alerts (alert.h): the sources the last Input phase saw on entities, which the waker
     // states for a waiting loop; the waker is added when the first is seen.
     Array<Handle> alert_sources;

@@ -22,7 +22,8 @@ constexpr u32 kMaxWatched = 64;
 struct WakeWatch {
     PlatformState* s = nullptr;
     OsMutex  lock;
-    struct Entry { const void* owner; Handle fd; bool armed; };
+    // `once`: a child's exit, which happens once and stays readable after: heard once, never rearmed.
+    struct Entry { const void* owner; Handle fd; bool armed; bool once; };
     Entry    list[kMaxWatched];
     u32      count = 0;
     bool     fired = false; // something was left out of the poll since the last rearm
@@ -82,8 +83,9 @@ void watch_main(void* arg) {
 } // namespace
 
 bool wake_watch_supported() { return true; }
-// poll takes whatever is a descriptor that becomes readable; a file on a disk always is.
-bool wake_watch_takes(OsKind k) { return k == OsKind::Socket || k == OsKind::Pipe || k == OsKind::Notify; }
+// poll takes whatever is a descriptor that becomes readable, a child's exit (a pidfd, a
+// kqueue) among them; a file on a disk always is, so never.
+bool wake_watch_takes(OsKind k) { return k == OsKind::Socket || k == OsKind::Pipe || k == OsKind::Notify || k == OsKind::Process; }
 
 bool wake_watch_readable(Handle h) {
     if (!wake_watch_takes(os_handle_kind(h))) return false;
@@ -145,7 +147,7 @@ bool wake_watch_set(WakeWatch* w, const void* owner, const Handle* fds, u32 n) {
         for (u32 i = 0; i < w->count; ++i) if (w->list[i].owner == owner && w->list[i].fd == fds[k]) have = true;
         if (have) continue;
         if (w->count == kMaxWatched) { fits = false; continue; }
-        w->list[w->count++] = WakeWatch::Entry{owner, fds[k], true};
+        w->list[w->count++] = WakeWatch::Entry{owner, fds[k], true, os_handle_kind(fds[k]) == OsKind::Process};
         changed = true;
     }
     bool start = !w->running && w->count;
@@ -163,7 +165,7 @@ void wake_watch_rearm(WakeWatch* w) {
     os_mutex_lock(&w->lock);
     bool again = w->fired;
     if (again) {
-        for (u32 i = 0; i < w->count; ++i) w->list[i].armed = true;
+        for (u32 i = 0; i < w->count; ++i) if (!w->list[i].once) w->list[i].armed = true;
         w->fired = false;
     }
     os_mutex_unlock(&w->lock);

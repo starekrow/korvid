@@ -1,7 +1,8 @@
 // Korvid platform: child processes. Spawn one with an argument vector, poll it, read what
 // it writes, kill it. Nothing blocks: whoever owns a process polls it once a tick, as
-// with a socket, and names it in its PlatformWatch (module.h) so a waiting loop wakes for
-// its output. For tools (goldberg's converters); a game has no business here.
+// with a socket, and watches it (platform_watch_add, or a PlatformWatch: module.h) so a
+// waiting loop wakes for its output and its exit. For tools (goldberg's converters); a game
+// has no business here.
 //
 // The child's stdin is empty. Its stdout and stderr are pipes the owner must drain: a
 // child that fills one waits until it is read. It runs in a process group of its own (a
@@ -38,7 +39,8 @@ struct Process {
     bool exited = false;
     i32  code = 0;               // once exited: its status, or 128 + the signal that ended it
     char error[160] = {};        // why spawn failed
-    Handle process, group;      // the platform's own hold on the child and on what it started, where the OS gives one beyond the id
+    Handle process;             // the child as a handle its exit is heard by (OsKind::Process: a process handle, a pidfd, a kqueue); null where the OS gives none
+    Handle group;               // what it started, where the OS holds that apart (a job object on Windows)
     bool warned = false;         // a dev or debug build has warned of its use while not open
 
     // False with `error` set if the program cannot be started (not found, not executable,
@@ -65,8 +67,10 @@ struct Process {
     // after it has: read until both streams return -1.
     bool running();
     // Blocks until either stream has something (or has ended), or `seconds` pass: for a
-    // thread that owns the process and has nothing else to do (an IoQueue task). With both
-    // streams ended, it waits a millisecond at most, since only running() can tell the end.
+    // thread that owns the process and has nothing else to do (a tool_task, an IoQueue
+    // task). With both streams ended it waits for the exit where there is a `process`
+    // handle to wait on, and a millisecond at most where there is none, since only
+    // running() can tell the end then.
     void wait(f64 seconds);
     // Bytes read, 0 when nothing has arrived, -1 at the end of the stream.
     i32  read_out(void* buf, u32 cap);

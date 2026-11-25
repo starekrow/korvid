@@ -15,6 +15,12 @@
 #include <unistd.h>
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
+#include <sys/event.h> // kqueue: a child's exit as a descriptor
+#elif defined(__linux__)
+#include <sys/syscall.h> // pidfd_open
+#ifndef SYS_pidfd_open
+#define SYS_pidfd_open 434 // the same on every architecture; older headers lack the name
+#endif
 #endif
 
 // Linux (glibc) and macOS start a child with posix_spawn: a vfork underneath, so the
@@ -48,6 +54,30 @@ bool proc_pipe(int fds[2]) {
 }
 
 void proc_close(int& fd) { if (fd >= 0) close(fd); fd = -1; }
+
+// A descriptor that turns readable when `child` exits, for a waiting loop's watch
+// (PlatformWatch::add(Process)): a pidfd on Linux and Android (kernel 5.3 or later), a
+// kqueue holding the child's NOTE_EXIT on Apple. Nothing ever reads it: once the child has
+// gone it stays readable, and the watch hears it once. -1 where there is none (an older
+// kernel), and the exit then wakes nothing; the end of the child's pipes, which nearly
+// always comes with it, still does.
+int proc_exit_fd(pid_t child) {
+#if defined(__APPLE__)
+    int kq = kqueue();
+    if (kq < 0) return -1;
+    struct kevent ev;
+    EV_SET(&ev, child, EVFILT_PROC, EV_ADD | EV_ONESHOT, NOTE_EXIT, 0, nullptr);
+    if (kevent(kq, &ev, 1, nullptr, 0, nullptr) != 0) { close(kq); return -1; } // ESRCH: gone already, and its pipes have said so
+    fcntl(kq, F_SETFD, FD_CLOEXEC);
+    return kq;
+#elif defined(__linux__)
+    long fd = syscall(SYS_pidfd_open, child, 0); // close-on-exec from the start
+    return fd < 0 ? -1 : (int)fd;
+#else
+    (void)child;
+    return -1;
+#endif
+}
 
 i32 proc_read(Handle& fd, void* buf, u32 cap) {
     if (!os_handle_open(fd)) return -1;
@@ -204,6 +234,8 @@ bool Process::spawn(const ProcessDesc& desc, i32* err) {
     out_fd = os_handle_make(OsKind::Pipe, out[0], label);
     format(label, sizeof label, "stderr of %s", what);
     err_fd = os_handle_make(OsKind::Pipe, err[0], label);
+    format(label, sizeof label, "the exit of %s", what);
+    process = os_handle_make(OsKind::Process, proc_exit_fd(child), label); // null where the OS gives none
     exited = false;
     code   = 0;
     return true;
@@ -211,11 +243,15 @@ bool Process::spawn(const ProcessDesc& desc, i32* err) {
 
 void Process::wait(f64 seconds) {
     if (pid < 0) misuse_process(*this, "wait");
-    pollfd fds[2];
+    pollfd fds[3];
     nfds_t n = 0;
     if (os_handle_open(out_fd)) fds[n++] = pollfd{(int)os_handle_value(out_fd), POLLIN, 0};
     if (os_handle_open(err_fd)) fds[n++] = pollfd{(int)os_handle_value(err_fd), POLLIN, 0};
-    if (!n) seconds = seconds < 0.001 ? seconds : 0.001;
+    // The exit too, where the OS gives it as a descriptor: with both streams ended the wait
+    // is for it alone. Without one, a millisecond at most, since only running() can tell.
+    bool exit_heard = !exited && os_handle_open(process);
+    if (exit_heard) fds[n++] = pollfd{(int)os_handle_value(process), POLLIN, 0};
+    if (!n || (!exit_heard && !os_handle_open(out_fd) && !os_handle_open(err_fd))) seconds = seconds < 0.001 ? seconds : 0.001;
     int ms = seconds <= 0 ? 0 : (int)(seconds * 1000.0 + 0.999);
     poll(n ? fds : nullptr, n, ms);
 }
@@ -259,7 +295,9 @@ void Process::close() {
     v = os_handle_release(err_fd);
     if (v >= 0) ::close((int)v);
     pid = -1;
-    out_fd = err_fd = Handle{};
+    v = os_handle_release(process); // the exit's descriptor, where there was one
+    if (v >= 0) ::close((int)v);
+    out_fd = err_fd = process = Handle{};
     exited = false;
     code = 0;
     warned = false;

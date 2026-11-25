@@ -115,20 +115,23 @@ kv::u8 now_byte(kv::u32 i) { return (kv::u8)(i * 7u + (i >> 13)); }
 
 // The other end of a write_now, on a thread of its own: everything read, checked as it comes.
 struct NowReader {
-    kv::NetSocket* sock = nullptr;
-    kv::u32        got  = 0;
-    bool           same = true;
+    kv::NetSocket* sock  = nullptr;
+    kv::u64        want  = kNowBytes;
+    bool           check = true; // each byte against now_byte, for one write_now of kNowBytes
+    kv::u64        got   = 0;
+    bool           same  = true;
 };
 
 void now_read(void* arg) {
     NowReader& r = *(NowReader*)arg;
     kv::u8 buf[64 * 1024];
-    for (kv::u32 idle = 0; r.got < kNowBytes && idle < 10000;) {
+    for (kv::u32 idle = 0; r.got < r.want && idle < 10000;) {
         kv::i32 n = r.sock->read(buf, sizeof buf);
         if (n < 0) break;
         if (n == 0) { ++idle; kv::time_sleep(0.001); continue; }
         idle = 0;
-        for (kv::i32 i = 0; i < n; ++i) if (buf[i] != now_byte(r.got + (kv::u32)i)) r.same = false;
+        if (r.check)
+            for (kv::i32 i = 0; i < n; ++i) if (buf[i] != now_byte((kv::u32)r.got + (kv::u32)i)) r.same = false;
         r.got += (kv::u32)n;
     }
 }
@@ -173,6 +176,33 @@ void test_net_write_now(kv::TestCtx& c) {
     n = 0;
     for (u32 i = 0; i < 2000 && n < 2; ++i) { i32 m = server.read(buf + n, sizeof buf - (u32)n); if (m > 0) n += m; else time_sleep(0.001); }
     KV_CHECK(c, n == 2 && memcmp(buf, "ab", 2) == 0);
+
+    // A deadline, with a peer that is not reading: false when the time runs out, the
+    // connection still up, and what the kernel did not take queued. The kernel may take a
+    // good deal first (Windows' loopback grows its buffer), so it is asked until it stops.
+    {
+        bool took = true;
+        u64 given = 0;
+        f64 late = 0.0;
+        for (u32 i = 0; i < 32 && took; ++i) {
+            f64 t0 = time_now();
+            took = client.write_now(big, kNowBytes, 0.2);
+            late = time_now() - t0;
+            given += kNowBytes;
+        }
+        KV_CHECK(c, !took && client.is_open() && client.pending() > 0);
+        KV_CHECK(c, late >= 0.19 && late < 1.0);
+        // A reader comes: the queue goes on where it stopped, and every byte arrives.
+        NowReader drain;
+        drain.sock = &server;
+        drain.want = given;
+        drain.check = false;
+        OsThread dt;
+        KV_CHECK(c, os_thread_start(&dt, now_read, &drain));
+        KV_CHECK(c, client.write_now(nullptr, 0) && client.pending() == 0);
+        os_thread_join(&dt);
+        KV_CHECK(c, drain.got == given);
+    }
 
     // The peer gone: false, with the reason, rather than waiting for ever. True only says
     // the kernel took the bytes, and it may take a buffer's worth before the peer's reset

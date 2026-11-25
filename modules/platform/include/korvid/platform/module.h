@@ -87,14 +87,16 @@ void platform_set_waiter(Engine& e, const PlatformWaiter* w);
 PlatformWaits platform_waits(Engine& e);
 
 // ---- What a waiting loop is woken by ----------------------------------------------------
-// One way to say it, whatever the thing is and whatever the OS can do about it (KR26). An
-// owner (a module with a waker: engine_add_watched_waker, the owner its `user`) fills a
-// PlatformWatch with what it is waiting on each time its waker is asked, and hands it over:
+// One way to say it, whatever the thing is and whatever the OS can do about it (KR26). Two
+// ways to hand it over. A standing watch (platform_watch_add, below): each thing added
+// once, watched until it closes, no waker. Or a stated one: an owner (a module with a
+// waker: engine_add_watched_waker, the owner its `user`) fills a PlatformWatch with what it
+// is waiting on each time its waker is asked, and hands it over:
 //
 //     PlatformWatch w(e);
 //     w.add(listener);  w.add(sock);  w.add(watcher);  w.add(child);  w.add(queue);
 //     w.at(next_retry);                      // and a time, if it has one
-//     platform_watch(e, &me, w);             // replaces what `me` said before
+//     platform_watch(e, &me, w);             // replaces what `me` stated before
 //
 // and the loop sleeps until one of them has something. How each is watched is the
 // platform's business, not the owner's:
@@ -103,6 +105,8 @@ PlatformWaits platform_waits(Engine& e);
 //                          (ReadDirectoryChangesW, FSEvents); a polled root, by its next walk
 //   a Process's pipes      that thread where a pipe can be polled (POSIX); elsewhere asked
 //                          again in kPlatformSoon seconds
+//   a Process's exit       that thread, as a pidfd (Linux, Android) or a kqueue (Apple); a
+//                          wait of the thread pool's on Windows. Heard once.
 //   an IoQueue             its task workers wake the loop as each finishes; reads in
 //                          flight are asked for again soon (the pump collects them)
 //   a time                 engine_want_wake_at
@@ -115,9 +119,8 @@ struct NetListener;
 struct NetSocket;
 struct FsWatcher;
 struct Process;
-// How long "soon" is: one pass of a loop that polls. With no window the wait is a
-// condition's, which Windows rounds up to its scheduler tick (15.6 ms unless something
-// raised the timer resolution): there, soon comes about 60 times a second, not 250.
+// How long "soon" is: one pass of a loop that polls, 250 a second. The wait keeps to it on
+// every OS (os_event_wait).
 constexpr f64 kPlatformSoon = 0.004;
 
 struct PlatformWatch {
@@ -125,8 +128,10 @@ struct PlatformWatch {
     void add(const NetListener& l);  // a connection waiting to be accepted
     void add(const NetSocket& s);    // bytes to read; and soon, while what was written is still queued
     void add(FsWatcher& w);          // news for its poll(): sets the watcher's wake, and takes its due()
-    // Output to read on either pipe, or a pipe's end. Not the child's exit: once both pipes
-    // have ended, an owner waiting for it asks soon() until running() says it is over.
+    // Output to read on either pipe, a pipe's end, and the child's exit, where the OS gives a
+    // handle for it (every desktop OS; Linux from 5.3). Where it gives none, soon once both
+    // pipes have ended, since only running() can tell then. Nothing once running() has
+    // seen the end.
     void add(const Process& p);
     void add(IoQueue& q);            // a completion to take: sets the queue's wake
     // A handle of the owner's own. Watched where this OS can watch its kind; asked again
@@ -141,10 +146,39 @@ struct PlatformWatch {
     u32     count = 0;
     f64     due   = 0.0;             // the earliest time asked for; 0: none
 };
-// States what `owner` is waiting on, replacing what it said before. From the owner's
-// waker, on the loop's thread.
+// States what `owner` is waiting on, replacing what it said before (its standing members,
+// below, stay). From the owner's waker, on the loop's thread.
 void platform_watch(Engine& e, const void* owner, const PlatformWatch& w);
-// Forgets it: at the owner's shutdown, before what it watched is closed.
+// Forgets all of it, stated and standing: at the owner's shutdown, before what it watched
+// is closed.
 void platform_unwatch(Engine& e, const void* owner);
+
+// ---- A standing watch -------------------------------------------------------------------
+// What `owner` waits on until it closes or the owner takes it back: added once, with no
+// waker and nothing stated again each pass. A listener, a socket, a child (its pipes and
+// its exit) or a handle of the owner's own. What it is waiting for wakes a waiting loop as
+// a stated watch's would, and the tick that follows is the owner's systems' to read it in:
+// a tool that waits, or a game paced on demand, needs only these and a system.
+//
+//     s.listener.open(port);   platform_watch_add(e, &s, s.listener);
+//     ...accepted:             s.sock.adopt(fd);  platform_watch_add(e, &s, s.sock);
+//     ...started:              s.child.spawn(d);  platform_watch_add(e, &s, s.child);
+//     ...at shutdown:          platform_unwatch(e, &s);  then close them
+//
+// Closing a thing ends its membership: its handle goes stale and is let go before the next
+// wait, so a closed socket's place is free for another. What the platform cannot watch on
+// an OS (a pipe on Windows) and a socket with output still queued are asked about again
+// in kPlatformSoon, as a stated watch's are. Members share the 64 handles of every owner's
+// sets. A stated watch (platform_watch) is for an owner whose set is worked out afresh
+// each pass, or that wants a time (PlatformWatch::at); an owner may have both. Loop's thread.
+void platform_watch_add(Engine& e, const void* owner, const NetListener& l);
+void platform_watch_add(Engine& e, const void* owner, const NetSocket& s);
+void platform_watch_add(Engine& e, const void* owner, const Process& p);
+void platform_watch_add(Engine& e, const void* owner, Handle h);
+// Takes one back before it closes; nothing if it is not a member.
+void platform_watch_remove(Engine& e, const void* owner, const NetListener& l);
+void platform_watch_remove(Engine& e, const void* owner, const NetSocket& s);
+void platform_watch_remove(Engine& e, const void* owner, const Process& p);
+void platform_watch_remove(Engine& e, const void* owner, Handle h);
 
 } // namespace kv

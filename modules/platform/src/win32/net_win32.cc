@@ -5,6 +5,7 @@
 #include "korvid/platform/net.h"
 #include "../os_err.h"
 #include "../misuse.h"
+#include "../net_internal.h"
 #include "../os_handle_table.h"
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
@@ -186,51 +187,35 @@ bool NetSocket::write(const void* data, u32 size) {
     if (!os_handle_open(fd) || closed) { misuse_socket(*this, "write"); return false; }
     if (out.len + size > out_limit) { dropped += size; return false; }
     memcpy(out.push_n(size), data, size);
+    net_mark_queued(*this);
     return true;
 }
 
-namespace {
-// Until `s` can be written or a quarter-second passes: a connect settled either way, room
-// in the kernel's buffer, or an error for the next send to find.
-void wait_writable(SOCKET s) {
+// write_now's two parts (net_internal.h, net_now.cc).
+NetSend net_send_some(NetSocket& sock, const u8* data, u32 size, u32* sent) {
+    *sent = 0;
+    int n = ::send(socket_of(sock.fd), (const char*)data, (int)(size > 0x7FFFFFFFu ? 0x7FFFFFFFu : size), 0);
+    if (n > 0) {
+        *sent = (u32)n;
+        sock.bytes_out += (u64)n;
+        os_handle_count(sock.fd, 0, (u64)n);
+        return NetSend::Some;
+    }
+    int e = WSAGetLastError();
+    if (would_block(e)) return NetSend::Again;
+    sock.error = errno_from_wsa(e);
+    sock.closed = true;
+    return NetSend::Over;
+}
+
+void net_wait_writable(NetSocket& sock, f64 seconds) {
+    SOCKET s = socket_of(sock.fd);
     fd_set can_write, failed;
     FD_ZERO(&can_write); FD_ZERO(&failed);
     FD_SET(s, &can_write); FD_SET(s, &failed);
-    timeval quarter{0, 250000};
-    select(0, nullptr, &can_write, &failed, &quarter);
-}
-
-// All of `data` to the kernel, waiting for room as it goes; false when the connection is over.
-bool send_waiting(NetSocket& sock, const u8* data, u32 size) {
-    SOCKET s = socket_of(sock.fd);
-    u32 sent = 0;
-    while (sent < size) {
-        int n = ::send(s, (const char*)data + sent, (int)(size - sent), 0);
-        if (n > 0) {
-            sent += (u32)n;
-            sock.bytes_out += (u64)n;
-            os_handle_count(sock.fd, 0, (u64)n);
-            continue;
-        }
-        int e = WSAGetLastError();
-        if (would_block(e)) { wait_writable(s); continue; }
-        sock.error = errno_from_wsa(e);
-        sock.closed = true;
-        return false;
-    }
-    return true;
-}
-} // namespace
-
-bool NetSocket::write_now(const void* data, u32 size) {
-    if (!os_handle_open(fd) || closed) { misuse_socket(*this, "write_now"); return false; }
-    while (link() == NetLink::Connecting) wait_writable(socket_of(fd));
-    if (closed) return false; // the connect failed: `error` says why
-    if (out.len) {
-        if (!send_waiting(*this, out.data, out.len)) return false;
-        out.len = 0;
-    }
-    return size == 0 || send_waiting(*this, (const u8*)data, size);
+    long us = seconds <= 0.0 ? 0 : (long)(seconds * 1e6);
+    timeval t{us / 1000000, us % 1000000};
+    select(0, nullptr, &can_write, &failed, &t);
 }
 
 bool NetSocket::write_str(const char* s) { return write(s, (u32)strlen(s)); }
@@ -253,6 +238,7 @@ void NetSocket::flush() {
     if (sent) {
         memmove(out.data, out.data + sent, out.len - sent);
         out.len -= sent;
+        net_mark_queued(*this);
     }
 }
 

@@ -41,6 +41,24 @@ bool os_cond_timed_wait(OsCond* c, OsMutex* m, f64 seconds);
 void os_cond_signal(OsCond* c);
 void os_cond_broadcast(OsCond* c);
 
+// ---- events ---------------------------------------------------------------------------
+// A flag that one thread waits on and any thread sets. It resets itself: a set wakes the
+// wait under way, or the next one to begin, and that wait takes it. Its timed wait keeps
+// to the time asked for to well under a millisecond on every OS: on Windows a
+// high-resolution waitable timer, where a condition variable's wait rounds up to the
+// scheduler's tick (15.6 ms unless something raised the timer resolution). For a loop
+// that sleeps a few milliseconds at a time and must wake at once when told. Initialized in
+// place: not moved or copied until destroyed.
+struct OsEvent { alignas(8) u8 storage[160]; };
+void os_event_init(OsEvent* ev);
+void os_event_destroy(OsEvent* ev);
+// Sets it. Any thread; not a signal handler.
+void os_event_set(OsEvent* ev);
+// Waits until it is set or `seconds` pass, whichever is first: true if it was set (it is
+// clear again now). 0 or less does not wait, and takes a set that is already there. One
+// thread waits at a time.
+bool os_event_wait(OsEvent* ev, f64 seconds);
+
 // ---- threads --------------------------------------------------------------------------
 // A thread's body: runs on the new thread with the `arg` given to os_thread_start; the
 // thread ends when it returns.

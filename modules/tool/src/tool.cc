@@ -14,18 +14,61 @@
 #include <string.h>
 #include "korvid/core/time.h"
 #include "korvid/core/os_process.h"
+#include "korvid/core/os_thread.h"
 
 namespace kv {
 
 namespace {
 
+// A tool_task: its thread reads fn, arg and ctl from here, so it stays where it is (its
+// own allocation) until the thread is joined.
+struct ToolTask {
+    Engine*     engine = nullptr;
+    ToolTaskFn  fn     = nullptr;
+    void*       arg    = nullptr;
+    ToolTaskCtl ctl;
+    OsThread    thread;
+    u32         done   = 0; // atomic: fn has returned, and `code` is what it said
+    i32         code   = 0;
+    char        name[48] = {};
+};
+constexpr u32 k_max_tasks = 8;
+
 struct ToolState {
     bool running  = false; // a tool_run is driving this engine
     bool finished = false;
     int  code     = 0;
+    ToolTask* tasks[k_max_tasks] = {};
+    u32       task_count = 0;
 };
 
 ToolState* state(Engine& e) { return engine_module_state_as<ToolState>(e, "tool"); }
+
+void task_main(void* arg) {
+    ToolTask& t = *(ToolTask*)arg;
+    t.code = t.fn(t.arg, t.ctl);
+    atomic_store(&t.done, 1u, MO_RELEASE);
+    platform_wake(*t.engine); // the loop's wait ends: it reaps this at its next pass
+}
+
+// The tasks that have returned, joined and let go, each one's code a finish. With
+// `all`, every task is asked to stop and waited for: the run is ending.
+void reap_tasks(Engine& e, ToolState& s, bool all) {
+    for (u32 i = 0; i < s.task_count;) {
+        ToolTask* t = s.tasks[i];
+        if (all) atomic_store(&t->ctl.flag, 1u, MO_RELAXED);
+        if (!all && !atomic_load(&t->done, MO_ACQUIRE)) { ++i; continue; }
+        os_thread_join(&t->thread);
+        if (!s.finished) {
+            KV_INFO("tool", "task '%s' returned %d", t->name, (int)t->code);
+            tool_finish(e, t->code);
+        }
+        mem_free(t);
+        s.tasks[i] = s.tasks[--s.task_count];
+    }
+    if (!all && s.finished)
+        for (u32 i = 0; i < s.task_count; ++i) atomic_store(&s.tasks[i]->ctl.flag, 1u, MO_RELAXED); // the run is ending: they should too
+}
 
 bool tool_startup(Engine&, ModuleInstance& self) {
     ToolState* s = arena_push<ToolState>(self.arena);
@@ -80,6 +123,26 @@ void tool_finish(Engine& e, int code) {
 bool tool_running(Engine& e) {
     ToolState* s = state(e);
     return s && s->running && !s->finished;
+}
+
+bool tool_task(Engine& e, ToolTaskFn fn, void* arg, const char* name) {
+    ToolState* s = state(e);
+    if (!s || !s->running || s->finished || !fn) return false;
+    if (s->task_count == k_max_tasks) { KV_ERROR("tool", "tool_task: %u tasks are running already", k_max_tasks); return false; }
+    ToolTask* t = (ToolTask*)mem_alloc(sizeof(ToolTask));
+    if (!t) return false;
+    *t = ToolTask{};
+    t->engine = &e;
+    t->fn     = fn;
+    t->arg    = arg;
+    format(t->name, sizeof t->name, "%s", name ? name : "task");
+    if (!os_thread_start(&t->thread, task_main, t)) {
+        KV_ERROR("tool", "tool_task: no thread for '%s'", t->name);
+        mem_free(t);
+        return false;
+    }
+    s->tasks[s->task_count++] = t;
+    return true;
 }
 
 // What a tool gives its Work cycle between two ticks: enough for a slice of real work, little
@@ -167,14 +230,16 @@ int tool_run(int argc, char** argv, Span<const ModuleDesc* const> modules, const
             // The work runs in the tool's systems, over as many ticks as it takes. A tick
             // runs when something asks for one, and the loop sleeps when nothing does: the
             // same contract a game's modules have with the frame loop, so a tool that waits
-            // on a socket or a child uses no CPU while it waits, once its module names them
-            // in a watched waker's PlatformWatch.
+            // on a socket or a child uses no CPU while it waits, once its module watches them
+            // (a standing watch, or a watched waker's PlatformWatch).
             // What asks:
-            //   - the platform's queue having requests on their way or completions to take;
+            //   - the platform's queue with reads or writes on their way or completions to take;
             //   - Work pending (docs/design/cycles.md);
             //   - a module: engine_want_ticks, each tick it wants the next;
-            //   - a waker (engine_add_watched_waker) saying something came, the time it
-            //     asked for (PlatformWatch::at, soon) arriving, or what it watches stirring;
+            //   - a tool_task returning (its thread wakes the loop, and the pass reaps it);
+            //   - a standing watch stirring, or a waker (engine_add_watched_waker) saying
+            //     something came, the time it asked for (PlatformWatch::at, soon) arriving,
+            //     or what it watches stirring;
             //   - the heartbeat, k_heartbeat after the last tick, so a module that asked
             //     for nothing still runs, slowly enough to be noticed.
             // --max-ticks is a bounded run for a test: it ticks without waiting.
@@ -184,10 +249,14 @@ int tool_run(int argc, char** argv, Span<const ModuleDesc* const> modules, const
             bool woke = true; // the first pass ticks: the command has just started its work
             f64 last_tick = time_now();
             while (!s->finished) {
+                reap_tasks(e, *s, false); // a task that returned is a finish
+                if (s->finished) break;
                 if (profiling) prof_frame(ticks);
                 platform_pump(e);
                 f64 now = time_now();
-                bool io_busy = io && (io->pending() || io->completions().len);
+                // Reads queued or on their way move only when the pump runs; a task on the
+                // queue's workers wakes the loop itself as it finishes, so it asks nothing.
+                bool io_busy = io && (io->queued.len || io->in_flight || io->completions().len);
                 bool tick = woke || max_ticks || e.ticks_wanted || io_busy || engine_work_pending(e) || now - last_tick >= k_heartbeat;
                 if (engine_wake(e)) tick = true; // the wakers: what came, and what each waits on next
                 if (!tick) {
@@ -204,11 +273,12 @@ int tool_run(int argc, char** argv, Span<const ModuleDesc* const> modules, const
                 ++ticks;
                 if (max_ticks && ticks >= max_ticks) { KV_ERROR("tool", "not finished after %llu ticks", (unsigned long long)ticks); break; }
                 // A tick that only waits on the disk yields the core briefly.
-                if (io && io->pending() && io->completions().len == 0 && !engine_work_pending(e)) time_sleep(0.0001);
+                if (io && (io->queued.len || io->in_flight) && io->completions().len == 0 && !engine_work_pending(e)) time_sleep(0.0001);
             }
             print_flush_lines();
             code = s->finished ? s->code : 2;
         }
+        reap_tasks(e, *s, true); // asked to stop, and waited for: nothing of theirs outlives the run
         s->running = false;
         engine_shutdown(e);
     }
