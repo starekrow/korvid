@@ -85,6 +85,14 @@ bool wake_watch_supported() { return true; }
 // poll takes whatever is a descriptor that becomes readable; a file on a disk always is.
 bool wake_watch_takes(OsKind k) { return k == OsKind::Socket || k == OsKind::Pipe || k == OsKind::Notify; }
 
+bool wake_watch_readable(Handle h) {
+    if (!wake_watch_takes(os_handle_kind(h))) return false;
+    i64 v = os_handle_value(h);
+    if (v < 0) return false;
+    struct pollfd p = {(int)v, POLLIN, 0};
+    return poll(&p, 1, 0) > 0 && p.revents != 0; // data, a connection, or the end
+}
+
 WakeWatch* wake_watch_create(PlatformState& s) {
     WakeWatch* w = new (mem_alloc(sizeof(WakeWatch))) WakeWatch{};
     w->s = &s;

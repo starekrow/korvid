@@ -217,8 +217,13 @@ bool os_handle_info(Handle h, OsHandleInfo* out) {
     out->opened_at = s->opened_at;
     out->bytes_in  = atomic_load(&s->in, MO_RELAXED);
     out->bytes_out = atomic_load(&s->out, MO_RELAXED);
+    // Who opened it: the module whose code was running. Outside any (the program's own
+    // main, a worker of the queue's, a thread of its own) it is the program's: its main
+    // module, the last of the list, which is the executable's own.
     const char* const* names = mem_module_names();
-    if (s->by && names && (u32)(s->by - 1) < mem_module_name_count() && names[s->by - 1]) format(out->by, sizeof out->by, "%s", names[s->by - 1]);
+    u32 count = mem_module_name_count();
+    u32 by = s->by ? (u32)(s->by - 1) : count ? count - 1 : ~0u;
+    if (names && by < count && names[by]) format(out->by, sizeof out->by, "%s", names[by]);
 #endif
     return true;
 }

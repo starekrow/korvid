@@ -10,6 +10,8 @@
 #include "os_file.h"
 #include "platform_state.h"
 #include "wake_watch.h"
+#include "platform_parts.h"
+#include "korvid/platform/alert.h"
 
 namespace kv {
 
@@ -32,6 +34,7 @@ bool platform_startup(Engine&, ModuleInstance& self) {
     if (!s) return false;
     self.set_state(s);
     os_mutex_init(&s->wait_lock);
+    s->alert_sources.alloc = &self.general;
     os_cond_init(&s->wait_cond);
     if (!os_bundle_archive() && !os_base_path(s->base_path, sizeof s->base_path)) {
         KV_WARN("platform", "the executable's directory is unknown; assets resolve from the working directory");
@@ -76,9 +79,10 @@ bool platform_startup(Engine&, ModuleInstance& self) {
     return true;
 }
 
-void platform_shutdown(Engine&, ModuleInstance& self) {
+void platform_shutdown(Engine& e, ModuleInstance& self) {
     PlatformState* s = self.state_as<PlatformState>();
     if (!s) return;
+    platform_alerts_shutdown(e, *s); // before the watch thread goes
     if (s->pump_count) KV_WARN("platform", "%u pump hooks still added at shutdown", s->pump_count);
     wake_watch_destroy(s->watch); // the thread stopped before what it wakes goes
     s->watch = nullptr;
@@ -91,7 +95,16 @@ void platform_shutdown(Engine&, ModuleInstance& self) {
     os_mutex_destroy(&s->wait_lock);
 }
 
+// Alertable is not simulation state: what an alerted entity reads is from outside the run.
+constinit const FieldDesc k_alertable_fields[] = {KV_FIELDS(Alertable, source, alerts)};
+constinit const ComponentDesc k_components[] = {KV_COMPONENT(Alertable, k_alertable_fields, CompCosmetic)};
+constinit const FieldDesc k_alerted_fields[] = {KV_FIELDS(Alerted, entity, source)};
+constinit const EventTypeDesc k_events[] = {KV_EVENT_EX(Alerted, k_alerted_fields, EvStaleOk)}; // a source closed, or an entity gone, since: dropped
+constinit const CliMountDesc k_mounts[] = {{.path = "/dev", .list = platform_dev_list, .describe = platform_dev_describe}};
+
 constinit const SystemDesc k_systems[] = {
+    {.name = "platform.alerts", .phase = Phase::Input, .fn = platform_alerts, .writes = "*[Alertable].Alertable", .emits = "Alerted",
+     .main_thread = true, .runs = RunWhen::Always},
     {.name = "platform.io_idle", .phase = Phase::Work, .fn = io_idle, .main_thread = true}, // the full name: nothing to intern
 };
 
@@ -99,7 +112,10 @@ constinit const SystemDesc k_systems[] = {
 
 KV_MODULE_DEFINE(platform_module) = {
     .name     = "platform",
+    .events   = k_events,
+    .components = k_components,
     .systems  = k_systems,
+    .mounts   = k_mounts,
     .startup  = platform_startup,
     .shutdown = platform_shutdown,
     .memory   = {.reserve = 64 * 1024},

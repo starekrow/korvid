@@ -21,6 +21,10 @@ struct PlatformState {
     OsMutex wait_lock;
     OsCond  wait_cond;
     struct WakeWatch* watch = nullptr; // platform_wake_set's thread and its sockets, once one is given
+    // Alerts (alert.h): the sources the last Input phase saw on entities, which the waker
+    // states for a waiting loop; the waker is added when the first is seen.
+    Array<Handle> alert_sources;
+    bool    alert_waker = false;
 };
 
 } // namespace kv

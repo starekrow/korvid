@@ -105,6 +105,24 @@ bool wake_watch_supported() { return true; }
 // WSAPoll takes sockets and nothing else: a pipe's or a console's handle is not one.
 bool wake_watch_takes(OsKind k) { return k == OsKind::Socket; }
 
+bool wake_watch_readable(Handle h) {
+    OsKind kind = os_handle_kind(h);
+    i64 v = os_handle_value(h);
+    if (v < 0) return false;
+    if (kind == OsKind::Socket) {
+        fd_set can_read;
+        FD_ZERO(&can_read);
+        FD_SET((SOCKET)v, &can_read);
+        timeval none{0, 0};
+        return select(0, &can_read, nullptr, nullptr, &none) > 0;
+    }
+    if (kind == OsKind::Pipe) {
+        DWORD avail = 0;
+        return !PeekNamedPipe((HANDLE)(intptr_t)v, nullptr, 0, nullptr, &avail, nullptr) || avail > 0; // data, or the end
+    }
+    return false;
+}
+
 WakeWatch* wake_watch_create(PlatformState& s) {
     WSADATA data;
     if (WSAStartup(MAKEWORD(2, 2), &data) != 0) { // counted: the destroy's WSACleanup gives it back

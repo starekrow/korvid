@@ -131,3 +131,50 @@ What follows from it, and is its own step: an entity can name an OS handle in a
 component and be told when it stirs, as an input event the loop records (so a replay
 sees the same wake on the same tick), since the handle is now something a component can
 hold and the engine can check.
+
+## Alerts
+
+Nov 25, 2026. The step the section above left: an entity names an OS handle in a
+component (`Alertable`, `korvid/platform/alert.h`) and is told, by an `Alerted` event in the
+Input phase, when there is something to read on it. One system of the platform's asks the
+OS, without waiting, about every Alertable's source each tick, and states those sources
+as a `PlatformWatch` of its own, so a loop asleep is woken for them. A game registers no
+waker and states no watch.
+
+- **Level, not edge.** An entity is alerted every tick its handle has something unread.
+  An edge would need the platform to know what the entity has read, which it does not.
+- **Stale is silent.** A closed handle no longer resolves, so its entity is skipped: no
+  unsubscribe, no error.
+- **No existing entity type is alertable.** It is a component a game puts on a ktable of
+  its own. Nothing in the engine's modules uses it.
+
+### An alert is a wake, and a replay does not hold it
+
+What an alerted entity reads from its handle comes from outside the run: a peer, a child,
+a clock nobody recorded. A recording (`--record`) holds the named actions and the state
+hashes, and nothing of this. So, for now:
+
+- `Alertable` is a cosmetic component: it is never hashed (a slot in the OS handle table
+  is not the same number from run to run), and a sim system that reads it fails
+  `engine_init`.
+- `Alerted` is not recorded. In a replay there is no socket; nothing is alerted.
+- A game whose simulation changes because of what an alerted entity read will not
+  replay. The engine keeps the component out of the sim; it cannot keep a handler from
+  writing sim state with what it read. That is the author's to hold to, and is why this
+  is fit for tools, UI, a debug channel, a lobby before the run starts, and not yet for
+  gameplay that must replay.
+
+**To do: an option to carry the data.** The fix is for the alert to bring what arrived
+with it, and for the recording to keep that:
+
+- the platform reads from the handle itself (up to a per-alert limit, the rest next
+  tick) and the event carries the bytes; the entity never touches the handle;
+- the frame loop records each such event as a new record type in the `.kvr` (the tick,
+  the entity by kind name and slot, the bytes), and on replay delivers the same event on
+  the same tick with no handle behind it;
+- writes go the other way through the platform too, and are dropped in a replay;
+- with that, the component can be sim state, and the restriction above goes.
+
+It is opt-in per Alertable (a flag: "deliver the data"), since a tool or a UI channel has
+no use for the copy. Old recordings stay readable: they hold no such records. This is the
+shape of entity IPC as well: two entities, or two programs, exchanging recorded messages.

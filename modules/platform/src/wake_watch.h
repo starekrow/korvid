@@ -25,6 +25,11 @@ bool platform_watches_kind(Engine& e, OsKind kind);
 bool       wake_watch_supported();
 // Whether a handle of this kind can be watched here: wake_watch_set is given only those.
 bool       wake_watch_takes(OsKind k);
+// Whether the handle has something to read now, asked of the OS without waiting: data, a
+// connection to accept, or the end. False for a handle that is not open, and for a kind
+// that is never read (a file, a process). Any kind that can be, whether or not the
+// watching thread can take it: this is how a pipe on Windows is looked at.
+bool       wake_watch_readable(Handle h);
 // Null when the OS cannot watch. The thread starts at the first socket given.
 WakeWatch* wake_watch_create(PlatformState& s);
 void       wake_watch_destroy(WakeWatch* w); // stops and joins the thread

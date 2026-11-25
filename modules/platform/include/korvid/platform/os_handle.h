@@ -40,7 +40,7 @@ inline bool os_handle_open(Handle h) { return os_handle_kind(h) != OsKind::None;
 struct OsHandleInfo {
     OsKind kind = OsKind::None;
     char   what[160] = {};   // what was opened: a path, "listener 127.0.0.1:4100", a command
-    char   by[32] = {};      // the module whose code opened it; "" outside any
+    char   by[32] = {};      // the module whose code opened it; outside any, the program's main module (the executable's own); "" with no engine
     f64    opened_at = 0.0;  // time_now's clock
     u64    bytes_in = 0, bytes_out = 0; // read and written through it so far
 };

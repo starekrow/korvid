@@ -134,6 +134,19 @@ cannot be watched by mistake: a file's is refused with an error line. A handle c
 while it is watched is stale, and left out: its number is never polled for whatever has
 it next.
 
+**Alerts** (`alert.h`). An entity with an `Alertable` component names an OS handle, and is
+sent an `Alerted` event in the Input phase every tick that handle has something to read;
+a loop asleep is woken for it. The platform watches on the entity's behalf: the game
+registers no waker. A closed handle is stale and asks for nothing. An alert is a wake,
+not data: `Alertable` is a cosmetic component and nothing of it is recorded, so it is for
+tools, UI and debug channels, not for gameplay that must replay (`docs/design/handles.md`,
+"Alerts", has what would change that).
+
+**Looking at it.** In a program with the CLI, `ls /dev/handles` lists the kinds of OS
+handle, `ls /dev/handles/socket` each open socket with what it is, who
+opened it and the bytes each way, and `print /dev/handles/file/7` one of them in full.
+A handle opened outside any module's code is the program's main module's.
+
 ## Using it
 
 **Declare the dependency**: `deps = { "core", "platform", ... }` in `module.lua`. The
@@ -292,6 +305,13 @@ Header `korvid/platform/os_handle.h`:
 | `os_handle_info(h, &info)`, `OsHandleInfo` | function, record | dev and debug builds: what was opened (`what`), by which module (`by`), when, and `bytes_in`, `bytes_out` |
 | `os_handles_open()`, `os_handles_each(fn, user)` | functions | how many the process has open through the platform, and each in turn |
 
+Header `korvid/platform/alert.h`:
+
+| name | kind | what |
+|---|---|---|
+| `Alertable` | component (cosmetic) | `source` (the OS handle to hear about; null: none), `alerts` (how many so far) |
+| `Alerted` | event | `entity`, `source`: the handle has something to read; every tick it has, in the Input phase |
+
 Headers `korvid/platform/fs_watch.h`, `process.h`, `stdin.h`:
 
 | name | kind | what |
@@ -328,6 +348,9 @@ What the module registers with the engine:
 |---|---|---|
 | `platform.io` | handle kind | an I/O request; `kv_handle_describe` prints its state and path |
 | `os.file`, `os.socket`, `os.pipe`, `os.notify`, `os.process` | handle kinds | what the OS has open, registered once for the process at the first one opened; `kv_handle_describe` prints what it is and, in dev and debug, who opened it and the bytes each way |
+| `platform.alerts` | system, phase Input, main thread | asks the OS about every `Alertable`'s source and emits `Alerted` |
+| `Alertable`, `Alerted` | component, event | `alert.h` |
+| `/dev` | CLI mount | `/dev/handles/<kind>/<slot>`: the open OS handles |
 | `platform.io_idle` | system, phase Work, main thread | serves idle reads and what the pumps held back, in the time the cycle has |
 
 ## Behaviour worth knowing
