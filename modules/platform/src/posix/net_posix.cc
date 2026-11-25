@@ -109,7 +109,7 @@ Handle NetListener::accept() {
 #endif
     if (c < 0) {
         if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) KV_WARN("net", "accept: %s", os_error_text(errno));
-        return -1;
+        return Handle{};
     }
     char what[48];
     kv::format(what, sizeof what, "accepted on :%u", port);
