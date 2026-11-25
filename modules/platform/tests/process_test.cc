@@ -4,6 +4,7 @@
 #include "korvid/core/test.h"
 #include "korvid/core/time.h"
 #include <stdio.h>
+#include <errno.h>
 #include <string.h>
 
 namespace {
@@ -124,20 +125,49 @@ void test_process(kv::TestCtx& c) {
     KV_CHECK(c, !p.is_open() && time_now() - t0 < 2.0);
 
 #if defined(_WIN32)
-    // A batch file through cmd /c gets its arguments as they were given: the last one keeps
-    // its closing quote (cmd strips the line's last quote unless it is asked with /s), and
-    // an & stays inside its argument.
-    char bat[600];
+    // A batch file is the shell's to run, on a line written by the shell's rules: its
+    // arguments arrive as they were given, the last one's closing quote kept (cmd strips
+    // the line's last quote unless it is asked with /s, which shell does), an & inside its
+    // argument.
+    char bat[600], bat_line[900];
     snprintf(bat, sizeof bat, "%s/args.bat", dir);
     const char* args_bat = "@echo off\r\necho 1=%1 2=%2\r\n";
     KV_CHECK(c, io_write_file(bat, args_bat, strlen(args_bat)));
-    const char* via_cmd[] = {"cmd", "/c", bat, "salt & pepper", "two"};
-    d = ProcessDesc{};
-    d.argv = Span<const char* const>(via_cmd, 5);
+    snprintf(bat_line, sizeof bat_line, "\"%s\" \"salt & pepper\" \"two\"", bat);
     out.len = err.len = 0;
-    KV_CHECK(c, p.spawn(d) && run_out(p, out, err) && p.code == 0 && strcmp(out.data, "1=\"salt & pepper\" 2=\"two\"\r\n") == 0);
+    KV_CHECK(c, p.shell(bat_line) && run_out(p, out, err) && p.code == 0 && strcmp(out.data, "1=\"salt & pepper\" 2=\"two\"\r\n") == 0);
+    p.close();
+    // The shell's own words work in a line, and mean nothing in an argument vector: cmd's
+    // builtin echo, two commands joined, an exit code.
+    out.len = err.len = 0;
+    KV_CHECK(c, p.shell("echo one&& echo two& exit 7") && run_out(p, out, err) && p.code == 7 && strcmp(out.data, "one\r\ntwo\r\n") == 0);
+    p.close();
+#else
+    out.len = err.len = 0;
+    KV_CHECK(c, p.shell("echo one && echo \"two  words\"; exit 7") && run_out(p, out, err) && p.code == 7 && strcmp(out.data, "one\ntwo  words\n") == 0);
     p.close();
 #endif
+    // The shell is given the directory and the environment as spawn is, and a failure's errno.
+    {
+        ProcessDesc sd;
+        const char* envs[] = {"KV_SHELL_TEST=from the parent"};
+        sd.env = Span<const char* const>(envs, 1);
+        sd.cwd = dir;
+        out.len = err.len = 0;
+#if defined(_WIN32)
+        KV_CHECK(c, p.shell("echo %KV_SHELL_TEST%", sd) && run_out(p, out, err) && strcmp(out.data, "from the parent\r\n") == 0);
+#else
+        KV_CHECK(c, p.shell("echo \"$KV_SHELL_TEST\"", sd) && run_out(p, out, err) && strcmp(out.data, "from the parent\n") == 0);
+#endif
+        p.close();
+        i32 why = 0;
+        const char* none[] = {"kv-no-such-program-anywhere"};
+        ProcessDesc nd;
+        nd.argv = Span<const char* const>(none, 1);
+        KV_CHECK(c, !p.spawn(nd, &why) && why == ENOENT && p.error[0]);
+        why = 0;
+        KV_CHECK(c, !p.spawn(ProcessDesc{}, &why) && why == EINVAL);
+    }
     // wait: returns when there is output, not at its limit; with nothing, at its limit.
     KV_CHECK(c, sh(p, "sleep 0.2; echo late"));
     t0 = time_now();

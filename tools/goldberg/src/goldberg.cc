@@ -221,6 +221,7 @@ struct Proc {
     Array<char> roots_text;             // a built-in's view of the asset roots: name, dir, NUL after each
     Array<char> words;                  // argv then env, NUL separated
     u32         argc = 0, envc = 0;
+    bool        shell = false;          // argv is a script and its arguments for the platform's shell (a batch file)
     Array<char> err;                    // what it wrote to stderr (the tail is kept)
     Array<Before> before;
     Array<char>   before_text;
@@ -933,7 +934,25 @@ i32 run_task(void* arg, const IoTaskCtl& ctl) {
     d.env  = Span<const char* const>(env.data, env.len);
     d.cwd  = pr.run_dir;
     bool ok;
-    { KV_ZONE("run.spawn"); ok = pr.p.spawn(d); }
+    if (pr.shell) {
+        // The shell's line: each word in quotes, which is how cmd is handed a script and
+        // arguments that may hold spaces or an &.
+        Array<char> line{};
+        for (u32 i = 0; i < argv.len; ++i) {
+            usize n = strlen(argv[i]);
+            if (i) line.push(' ');
+            line.push('"');
+            memcpy(line.push_n((u32)n), argv[i], n);
+            line.push('"');
+        }
+        line.push(0);
+        d.argv = Span<const char* const>();
+        { KV_ZONE("run.spawn"); ok = pr.p.shell(line.data, d); }
+        line.free();
+    } else {
+        KV_ZONE("run.spawn");
+        ok = pr.p.spawn(d);
+    }
     argv.free();
     env.free();
     if (!ok) { pr.spawn_failed = true; return 0; }
@@ -1326,6 +1345,11 @@ int host_run(lua_State* L) {
                 if (!w) return fail("argv and env are lists of strings");
                 memcpy(pr->words.push_n((u32)len + 1), w, len + 1);
                 if (pass) ++pr->envc; else ++pr->argc;
+                lua_pop(L, 1);
+            }
+            if (!pass) { // argv.shell: the words are for the platform's shell (convert.lua, a batch file)
+                lua_getfield(L, -1, "shell");
+                pr->shell = lua_toboolean(L, -1) != 0;
                 lua_pop(L, 1);
             }
         }

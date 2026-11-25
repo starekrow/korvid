@@ -2,6 +2,7 @@
 #include "korvid/core/os_error.h"
 #include "korvid/core/format.h"
 #include "korvid/core/memory.h"
+#include "../os_err.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -90,22 +91,29 @@ char** proc_env(Span<const char* const> extra) {
 
 bool process_supported() { return !KV_PROC_NONE; }
 
-bool Process::spawn(const ProcessDesc& desc) {
+bool Process::spawn(const ProcessDesc& desc, i32* err) {
     close();
     error[0] = 0;
-    if (KV_PROC_NONE) { format(error, sizeof error, "an iOS app cannot start another program"); return false; }
-    if (desc.argv.len == 0 || !desc.argv.data[0]) { format(error, sizeof error, "nothing to run"); return false; }
+    if (KV_PROC_NONE) { format(error, sizeof error, "an iOS app cannot start another program"); return os_fail(err, ENOTSUP); }
+    bool has_argv = desc.argv.len != 0 && desc.argv.data[0];
+    if (!desc.shell && !has_argv) { format(error, sizeof error, "nothing to run"); return os_fail(err, EINVAL); }
+    // A line for the shell is sh's to read: /bin/sh -c <line>, the line one argument, as
+    // written. Else argv is argv.
+    const char* const shell_argv[] = {"/bin/sh", "-c", desc.shell};
+    Span<const char* const> words = desc.shell ? Span<const char* const>(shell_argv, 3) : desc.argv;
+    const char* what = desc.shell ? desc.shell : desc.argv.data[0]; // what a failure names
     int out[2] = {-1, -1}, err[2] = {-1, -1}, fail[2] = {-1, -1};
     // With fork, a third pipe carries the child's errno if its exec fails; posix_spawn
     // returns that itself.
     if (!proc_pipe(out) || !proc_pipe(err) || (!KV_PROC_SPAWN && !proc_pipe(fail))) {
-        format(error, sizeof error, "pipe: %s", os_error_text(errno));
+        int e = errno;
+        format(error, sizeof error, "pipe: %s", os_error_text(e));
         proc_close(out[0]); proc_close(out[1]); proc_close(err[0]); proc_close(err[1]);
-        return false;
+        return os_fail(err, e);
     }
-    char** argv = (char**)mem_alloc(sizeof(char*) * (desc.argv.len + 1));
-    for (u32 i = 0; i < desc.argv.len; ++i) argv[i] = (char*)desc.argv.data[i];
-    argv[desc.argv.len] = nullptr;
+    char** argv = (char**)mem_alloc(sizeof(char*) * (words.len + 1));
+    for (u32 i = 0; i < words.len; ++i) argv[i] = (char*)words.data[i];
+    argv[words.len] = nullptr;
     char** envp = proc_env(desc.env);
 
 #if KV_PROC_SPAWN
@@ -137,8 +145,8 @@ bool Process::spawn(const ProcessDesc& desc) {
     proc_close(out[1]); proc_close(err[1]);
     if (why != 0) {
         proc_close(out[0]); proc_close(err[0]);
-        format(error, sizeof error, "%s: %s", desc.cwd && why == ENOENT && access(desc.cwd, F_OK) != 0 ? desc.cwd : desc.argv.data[0], os_error_text(why));
-        return false;
+        format(error, sizeof error, "%s: %s", desc.cwd && why == ENOENT && access(desc.cwd, F_OK) != 0 ? desc.cwd : what, os_error_text(why));
+        return os_fail(err, why);
     }
 #else
     pid_t child = fork();
@@ -168,7 +176,7 @@ bool Process::spawn(const ProcessDesc& desc) {
     if (child < 0) {
         format(error, sizeof error, "fork: %s", os_error_text(fork_errno));
         proc_close(out[0]); proc_close(err[0]); proc_close(fail[0]);
-        return false;
+        return os_fail(err, fork_errno);
     }
     setpgid(child, child); // both sides set it, so it is set whichever runs first
     // The exec closes the failure pipe; a read that returns bytes is the child saying why
@@ -181,8 +189,8 @@ bool Process::spawn(const ProcessDesc& desc) {
         int status;
         while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
         proc_close(out[0]); proc_close(err[0]);
-        format(error, sizeof error, "%s: %s", desc.cwd && why == ENOENT && access(desc.cwd, F_OK) != 0 ? desc.cwd : desc.argv.data[0], os_error_text(why));
-        return false;
+        format(error, sizeof error, "%s: %s", desc.cwd && why == ENOENT && access(desc.cwd, F_OK) != 0 ? desc.cwd : what, os_error_text(why));
+        return os_fail(err, why);
     }
 #endif
     fcntl(out[0], F_SETFL, fcntl(out[0], F_GETFL, 0) | O_NONBLOCK);

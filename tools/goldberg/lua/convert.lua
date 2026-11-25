@@ -121,7 +121,7 @@ function M.command(conv, script, kind, vars, params)
         return { script, vars["in"], vars.asset or vars.name }, {}
     end
     if kind == "exe" then argv = { script } -- the program itself: no shell between
-    elseif kind == "bat" then argv = { "cmd", "/c", script }
+    elseif kind == "bat" then argv = { script, shell = true } -- a batch file is the shell's to run: host.run makes its line
     else argv = { host.windows and "sh" or "/bin/sh", script } end
     for word in (conv.args or "{in} {work}"):gmatch("%S+") do
         local w, bad = subst(word, vars, params or {})

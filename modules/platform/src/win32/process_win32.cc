@@ -19,6 +19,8 @@
 #include "korvid/core/array.h"
 #include "korvid/core/format.h"
 #include "wide.h"
+#include "../os_err.h"
+#include <errno.h>
 #include <string.h>
 
 namespace kv {
@@ -146,48 +148,54 @@ void win32_message(char* out, usize cap, const char* what, DWORD err) {
 
 bool process_supported() { return true; }
 
-bool Process::spawn(const ProcessDesc& desc) {
+bool Process::spawn(const ProcessDesc& desc, i32* err) {
     close();
     error[0] = 0;
-    if (desc.argv.len == 0 || !desc.argv.data[0] || !desc.argv.data[0][0]) { format(error, sizeof error, "nothing to run"); return false; }
+    bool has_argv = desc.argv.len != 0 && desc.argv.data[0] && desc.argv.data[0][0];
+    if (!desc.shell && !has_argv) { format(error, sizeof error, "nothing to run"); return os_fail(err, EINVAL); }
+    const char* what = desc.shell ? desc.shell : desc.argv.data[0]; // what a failure names
 
     Array<wchar_t> cmd{}, env{}, arg{};
     bool ok = true;
-    // cmd.exe does not read its line by the C runtime's rules: given `/c` and more than two
-    // quotes it strips the first and the last of the whole rest, which breaks every quoted
-    // argument. `cmd /d /s /c "<the rest, quoted as usual>"` is the form it does read: /s
-    // takes exactly the outer pair off and runs what is inside as written (/d: no AutoRun).
-    u32 first = 0;
-    bool via_cmd = desc.argv.len >= 3 && (_stricmp(desc.argv.data[0], "cmd") == 0 || _stricmp(desc.argv.data[0], "cmd.exe") == 0) &&
-                   _stricmp(desc.argv.data[1], "/c") == 0;
-    if (via_cmd) {
-        const wchar_t lead[] = L"cmd /d /s /c \"";
-        memcpy(cmd.push_n(KV_COUNTOF(lead) - 1), lead, sizeof lead - sizeof(wchar_t));
-        first = 2;
+    if (desc.shell) {
+        // The shell's line, as written: cmd.exe does not read a command line by the C
+        // runtime's rules, and `<cmd> /d /s /c "<line>"` is the one form in which it takes
+        // exactly the outer pair of quotes off and runs what is inside as it stands, quotes,
+        // builtins, `&&` and all (/d: no AutoRun). %ComSpec% names the shell; cmd.exe if not.
+        wchar_t comspec[KV_WIDE_PATH_MAX];
+        DWORD n = GetEnvironmentVariableW(L"ComSpec", comspec, KV_WIDE_PATH_MAX);
+        if (n == 0 || n >= (DWORD)KV_WIDE_PATH_MAX) wcscpy_s(comspec, L"cmd.exe");
+        append_arg(cmd, comspec);
+        const wchar_t flags[] = L" /d /s /c \"";
+        memcpy(cmd.push_n(KV_COUNTOF(flags) - 1), flags, sizeof flags - sizeof(wchar_t));
+        ok = append_wide(cmd, desc.shell, strlen(desc.shell));
+        cmd.push(L'"');
+    } else {
+        // argv is argv: each word quoted as CommandLineToArgvW and the C runtime read it
+        // back, whatever the program is.
+        for (u32 i = 0; i < desc.argv.len && ok; ++i) {
+            arg.len = 0;
+            ok = append_wide(arg, desc.argv.data[i], strlen(desc.argv.data[i]));
+            arg.push(0);
+            if (i > 0) cmd.push(L' ');
+            if (ok) append_arg(cmd, arg.data);
+        }
     }
-    for (u32 i = first; i < desc.argv.len && ok; ++i) {
-        arg.len = 0;
-        ok = append_wide(arg, desc.argv.data[i], strlen(desc.argv.data[i]));
-        arg.push(0);
-        if (i > first) cmd.push(L' ');
-        if (ok) append_arg(cmd, arg.data);
-    }
-    if (via_cmd) cmd.push(L'"');
     cmd.push(0);
     ok = ok && make_env(desc.env, env);
     wchar_t wcwd[KV_WIDE_PATH_MAX];
     if (ok && desc.cwd && !widen(desc.cwd, wcwd, KV_WIDE_PATH_MAX)) ok = false;
     if (!ok) {
-        format(error, sizeof error, "%s: not UTF-8, or too long", desc.argv.data[0]);
+        format(error, sizeof error, "%s: not UTF-8, or too long", what);
         cmd.free(); env.free(); arg.free();
-        return false;
+        return os_fail(err, EILSEQ);
     }
     if (desc.cwd) {
         DWORD a = GetFileAttributesW(wcwd);
         if (a == INVALID_FILE_ATTRIBUTES || !(a & FILE_ATTRIBUTE_DIRECTORY)) {
             format(error, sizeof error, "%s: No such directory", desc.cwd);
             cmd.free(); env.free(); arg.free();
-            return false;
+            return os_fail(err, ENOENT);
         }
     }
 
@@ -253,9 +261,9 @@ bool Process::spawn(const ProcessDesc& desc) {
         close_handle(out_r);
         close_handle(err_r);
         close_handle(job);
-        if (spawn_err == ERROR_FILE_NOT_FOUND || spawn_err == ERROR_PATH_NOT_FOUND) format(error, sizeof error, "%s: not found", desc.argv.data[0]);
-        else win32_message(error, sizeof error, desc.argv.data[0], spawn_err);
-        return false;
+        if (spawn_err == ERROR_FILE_NOT_FOUND || spawn_err == ERROR_PATH_NOT_FOUND) format(error, sizeof error, "%s: not found", what);
+        else win32_message(error, sizeof error, what, spawn_err);
+        return os_fail(err, errno_from_win32(spawn_err));
     }
     ResumeThread(pi.hThread);
     close_handle(pi.hThread);

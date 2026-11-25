@@ -7,8 +7,14 @@
 // job object on Windows), so kill() takes what it started with it (a shell script's
 // `sleep`), and reports 128 + 9 as a SIGKILL does.
 //
-// On Windows argv is quoted as the C runtime parses it, and {"cmd", "/c", ...} is run as
-// `cmd /d /s /c "..."`, the one form in which cmd hands a batch file its arguments as given.
+// Two ways to say what to run, and no flags to juggle between them:
+// - spawn: an argument vector. argv is argv on every OS: each word reaches the program as
+//   it is given (on Windows, quoted as the C runtime reads a command line back). Nothing
+//   is a shell's to interpret, so a shell's builtins and operators mean nothing here.
+// - shell: one line for the platform's non-interactive shell, by that shell's own rules:
+//   `/bin/sh -c <line>` on POSIX, `%ComSpec% /d /s /c "<line>"` (cmd.exe) on Windows.
+//   Quoting, builtins (`echo`, `dir`), `&&` and redirection are the shell's, so the line is
+//   that OS's to write: a line that must run everywhere is a script, started with spawn.
 #pragma once
 #include "korvid/core/types.h"
 #include "korvid/platform/khandle.h"
@@ -19,6 +25,7 @@ struct ProcessDesc {
     Span<const char* const> argv;          // argv[0] is the program: a path, or a name found on PATH
     const char*             cwd = nullptr; // null: the parent's
     Span<const char* const> env;           // "NAME=value", added to (and overriding) the parent's
+    const char*             shell = nullptr; // a line for the platform's shell, run instead of argv: Process::shell sets it
 };
 
 struct Process {
@@ -30,8 +37,18 @@ struct Process {
     KHandle process, group;      // the platform's own hold on the child and on what it started, where the OS gives one beyond the id
 
     // False with `error` set if the program cannot be started (not found, not executable,
-    // no such directory). Nothing is left to free then.
-    bool spawn(const ProcessDesc& desc);
+    // no such directory), and *err (if given) its errno: ENOENT, EACCES, EINVAL for nothing
+    // to run, ENOTSUP where spawn is not implemented. `error` says what an errno cannot:
+    // whose name was not found. Nothing is left to free then.
+    bool spawn(const ProcessDesc& desc, i32* err = nullptr);
+    // The same for one line of the platform's shell (above): desc gives the directory and
+    // the environment, and its argv is not used. The shell starting is all that true
+    // means: a line it cannot run is the shell's exit code and its stderr.
+    bool shell(const char* line, const ProcessDesc& desc = ProcessDesc{}, i32* err = nullptr) {
+        ProcessDesc d = desc;
+        d.shell = line;
+        return spawn(d, err);
+    }
     bool is_open() const { return pid >= 0; }
     // Asks the OS once; true until the child has ended. Output may remain to be read
     // after it has: read until both streams return -1.
