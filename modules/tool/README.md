@@ -94,8 +94,8 @@ int main(int argc, char** argv) { return kv::tool_main(argc, argv, kv_module_lis
 
 A tool that serves a socket or runs a child has four pieces: a system that does the
 I/O, a watched waker that says what the system is waiting on, the startup that adds the
-waker and the shutdown that takes it away. From [runcast](../../tools/runcast/README.md)
-(`tools/runcast/src/module.cc`), which runs a command for whoever connects:
+waker and the shutdown that takes it away. For a tool that runs a command for whoever
+connects and streams its output down the socket:
 
 ```cpp
 // The work: whatever can be done now, then return. It never waits and never asks for a tick.
@@ -106,24 +106,30 @@ constinit const SystemDesc k_systems[] = {
 
 // Asked by the loop each pass: what the run is waiting on now.
 bool waker(Engine& e, void* user) {
-    Runcast& r = *(Runcast*)user;
+    Serve& s = *(Serve*)user;
     PlatformWatch w(e);
-    if (listening) w.add(r.listener);
-    if (streaming) { w.add(r.sock); w.add(r.child); w.soon(); }   // soon: the child's end is not watched
-    platform_watch(e, &r, w);
+    if (listening) w.add(s.listener);
+    if (streaming) { w.add(s.sock); w.add(s.child); w.soon(); }   // soon: the child's end is not watched
+    platform_watch(e, &s, w);
     return false;                     // a stir gets the tick by itself; the reading is pump's
 }
 
-bool runcast_startup(Engine& e, ModuleInstance& self) { ... return engine_add_watched_waker(e, waker, r); }
-void runcast_shutdown(Engine& e, ModuleInstance& self) {
-    platform_unwatch(e, r);           // before what it watched is closed
-    engine_remove_waker(e, waker, r);
+bool serve_startup(Engine& e, ModuleInstance& self) { ... return engine_add_watched_waker(e, waker, s); }
+void serve_shutdown(Engine& e, ModuleInstance& self) {
+    platform_unwatch(e, s);           // before what it watched is closed
+    engine_remove_waker(e, waker, s);
     ... close the child, the socket, the listener ...
 }
 ```
 
+goldberg's `goldberg_wake` (`tools/goldberg/src/goldberg.cc`, with `goldberg_watch`) is a
+waker in a real tool, watching its source directories, its listener, its programs'
+sockets, a child process and its I/O queue; it does some of the work itself and returns
+true when it found any. asset_live's (`modules/asset_live/src/module.cc`)
+watches one socket.
+
 - **The system is the tool's pump**: PreSim, main thread (sockets and children are the
-  loop thread's), `RunWhen::Always`, as kbor's and runcast's are.
+  loop thread's), `RunWhen::Always`, as kbor's and goldberg's are.
 - **Backpressure**: read from the child only as much as `sock.room()` says the socket
   will take, and leave the rest in the pipe, where the child blocks. A socket with output
   still queued is asked about again soon by `PlatformWatch::add(NetSocket)` itself, so

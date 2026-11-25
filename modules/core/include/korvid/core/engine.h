@@ -270,8 +270,8 @@ void engine_remove_waker(Engine& e, bool (*fn)(Engine&, void*), void* user);
 // (a frame, in the frame loop). A stir that ends the wait gets a tick by itself, so a waker
 // that only states its watch returns false and leaves the reading to the owner's system:
 //
-//     bool waker(Engine& e, void* user) {             // tools/runcast/src/module.cc, waker
-//         Runcast* me = (Runcast*)user;
+//     bool waker(Engine& e, void* user) {
+//         Serve* me = (Serve*)user;
 //         PlatformWatch w(e);
 //         w.add(me->listener);  w.add(me->sock);  w.add(me->child);
 //         platform_watch(e, me, w);
