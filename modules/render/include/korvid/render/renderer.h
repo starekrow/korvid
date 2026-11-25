@@ -144,7 +144,10 @@ bool       renderer_check_sort(Renderer* r);
 // render's shaders/post_fragment.slangh) then draws that image to the window, and the
 // layers at and above `layer` draw over it (the HUD, the UI). A null shader turns the pass
 // off: the frame is drawn straight to the window, as without one, at no cost. A shader
-// that will not load leaves the pass off, logged once; false then.
+// that will not load leaves the pass off, logged once; false then, where it is known at
+// once. A backend that reads the shader through the I/O queue (D3D12) answers true for one
+// it could ask for: the pass is off for the frame or two until the shader has come, and
+// stays off, logged, if it does not load.
 constexpr u32 KV_POST_PARAMS = 16; // float4s
 bool       renderer_post_layer(Renderer* r, i32 layer, const char* shader);
 // The post shader's parameters for the frames from the next one on: `count` float4s (at

@@ -74,6 +74,7 @@ bool rb_post_set(Renderer* r, i32 layer, Name shader) {
     PostPass& p = r->post;
     p.layer = layer;
     if (shader == p.shader) return !p.failed;
+    if (!p.read_fragment.is_null()) { r->io->cancel(p.read_fragment); p.read_fragment = Handle{}; } // the one before, still on its way: dropped as it comes
     rb_defer_release(r, p.pipeline);
     p.pipeline = nullptr;
     rb_free_shader(p.fragment);
@@ -82,11 +83,36 @@ bool rb_post_set(Renderer* r, i32 layer, Name shader) {
     if (shader.is_null()) { post_destroy_target_later(r); return true; }
 
     if (!post_root(r)) { post_fail(r, "has no root signature"); return false; }
-    if (!p.vertex.data && !rb_load_shader(r, "post.dxil.zip", "vs_post", &p.vertex)) { post_fail(r, "has no vertex shader (post.dxil.zip)"); return false; }
     char file[96];
     format(file, sizeof file, "%s.dxil.zip", name_str(shader));
+    if (r->io) { // asked of the I/O queue: the pass is off until both have come (rb_post_shader_landed)
+        if (!p.vertex.data && p.read_vertex.is_null() && !rb_shader_ask(r, "post.dxil.zip", &p.read_vertex)) { post_fail(r, "has no vertex shader (post.dxil.zip)"); return false; }
+        if (!rb_shader_ask(r, file, &p.read_fragment)) { post_fail(r, "did not load"); return false; }
+        return true;
+    }
+    if (!p.vertex.data && !rb_load_shader(r, "post.dxil.zip", "vs_post", &p.vertex)) { post_fail(r, "has no vertex shader (post.dxil.zip)"); return false; }
     if (!rb_load_shader(r, file, "fs_main", &p.fragment)) { post_fail(r, "did not load"); return false; }
     return rb_post_create_pipeline(r);
+}
+
+// A read rb_post_set asked for has come. The pipeline is made once the vertex shader and
+// the fragment shader are both here.
+bool rb_post_shader_landed(Renderer* r, const IoCompletion& c) {
+    PostPass& p = r->post;
+    bool vertex = c.request == p.read_vertex;
+    if (!vertex && c.request != p.read_fragment) return false;
+    (vertex ? p.read_vertex : p.read_fragment) = Handle{};
+    char file[96];
+    if (vertex) format(file, sizeof file, "post.dxil.zip");
+    else format(file, sizeof file, "%s.dxil.zip", name_str(p.shader));
+    const char* entry = vertex ? "vs_post" : "fs_main";
+    if (c.status != IoStatus::Done) KV_ERROR("d3d12", "cannot read shader '%s': %s", file, c.status == IoStatus::Cancelled ? "cancelled" : os_error_text(c.error));
+    if (c.status != IoStatus::Done || !rb_shader_entries_from(file, c.bytes.data, c.bytes.size, &entry, vertex ? &p.vertex : &p.fragment, 1)) {
+        if (!p.shader.is_null() && !p.failed) post_fail(r, vertex ? "has no vertex shader (post.dxil.zip)" : "did not load");
+        return true;
+    }
+    if (p.vertex.data && p.fragment.data && !p.shader.is_null()) rb_post_create_pipeline(r);
+    return true;
 }
 
 bool rb_post_active(const Renderer* r) {

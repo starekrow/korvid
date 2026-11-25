@@ -336,12 +336,34 @@ bool rb_create_game_pipeline(Renderer* r, GamePipe& gp) {
     return gp.pipeline != nullptr;
 }
 
+// The shader is asked of the I/O queue, and its pipeline made when it has come
+// (rb_game_shader_landed): until then, and for good if it does not load, the slot draws with
+// the engine's pipeline of its blend (rb_draw_run). With no queue (no platform), read now.
 bool rb_game_pipe_load(Renderer* r, GamePipe& gp) {
     char file[96];
     format(file, sizeof file, "%s" KV_RB_SHADER_EXT, name_str(gp.shader));
+    if (r->io) return rb_shader_ask(r, file, &gp.read);
     if (!rb_load_shader(r, file, "fs_main", &gp.fragment)) return false;
     rb_create_game_pipeline(r, gp);
     return true;
+}
+
+bool rb_game_shader_landed(Renderer* r, const IoCompletion& c) {
+    for (GamePipe& gp : r->game_pipes) {
+        if (!gp.used || gp.read != c.request) continue;
+        gp.read = Handle{};
+        char file[96];
+        format(file, sizeof file, "%s" KV_RB_SHADER_EXT, name_str(gp.shader));
+        const char* entry = "fs_main";
+        if (c.status != IoStatus::Done) KV_ERROR("d3d12", "cannot read shader '%s': %s", file, c.status == IoStatus::Cancelled ? "cancelled" : os_error_text(c.error));
+        if (c.status == IoStatus::Done && rb_shader_entries_from(file, c.bytes.data, c.bytes.size, &entry, &gp.fragment, 1)) rb_create_game_pipeline(r, gp);
+        else {
+            gp.failed = true;
+            KV_ERROR("d3d12", "game shader '%s' did not load: its sprites draw with the engine's", name_str(gp.shader));
+        }
+        return true;
+    }
+    return false;
 }
 
 void rb_destroy_pipelines(Renderer* r) {

@@ -58,21 +58,51 @@ void rb_free_shader(ShaderBlob& b) {
     b = ShaderBlob{};
 }
 
-// Every one of `entries` out of <exe>/shaders/<file>, read once. All or nothing.
+// Every one of `entries` out of <exe>/shaders/<file>, read once, now: for the engine's own
+// shaders at start-up. All or nothing.
 bool rb_load_shader_entries(Renderer* r, const char* file, const char* const* entries, ShaderBlob* outs, u32 n) {
     char path[1024];
     format(path, sizeof path, "%sshaders/%s", r->base_path, file);
     IoBytes zip;
     i32 read_err = 0;
     if (!io_read_file(path, &zip, nullptr, &read_err)) { KV_ERROR("d3d12", "cannot read shader '%s': %s", path, os_error_text(read_err)); return false; }
+    bool ok = rb_shader_entries_from(file, zip.data, zip.size, entries, outs, n);
+    zip.free();
+    return ok;
+}
+
+bool rb_shader_ask(Renderer* r, const char* file, Handle* read) {
+    char path[1024];
+    format(path, sizeof path, "%sshaders/%s", r->base_path, file);
+    IoRequest req;
+    req.path  = path;
+    req.owner = r;
+    *read = r->io ? r->io->read_file(req) : Handle{};
+    if (read->is_null()) KV_ERROR("d3d12", "cannot ask for shader '%s'", path);
+    return !read->is_null();
+}
+
+// Once a frame, before it is drawn: the shaders that have come, each to whoever asked. One
+// nobody is waiting for any more (the post shader changed again) is dropped.
+void rb_shaders_pump(Renderer* r) {
+    if (!r->io) return;
+    while (r->io->completions(r).len) {
+        IoCompletion c = r->io->completions(r)[0];
+        r->io->reap(c.request);
+        if (!rb_game_shader_landed(r, c)) rb_post_shader_landed(r, c);
+        c.bytes.free();
+    }
+}
+
+bool rb_shader_entries_from(const char* file, const u8* data, usize size, const char* const* entries, ShaderBlob* outs, u32 n) {
     const char* err = "";
-    usize tail_len = zip.size < KV_ZIP_TAIL_MAX ? zip.size : KV_ZIP_TAIL_MAX;
+    usize tail_len = size < KV_ZIP_TAIL_MAX ? size : KV_ZIP_TAIL_MAX;
     ZipTail tail;
     PackTable table;
-    bool ok = zip_find_end(zip.data + zip.size - tail_len, tail_len, zip.size - tail_len, &tail, &err) && !tail.needs_zip64 &&
-              tail.cd_offset + tail.cd_size <= zip.size &&
-              zip_read_central(zip.data + tail.cd_offset, (usize)tail.cd_size, tail, mem_general(), &table, &err);
-    if (!ok) { KV_ERROR("d3d12", "shader '%s' is not slangc's container: %s", path, err); zip.free(); return false; }
+    bool ok = zip_find_end(data + size - tail_len, tail_len, size - tail_len, &tail, &err) && !tail.needs_zip64 &&
+              tail.cd_offset + tail.cd_size <= size &&
+              zip_read_central(data + tail.cd_offset, (usize)tail.cd_size, tail, mem_general(), &table, &err);
+    if (!ok) { KV_ERROR("d3d12", "shader '%s' is not slangc's container: %s", file, err); return false; }
 
     for (u32 i = 0; i < n; ++i) outs[i] = ShaderBlob{};
     u32 found = 0;
@@ -83,15 +113,15 @@ bool rb_load_shader_entries(Renderer* r, const char* file, const char* const* en
         if (len < 5 || strcmp(name + len - 5, ".dxil") != 0 || (pe.flags & PackEntryUnsupported)) continue;
         u64 data_off = pe.data_offset;
         usize need = 0;
-        if (!data_off && (pe.header_offset >= zip.size ||
-                          !zip_local_data_offset(zip.data + pe.header_offset, (usize)(zip.size - pe.header_offset), pe.header_offset, &data_off, &need)))
+        if (!data_off && (pe.header_offset >= size ||
+                          !zip_local_data_offset(data + pe.header_offset, (usize)(size - pe.header_offset), pe.header_offset, &data_off, &need)))
             continue;
-        if (data_off + pe.csize > zip.size) continue;
+        if (data_off + pe.csize > size) continue;
         u8* blob = (u8*)alloc_in(mem_general(), (usize)pe.size ? (usize)pe.size : 1);
         bool good = false;
-        if (pe.method == ZipStored && pe.csize == pe.size) { memcpy(blob, zip.data + data_off, (usize)pe.size); good = true; }
+        if (pe.method == ZipStored && pe.csize == pe.size) { memcpy(blob, data + data_off, (usize)pe.size); good = true; }
         else if (pe.method == ZipDeflate) {
-            InflateOut o = inflate_raw(zip.data + data_off, (usize)pe.csize, blob, (usize)pe.size);
+            InflateOut o = inflate_raw(data + data_off, (usize)pe.csize, blob, (usize)pe.size);
             good = o.result == InflateResult::Ok && o.produced == pe.size;
         }
         const char* entry = good ? dxil_entry_name(blob, (usize)pe.size) : nullptr;
@@ -103,13 +133,12 @@ bool rb_load_shader_entries(Renderer* r, const char* file, const char* const* en
         ++found;
     }
     pack_table_free(table, mem_general());
-    zip.free();
     if (found == n) {
         KV_INFO("d3d12", "shader '%s': %u entry point%s", file, n, n == 1 ? "" : "s");
         return true;
     }
     for (u32 i = 0; i < n; ++i) {
-        if (!outs[i].data) KV_ERROR("d3d12", "shader '%s' has no entry point '%s'", path, entries[i]);
+        if (!outs[i].data) KV_ERROR("d3d12", "shader '%s' has no entry point '%s'", file, entries[i]);
         rb_free_shader(outs[i]);
     }
     return false;

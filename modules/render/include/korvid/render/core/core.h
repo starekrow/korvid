@@ -326,7 +326,9 @@ void rb_defer_destroy_texture(Renderer* r, Texture& t);
 
 // Loads the game shader gp.shader (<exe>/shaders/<name> KV_RB_SHADER_EXT) and builds its
 // pipeline if the backend can yet (else when it builds the engine's). False when the shader
-// did not load; a shader that loads and does not link sets gp.failed.
+// did not load; a shader that loads and does not link sets gp.failed. A backend may ask the
+// I/O queue for it instead and answer true: the slot draws with the engine's pipeline of
+// its blend until the shader has come, and gp.failed is set then if it does not load.
 bool rb_game_pipe_load(Renderer* r, GamePipe& gp);
 
 // The post pass's shader changed (r->post.shader is still the old one): the backend drops

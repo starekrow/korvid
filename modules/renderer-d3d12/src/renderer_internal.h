@@ -41,6 +41,7 @@
 #include "korvid/core/name.h"
 #include "korvid/core/pool.h"
 #include "korvid/core/profile.h"
+#include "korvid/platform/io.h"
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -139,6 +140,7 @@ struct ShaderBlob {
 
 struct GamePipe : GamePipeCore {
     ShaderBlob           fragment;
+    Handle               read; // its shader, asked of the I/O queue and not yet come
     ID3D12PipelineState* pipeline = nullptr;
 };
 
@@ -180,6 +182,7 @@ struct GpuProfiler {
 struct PostPass : PostCore {
     ShaderBlob           vertex;   // the engine's vs_post
     ShaderBlob           fragment; // the game's fs_main
+    Handle               read_vertex, read_fragment; // either, asked of the I/O queue and not yet come
     ID3D12RootSignature* root = nullptr;
     ID3D12PipelineState* pipeline = nullptr;
     ID3D12Resource*      target = nullptr; // the world: the swapchain's size, sRGB
@@ -197,6 +200,7 @@ struct Swapchain {
 
 struct Renderer : RenderCore {
     HWND        window     = nullptr;
+    IoQueue*    io         = nullptr; // the platform's queue: game and post shaders are read through it, owner `this`
     bool        markers    = false; // event markers for PIX and the like
 
     IDXGIFactory4*      factory = nullptr;
@@ -266,6 +270,16 @@ bool rb_wait_idle(Renderer* r);             // signals and waits: nothing in fli
 // when the file or the entry is not there.
 bool rb_load_shader(Renderer* r, const char* file, const char* entry, ShaderBlob* out);
 bool rb_load_shader_entries(Renderer* r, const char* file, const char* const* entries, ShaderBlob* outs, u32 n);
+// The same out of a container already read (`file` for the log). All or nothing.
+bool rb_shader_entries_from(const char* file, const u8* data, usize size, const char* const* entries, ShaderBlob* outs, u32 n);
+// A game's shader, or the post pass's, asked of the I/O queue: nothing in a tick waits on the
+// disk. The read's handle in *read; false (logged) when it could not be asked. What comes
+// is taken by rb_shaders_pump, once a frame, and handed to whichever asked
+// (rb_game_shader_landed, rb_post_shader_landed: true if the request was theirs).
+bool rb_shader_ask(Renderer* r, const char* file, Handle* read);
+void rb_shaders_pump(Renderer* r);
+bool rb_game_shader_landed(Renderer* r, const IoCompletion& c);
+bool rb_post_shader_landed(Renderer* r, const IoCompletion& c);
 void rb_free_shader(ShaderBlob& b);
 
 // ---- d3d_resources.cc ---------------------------------------------------------------------

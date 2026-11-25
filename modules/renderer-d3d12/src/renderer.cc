@@ -43,6 +43,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     r->uploads.alloc = ga;
     r->window = (HWND)desc.native_window;
     if (platform_io(engine)) format(r->base_path, sizeof r->base_path, "%s", platform_base_dir(engine)); // the platform is up
+    r->io = platform_io(engine);
     r->start_time  = time_now();
     r->validation  = desc.validation;
     r->markers     = desc.validation || KV_DEV;
@@ -75,6 +76,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
 
 void renderer_destroy(Renderer* r) {
     if (!r) return;
+    if (r->io) r->io->drain(r); // shaders asked for and not come: none lands after this
     free_in(mem_general(), r->check_keys, sizeof(f32) * (r->check_rows ? r->check_rows : 1));
     r->check_keys = nullptr;
     if (r->device) {
@@ -148,6 +150,7 @@ bool rb_frame_wait(Renderer* r, FrameInFlight& f, f64* waited) {
 void rb_frame_slot(Renderer* r, FrameInFlight& f, u32 slot) { rb_write_texture_slot(r, (u32)(&f - r->frames), slot); }
 
 bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64* waited) {
+    rb_shaders_pump(r); // the game and post shaders that have come since the last frame
     if (r->swapchain_dirty && !rb_recreate_swapchain(r)) return false;
     f.have_image = r->swapchain.handle != nullptr;
     f.image      = 0;
