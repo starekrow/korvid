@@ -18,7 +18,7 @@ struct IoEntry {
     bool       stat;      // a stat: on the ring, `buf` holds the kernel's answer and a copy of the path
     IoTask*    task;      // a task, or a stat on the task workers: its node, until the pump completes it
     // The ring's bookkeeping while a request is in flight.
-    KHandle     fd;
+    Handle     fd;
     u8*        buf;
     usize      size;      // the file's size at open, or the bytes to write
     usize      done;      // bytes read or written so far
@@ -43,7 +43,7 @@ struct IoEntry {
 struct IoMount {
     char      path[256] = {}; // the directory (with a trailing '/') or the pack file
     bool      is_pack = false;
-    KHandle    fd;          // the pack's file, open for the queue's life
+    Handle    fd;          // the pack's file, open for the queue's life
     u64       base = 0;    // where the archive starts in that file (a pack inside another archive)
     char      prefix[64] = {}; // only the archive's entries under this are seen, without it ("assets/")
     PackTable table;

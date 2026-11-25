@@ -286,7 +286,7 @@ void run_wake(TestCtx& c) {
         KV_CHECK(c, w.add_root(gone, FsWatchBackend::Auto, &err) == ~0u && err == ENOENT);
     }
     u32 calls = 0;
-    if (w.wake_handle().is_open()) {
+    if (os_handle_open(w.wake_handle())) {
         KV_CHECK(c, !w.set_wake(wake_bump, &calls));
     } else {
         KV_CHECK(c, w.due() > 0.0);                 // no wake: a poll soon

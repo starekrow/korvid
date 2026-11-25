@@ -34,7 +34,7 @@ bool io_stdin_is_terminal() {
     return h && GetConsoleMode(h, &mode);
 }
 
-KHandle io_stdin_handle() { return KHandle{}; } // a console's or a pipe's handle, which WSAPoll does not take
+Handle io_stdin_handle() { return Handle{}; } // a console's or a pipe's handle, which WSAPoll does not take
 
 i32 io_stdin_read(void* buf, u32 cap) {
     HANDLE h = stdin_handle();

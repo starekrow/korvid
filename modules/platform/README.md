@@ -13,8 +13,9 @@ few and never call a caller's code but to wake it: the queue's task workers once
 (Apple, Android), one thread watching what a waiting loop is woken by, and the settings
 store's writer.
 
-**One shape for all of it.** What the OS opened is a `KHandle`, which knows what kind of
-thing it is. What is opened is closed (`open`, `close`, `is_open`). A blocking call that
+**One shape for all of it.** What the OS opened is a `Handle`, the engine's own, as an
+entity or a texture is: it knows what kind of thing it names, describes itself
+(`kv_handle_describe`), and goes stale in every copy when what it names is closed. What is opened is closed (`open`, `close`, `is_open`). A blocking call that
 can fail takes a last `i32* err`, an errno on every OS. A read gives an `IoBytes`,
 whether it was asked for now or later. What a waiting loop is woken by goes in a
 `PlatformWatch`, whatever it is. Times are seconds, paths are UTF-8 with `/`.
@@ -58,8 +59,8 @@ header says what holds on both backends. The backend is chosen per root: on a sh
 so a watcher made with `Auto` polls such a root every `remote_interval` seconds (5), and
 `add_root(dir, FsWatchBackend::Poll)` polls one the test misses; `root_backend(id)` says
 which a root got. A loop that waits adds the watcher to its `PlatformWatch` and is woken
-when there is news; underneath, `wake_handle()` is inotify's descriptor (a `KHandle`, else
-none), `set_wake(fn, user)` has ReadDirectoryChangesW (a one-shot wait in the thread pool
+when there is news; underneath, `wake_handle()` is inotify's descriptor (a `Handle`, else
+null), `set_wake(fn, user)` has ReadDirectoryChangesW (a one-shot wait in the thread pool
 on each root's read) or FSEvents (its queue's callback) call `fn` once till a poll takes
 the news, and `due()` is the time by which `poll()` should next be called for what neither
 tells of (a polled root's walk).
@@ -128,8 +129,10 @@ its next walk. A `Process`'s pipes go to the thread where a pipe can be polled (
 queued, a read on the ring, and whatever this OS cannot watch (a pipe on Windows, whose
 watch takes sockets only) are asked about again in `kPlatformSoon` (4 ms) instead: the
 owner's code is the same on every OS, and only how promptly it hears differs. 64 handles
-in all; past that, soon. A handle is a `KHandle`, which carries its kind, so the wrong one
-cannot be watched by mistake: a file's is refused with an error line.
+in all; past that, soon. A handle knows its kind (`os_handle_kind`), so the wrong one
+cannot be watched by mistake: a file's is refused with an error line. A handle closed
+while it is watched is stale, and left out: its number is never polled for whatever has
+it next.
 
 ## Using it
 
@@ -177,7 +180,7 @@ asset module is the model consumer.
 main-thread system every tick:
 
 ```cpp
-for (KHandle h; (h = listener.accept()).is_open();) sessions.push(...).sock.adopt(h);
+for (Handle h; !(h = listener.accept()).is_null();) sessions.push(...).sock.adopt(h);
 for (Session& s : sessions) {
     i32 n = s.sock.read(buf, sizeof buf);      // 0: nothing yet; -1: the peer closed
     if (n > 0) s.sock.write(buf, (u32)n);      // queued
@@ -280,12 +283,14 @@ Header `korvid/platform/paths.h`:
 | `platform_base_dir(engine)`, `platform_exe_dir(out, cap)` | functions | the executable's directory with a trailing separator; assets live beneath it. The second asks the OS, for code with no engine |
 | `platform_assets_dir(out, cap)` | function | the program's loose assets, no trailing separator |
 
-Header `korvid/platform/khandle.h`:
+Header `korvid/platform/os_handle.h`:
 
 | name | kind | what |
 |---|---|---|
-| `KHandle` | record | what the OS opened, with its kind: `is_open()`, `kind()`, compared and handed back; none is -1 |
-| `KHandleKind` | enum | `None`, `File`, `Socket`, `Pipe`, `Notify`, `Process` |
+| `OsKind` | enum | `None`, `File`, `Socket`, `Pipe`, `Notify`, `Process`: what sort of OS object a `Handle` names |
+| `os_handle_kind(h)`, `os_handle_open(h)` | functions | the kind, or `None` for a handle that is null, stale or not the OS's; whether it is still open |
+| `os_handle_info(h, &info)`, `OsHandleInfo` | function, record | dev and debug builds: what was opened (`what`), by which module (`by`), when, and `bytes_in`, `bytes_out` |
+| `os_handles_open()`, `os_handles_each(fn, user)` | functions | how many the process has open through the platform, and each in turn |
 
 Headers `korvid/platform/fs_watch.h`, `process.h`, `stdin.h`:
 
@@ -299,7 +304,7 @@ Header `korvid/platform/net.h`:
 
 | name | kind | what |
 |---|---|---|
-| `NetListener` | record | `open(port, scope, &err)` (port 0: the OS picks, see `port`; `NetScope::Loopback` or `Any`), `close()`, `is_open()`, `accept()` (a `KHandle`, or none) |
+| `NetListener` | record | `open(port, scope, &err)` (port 0: the OS picks, see `port`; `NetScope::Loopback` or `Any`), `close()`, `is_open()`, `accept()` (a `Handle`, or null) |
 | `NetSocket` | record | `adopt(handle)`, `read(buf, cap)` (bytes, 0, or -1 closed), `write(data, size)`, `write_str(s)`, `flush()`, `close()`, `is_open()`, `out_limit`, `closed`, `bytes_in`, `bytes_out`, `dropped` |
 | `net_connect_local(port, &sock)` | function | a non-blocking connect to loopback, for tools and tests |
 
@@ -315,13 +320,14 @@ Header `korvid/platform/module.h`:
 | `platform_wake(engine)` | function | ends the wait under way or the next; any thread |
 | `platform_set_waiter(engine, w)`, `PlatformWaiter` | function, record | the window's `wait(user, seconds)` (1 early, 0 the time, -1 cannot now) and `wake(user)`; null clears |
 | `platform_waits(engine)`, `PlatformWaits` | function, record | `waits`, and of them ended by the `window`, `woken`, `timed` |
-| `PlatformWatch`, `platform_watch(engine, owner, w)`, `platform_unwatch(engine, owner)` | record, functions | what an owner's waiting loop is woken by: `add` a listener, a socket, an `FsWatcher`, a `Process`, an `IoQueue` or a `KHandle`, `at(when)`, `soon()`; replaces what the owner said; what this OS cannot watch is asked again in `kPlatformSoon` |
+| `PlatformWatch`, `platform_watch(engine, owner, w)`, `platform_unwatch(engine, owner)` | record, functions | what an owner's waiting loop is woken by: `add` a listener, a socket, an `FsWatcher`, a `Process`, an `IoQueue` or a `Handle`, `at(when)`, `soon()`; replaces what the owner said; what this OS cannot watch is asked again in `kPlatformSoon` |
 
 What the module registers with the engine:
 
 | name | kind | notes |
 |---|---|---|
 | `platform.io` | handle kind | an I/O request; `kv_handle_describe` prints its state and path |
+| `os.file`, `os.socket`, `os.pipe`, `os.notify`, `os.process` | handle kinds | what the OS has open, registered once for the process at the first one opened; `kv_handle_describe` prints what it is and, in dev and debug, who opened it and the bytes each way |
 | `platform.io_idle` | system, phase Work, main thread | serves idle reads and what the pumps held back, in the time the cycle has |
 
 ## Behaviour worth knowing

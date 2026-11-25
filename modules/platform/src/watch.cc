@@ -23,13 +23,13 @@ void PlatformWatch::at(f64 when) {
 
 void PlatformWatch::soon() { at(time_now() + kPlatformSoon); }
 
-void PlatformWatch::add(KHandle h) {
-    if (!h.is_open()) return;
-    if (h.kind() == KHandleKind::File) {
+void PlatformWatch::add(Handle h) {
+    if (!os_handle_open(h)) return;
+    if (os_handle_kind(h) == OsKind::File) {
         KV_ERROR("platform", "PlatformWatch: a file's handle wakes nothing (a file on a disk can always be read); it is not watched");
         return;
     }
-    if (!platform_watches_kind(*engine, h.kind()) || count == KV_COUNTOF(handles)) { soon(); return; }
+    if (!platform_watches_kind(*engine, os_handle_kind(h)) || count == KV_COUNTOF(handles)) { soon(); return; }
     handles[count++] = h;
 }
 
@@ -43,8 +43,8 @@ void PlatformWatch::add(const NetSocket& s) {
 
 void PlatformWatch::add(FsWatcher& w) {
     if (!w.is_open()) return;
-    KHandle h = w.wake_handle();
-    if (h.is_open()) add(h);
+    Handle h = w.wake_handle();
+    if (os_handle_open(h)) add(h);
     else w.set_wake(wake_engine, engine); // where the OS calls instead; false where it cannot, and due() then says soon
     at(w.due());
 }

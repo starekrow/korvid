@@ -39,7 +39,7 @@ struct Runcast {
     NetListener listener;
     NetSocket   sock;
     Process     child;
-    KHandle     lock;
+    Handle     lock;
     const char* argv[kMaxArgs] = {};
     u32         argc = 0;
     char        argbuf[kArgBytes] = {};
@@ -77,7 +77,7 @@ void release(Engine& e, Runcast& r) {
     if (r.child.is_open()) r.child.close();
     r.sock.close();
     if (r.listener.is_open()) r.listener.close();
-    if (r.lock.is_open()) { io_unlock_file(r.lock); r.lock = KHandle{}; }
+    if (!r.lock.is_null()) { io_unlock_file(r.lock); r.lock = Handle{}; }
     r.got.free();
     r.stage = Stage::Idle;
 }
@@ -116,8 +116,8 @@ void pump_child(Runcast& r) {
 
 void step_serve(Engine& e, Runcast& r) {
     if (r.stage == Stage::Listening) {
-        KHandle h = r.listener.accept();
-        if (!h.is_open()) return;
+        Handle h = r.listener.accept();
+        if (h.is_null()) return;
         r.sock.adopt(h);
         r.listener.close(); // one client a run
         ProcessDesc desc;
@@ -322,7 +322,7 @@ void cmd_serve(CliContext& ctx, Span<const char* const> args) {
     if (!r->listener.open(port, NetScope::Loopback, &err)) {
         ctx.fail("cannot listen on port %u: %s", (u32)port, os_error_text(err));
         io_unlock_file(r->lock);
-        r->lock = KHandle{};
+        r->lock = Handle{};
         return;
     }
     r->out_done = r->err_done = false;

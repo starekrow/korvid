@@ -226,8 +226,8 @@ JsonRef entry_value(JsonBuilder& b, const Entry& e) {
 }
 
 bool write_all(const char* path, const void* data, usize size, i32* err) {
-    KHandle f = os_file_open(path, true, err);
-    if (!f.is_open()) return false;
+    Handle f = os_file_open(path, true, err);
+    if (!os_handle_open(f)) return false;
     const u8* p = (const u8*)data;
     usize left = size;
     while (left) {
@@ -248,8 +248,8 @@ bool write_merged(SettingsStore* s, Span<const Entry> changes) {
     format(tmp, sizeof tmp, "%ssettings.json.tmp", s->dir);
     format(lock_path, sizeof lock_path, "%ssettings.lock", s->dir);
     i32 err = 0;
-    KHandle lock = os_file_lock(lock_path, &err);
-    if (!lock.is_open()) { KV_WARN("settings", "cannot lock %s (errno %d)", lock_path, err); return false; }
+    Handle lock = os_file_lock(lock_path, &err);
+    if (!os_handle_open(lock)) { KV_WARN("settings", "cannot lock %s (errno %d)", lock_path, err); return false; }
     Arena ar;
     if (!arena_create(ar, 256u << 20, "settings.write", MemTag{})) { os_file_close(lock); return false; }
     JsonDoc now;

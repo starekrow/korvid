@@ -671,11 +671,11 @@ void test_io_lock(kv::TestCtx& c) {
     char dir[256], path[400], holder[64];
     KV_CHECK(c, io_make_temp_dir("kv-io-lock", dir, sizeof dir));
     format(path, sizeof path, "%s/state.lock", dir);
-    KHandle first, second;
+    Handle first, second;
     i32 err = 0;
-    KV_CHECK(c, io_lock_file(path, "first", &first, holder, sizeof holder, &err) && first.is_open() && err == 0 && holder[0] == 0);
-    KV_CHECK(c, first.kind() == KHandleKind::File);
-    KV_CHECK(c, !io_lock_file(path, "second", &second, holder, sizeof holder, &err) && !second.is_open() && err == EWOULDBLOCK);
+    KV_CHECK(c, io_lock_file(path, "first", &first, holder, sizeof holder, &err) && os_handle_open(first) && err == 0 && holder[0] == 0);
+    KV_CHECK(c, os_handle_kind(first) == OsKind::File);
+    KV_CHECK(c, !io_lock_file(path, "second", &second, holder, sizeof holder, &err) && !os_handle_open(second) && err == EWOULDBLOCK);
     KV_CHECK(c, strncmp(holder, "first ", 6) == 0 && atoi(holder + 6) > 0); // who, and its process id
     io_unlock_file(first);
     err = 0;
@@ -690,4 +690,57 @@ void test_io_lock(kv::TestCtx& c) {
     KV_CHECK(c, os_env_set("KV_TEST_IO_ENV", nullptr) && (!getenv("KV_TEST_IO_ENV") || !getenv("KV_TEST_IO_ENV")[0]));
     TimeDate d = time_local_date();
     KV_CHECK(c, d.year >= 2025 && d.month >= 1 && d.month <= 12 && d.day >= 1 && d.day <= 31 && d.hour >= 0 && d.hour < 24);
+}
+
+// What the OS opened is a Handle like any other: it says what it is, it can be described,
+// and it goes stale when it is closed, in every copy.
+void test_os_handles(kv::TestCtx& c) {
+    using namespace kv;
+    char dir[256], path[400], text[400];
+    KV_CHECK(c, io_make_temp_dir("kv-os-handle", dir, sizeof dir));
+    format(path, sizeof path, "%s/out.txt", dir);
+    u32 open_before = os_handles_open();
+
+    IoFileWriter w;
+    KV_CHECK(c, w.open(path) && w.write("abc", 3) && w.print("%d", 12345));
+    Handle h = w.file, copy = h;
+    KV_CHECK(c, !h.is_null() && os_handle_open(h) && os_handle_kind(h) == OsKind::File);
+    KV_CHECK(c, os_handles_open() == open_before + 1);
+    KV_CHECK(c, strcmp(kind_name(h), "os.file") == 0); // an engine handle kind, as an entity's is
+    OsHandleInfo info;
+    KV_CHECK(c, os_handle_info(h, &info) && info.kind == OsKind::File);
+    KV_CHECK(c, kv_handle_describe(h.bits, text, sizeof text) > 0 && strncmp(text, "os.file#", 8) == 0);
+#if KV_DEV || KV_DEBUG
+    // A dev build keeps what was opened and what has moved through it.
+    KV_CHECK(c, strcmp(info.what, path) == 0 && info.bytes_out == 8 && info.bytes_in == 0 && info.opened_at > 0.0);
+    KV_CHECK(c, strstr(text, path) && strstr(text, "8 written"));
+#endif
+    struct Seen { Handle want; u32 hits; } seen{h, 0};
+    os_handles_each([](void* user, Handle each, const OsHandleInfo& i) { Seen& s = *(Seen*)user; if (each == s.want && i.kind == OsKind::File) ++s.hits; }, &seen);
+    KV_CHECK(c, seen.hits == 1);
+
+    // Closed: every copy is stale. It names nothing, describes as closed, and cannot be
+    // written through, whatever the OS has since done with the value it held.
+    KV_CHECK(c, w.close());
+    KV_CHECK(c, !os_handle_open(copy) && os_handle_kind(copy) == OsKind::None && !os_handle_info(copy, &info));
+    KV_CHECK(c, os_handles_open() == open_before);
+    KV_CHECK(c, kv_handle_describe(copy.bits, text, sizeof text) > 0 && strstr(text, "closed"));
+    IoFileWriter other; // a new file, which the OS may well give the old one's value
+    char path2[400];
+    format(path2, sizeof path2, "%s/other.txt", dir);
+    KV_CHECK(c, other.open(path2) && other.file != copy);
+    IoFileWriter stale;
+    stale.file = copy;
+    KV_CHECK(c, !stale.write("never", 5) && stale.error == EBADF); // not into other.txt
+    stale.file = Handle{};
+    KV_CHECK(c, other.close());
+    IoBytes b;
+    KV_CHECK(c, io_read_file(path2, &b) && b.size == 0); // untouched
+    b.free();
+    KV_CHECK(c, io_read_file(path, &b) && b.size == 8 && memcmp(b.data, "abc12345", 8) == 0);
+    b.free();
+
+    // An entity's handle, or any that is not the OS's, is simply not an OS handle.
+    KV_CHECK(c, os_handle_kind(Handle::make(1, 1, 0)) == OsKind::None && !os_handle_open(Handle{}));
+    KV_CHECK(c, io_remove_tree(dir) && os_handles_open() == open_before);
 }

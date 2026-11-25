@@ -3,6 +3,7 @@
 #include "korvid/core/format.h"
 #include "korvid/core/memory.h"
 #include "../os_err.h"
+#include "../os_handle_table.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -47,15 +48,16 @@ bool proc_pipe(int fds[2]) {
 
 void proc_close(int& fd) { if (fd >= 0) close(fd); fd = -1; }
 
-i32 proc_read(KHandle& fd, void* buf, u32 cap) {
-    if (!fd.is_open()) return -1;
+i32 proc_read(Handle& fd, void* buf, u32 cap) {
+    if (!os_handle_open(fd)) return -1;
     for (;;) {
-        ssize_t n = read((int)fd.os(), buf, cap);
-        if (n > 0) return (i32)n;
+        ssize_t n = read((int)os_handle_value(fd), buf, cap);
+        if (n > 0) { os_handle_count(fd, (u64)n, 0); return (i32)n; }
         if (n < 0 && errno == EINTR) continue;
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return 0;
-        close((int)fd.os()); // the end, or an error we can do nothing about
-        fd = KHandle{};
+        i64 v = os_handle_release(fd); // the end, or an error we can do nothing about: stale, then closed
+        if (v >= 0) close((int)v);
+        fd = Handle{};
         return -1;
     }
 }
@@ -196,8 +198,11 @@ bool Process::spawn(const ProcessDesc& desc, i32* err) {
     fcntl(out[0], F_SETFL, fcntl(out[0], F_GETFL, 0) | O_NONBLOCK);
     fcntl(err[0], F_SETFL, fcntl(err[0], F_GETFL, 0) | O_NONBLOCK);
     pid    = child;
-    out_fd = khandle_make(KHandleKind::Pipe, out[0]);
-    err_fd = khandle_make(KHandleKind::Pipe, err[0]);
+    char label[160];
+    format(label, sizeof label, "stdout of %s", what);
+    out_fd = os_handle_make(OsKind::Pipe, out[0], label);
+    format(label, sizeof label, "stderr of %s", what);
+    err_fd = os_handle_make(OsKind::Pipe, err[0], label);
     exited = false;
     code   = 0;
     return true;
@@ -206,8 +211,8 @@ bool Process::spawn(const ProcessDesc& desc, i32* err) {
 void Process::wait(f64 seconds) {
     pollfd fds[2];
     nfds_t n = 0;
-    if (out_fd.is_open()) fds[n++] = pollfd{(int)out_fd.os(), POLLIN, 0};
-    if (err_fd.is_open()) fds[n++] = pollfd{(int)err_fd.os(), POLLIN, 0};
+    if (os_handle_open(out_fd)) fds[n++] = pollfd{(int)os_handle_value(out_fd), POLLIN, 0};
+    if (os_handle_open(err_fd)) fds[n++] = pollfd{(int)os_handle_value(err_fd), POLLIN, 0};
     if (!n) seconds = seconds < 0.001 ? seconds : 0.001;
     int ms = seconds <= 0 ? 0 : (int)(seconds * 1000.0 + 0.999);
     poll(n ? fds : nullptr, n, ms);
@@ -239,10 +244,12 @@ void Process::close() {
         int status;
         while (waitpid((pid_t)pid, &status, 0) < 0 && errno == EINTR) {}
     }
-    if (out_fd.is_open()) ::close((int)out_fd.os());
-    if (err_fd.is_open()) ::close((int)err_fd.os());
+    i64 v = os_handle_release(out_fd); // stale, then closed
+    if (v >= 0) ::close((int)v);
+    v = os_handle_release(err_fd);
+    if (v >= 0) ::close((int)v);
     pid = -1;
-    out_fd = err_fd = KHandle{};
+    out_fd = err_fd = Handle{};
     exited = false;
     code = 0;
 }

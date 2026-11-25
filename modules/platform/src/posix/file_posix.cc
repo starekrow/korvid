@@ -18,34 +18,39 @@
 
 namespace kv {
 
-KHandle os_file_open(const char* path, bool write, i32* err) {
+Handle os_file_open(const char* path, bool write, i32* err) {
     int fd = write ? open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644) : open(path, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) { *err = errno; return KHandle{}; }
-    return khandle_make(KHandleKind::File, fd);
+    if (fd < 0) { *err = errno; return Handle{}; }
+    return os_handle_make(OsKind::File, fd, path);
 }
 
-void os_file_close(KHandle f) { if (f.is_open()) close((int)f.os()); }
+// The slot first, so every copy of the handle is stale before the OS can give the
+// descriptor to something else; closing one already closed does nothing.
+void os_file_close(Handle f) {
+    i64 v = os_handle_release(f);
+    if (v >= 0) close((int)v);
+}
 
-bool os_file_sync(KHandle f, i32* err) {
+bool os_file_sync(Handle f, i32* err) {
 #if defined(__APPLE__)
     // fsync on Apple leaves the data in the drive's cache; F_FULLFSYNC asks it to the platter.
-    if (fcntl((int)f.os(), F_FULLFSYNC) == 0) return true;
+    if (fcntl((int)os_handle_value(f), F_FULLFSYNC) == 0) return true;
 #endif
-    if (fsync((int)f.os()) == 0) return true;
+    if (fsync((int)os_handle_value(f)) == 0) return true;
     *err = errno;
     return false;
 }
 
-KHandle os_file_lock(const char* path, i32* err) {
+Handle os_file_lock(const char* path, i32* err) {
     int fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
-    if (fd < 0) { *err = errno; return KHandle{}; }
+    if (fd < 0) { *err = errno; return Handle{}; }
     while (flock(fd, LOCK_EX) != 0) {
         if (errno == EINTR) continue;
         *err = errno;
         close(fd);
-        return KHandle{};
+        return Handle{};
     }
-    return khandle_make(KHandleKind::File, fd);
+    return os_handle_make(OsKind::File, fd, path);
 }
 
 void os_dir_sync(const char* dir) {
@@ -55,16 +60,17 @@ void os_dir_sync(const char* dir) {
     close(fd);
 }
 
-bool os_file_size(KHandle f, u64* size, i32* err) {
+bool os_file_size(Handle f, u64* size, i32* err) {
     struct stat st;
-    if (fstat((int)f.os(), &st) != 0) { *err = errno; return false; }
+    if (fstat((int)os_handle_value(f), &st) != 0) { *err = errno; return false; }
     *size = (u64)st.st_size;
     return true;
 }
 
-i64 os_file_read_at(KHandle f, void* buf, usize n, u64 at, i32* err) {
+i64 os_file_read_at(Handle f, void* buf, usize n, u64 at, i32* err) {
     for (;;) {
-        ssize_t r = pread((int)f.os(), buf, n, (off_t)at);
+        ssize_t r = pread((int)os_handle_value(f), buf, n, (off_t)at); // a stale handle is -1: EBADF, never another file
+        if (r > 0) os_handle_count(f, (u64)r, 0);
         if (r >= 0) return r;
         if (errno == EINTR) continue;
         *err = errno;
@@ -72,9 +78,10 @@ i64 os_file_read_at(KHandle f, void* buf, usize n, u64 at, i32* err) {
     }
 }
 
-i64 os_file_write(KHandle f, const void* buf, usize n, i32* err) {
+i64 os_file_write(Handle f, const void* buf, usize n, i32* err) {
     for (;;) {
-        ssize_t r = ::write((int)f.os(), buf, n);
+        ssize_t r = ::write((int)os_handle_value(f), buf, n);
+        if (r > 0) os_handle_count(f, 0, (u64)r);
         if (r >= 0) return r;
         if (errno == EINTR) continue;
         *err = errno;
@@ -268,10 +275,10 @@ namespace kv {
 
 // flock on the whole file, asked for without waiting. The descriptor is not inherited
 // across exec, so a child the holder starts does not hold it.
-KHandle os_file_lock_try(const char* path, const char* who, char* holder, u32 cap, i32* err) {
+Handle os_file_lock_try(const char* path, const char* who, char* holder, u32 cap, i32* err) {
     if (holder && cap) holder[0] = 0;
     int fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
-    if (fd < 0) { if (err) *err = errno; return KHandle{}; }
+    if (fd < 0) { if (err) *err = errno; return Handle{}; }
     if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
         int why = errno;
         bool held = why == EWOULDBLOCK || why == EAGAIN;
@@ -282,12 +289,12 @@ KHandle os_file_lock_try(const char* path, const char* who, char* holder, u32 ca
         }
         close(fd);
         if (err) *err = held ? EWOULDBLOCK : why;
-        return KHandle{};
+        return Handle{};
     }
     char line[160];
     int n = kv::format(line, sizeof line, "%s %d\n", who ? who : "", (int)getpid());
     if (n > 0 && ftruncate(fd, 0) == 0 && write(fd, line, (usize)n) < 0) {}
-    return khandle_make(KHandleKind::File, fd); // closing it lets the lock go
+    return os_handle_make(OsKind::File, fd, path); // closing it lets the lock go
 }
 
 } // namespace kv

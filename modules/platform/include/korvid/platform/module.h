@@ -127,12 +127,12 @@ struct PlatformWatch {
     // A handle of the owner's own. Watched where this OS can watch its kind; asked again
     // soon where it cannot (a pipe on Windows). A file on a disk is always readable and
     // wakes nothing anywhere: an error, logged.
-    void add(KHandle h);
+    void add(Handle h);
     void at(f64 when);               // no later than `when` (time_now's clock)
     void soon();                     // no later than kPlatformSoon from now
 
     Engine* engine;
-    KHandle handles[64];
+    Handle handles[64];
     u32     count = 0;
     f64     due   = 0.0;             // the earliest time asked for; 0: none
 };

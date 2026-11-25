@@ -5,7 +5,7 @@
 // to every interface, and should think before it does.
 #pragma once
 #include "korvid/core/array.h"
-#include "korvid/platform/khandle.h"
+#include "korvid/platform/os_handle.h"
 
 namespace kv {
 
@@ -13,15 +13,15 @@ namespace kv {
 enum class NetScope : u8 { Loopback, Any };
 
 struct NetListener {
-    KHandle fd;      // KHandleKind::Socket
+    Handle fd;      // OsKind::Socket
     u16   port = 0; // the bound port; what the OS chose when asked for 0
 
     // False (*err: EADDRINUSE, EACCES, the OS's errno) with a log line if it cannot listen.
     bool open(u16 port, NetScope scope = NetScope::Loopback, i32* err = nullptr);
     void close();
-    bool is_open() const { return fd.is_open(); }
+    bool is_open() const { return os_handle_open(fd); }
     // A connected socket, or none (not is_open) when nobody is waiting. Non-blocking.
-    KHandle accept();
+    Handle accept();
 };
 
 // Where a socket's connection stands. One that was accepted is Up from the start; one
@@ -29,7 +29,7 @@ struct NetListener {
 enum class NetLink : u8 { None, Connecting, Up, Failed };
 
 struct NetSocket {
-    KHandle   fd;       // KHandleKind::Socket
+    Handle   fd;       // OsKind::Socket
     Array<u8> out;        // queued for sending; flush() drains what the kernel takes. Set out.alloc before the first write to say where it lives
     u32       out_limit = 64 * 1024; // past this, writes are dropped and counted, never blocked on
     bool      closed = false;        // over: the peer went away (read saw the end, or a send failed), or the connect failed
@@ -38,8 +38,8 @@ struct NetSocket {
     u64       bytes_in = 0, bytes_out = 0, dropped = 0;
 
     // Takes ownership of a socket (from accept) and makes it non-blocking.
-    void adopt(KHandle fd);
-    bool is_open() const { return fd.is_open() && !closed; }
+    void adopt(Handle fd);
+    bool is_open() const { return os_handle_open(fd) && !closed; }
     // Where the connection stands. Free for a socket that is Up or over; while Connecting it
     // asks the OS, without waiting, and remembers the answer. Failed is also `closed`, with
     // `error` saying why (ECONNREFUSED: nobody is listening there). read() asks this
@@ -71,6 +71,6 @@ struct NetSocket {
 bool net_connect_local(u16 port, NetSocket* out, i32* err = nullptr);
 
 // Closes a socket nobody adopted (one accept returned that is being turned away).
-void net_close(KHandle fd);
+void net_close(Handle fd);
 
 } // namespace kv

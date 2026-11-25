@@ -3,7 +3,7 @@
 // source per OS (posix/stdin_posix.cc, win32/stdin_win32.cc).
 #pragma once
 #include "korvid/core/types.h"
-#include "korvid/platform/khandle.h"
+#include "korvid/platform/os_handle.h"
 
 namespace kv {
 
@@ -14,6 +14,6 @@ bool io_stdin_is_terminal();
 i32  io_stdin_read(void* buf, u32 cap);
 // What a waiting loop can be woken by when input arrives (PlatformWatch::add), or none
 // where this OS cannot watch it (Windows: a console's or a pipe's handle is no socket).
-KHandle io_stdin_handle();
+Handle io_stdin_handle();
 
 } // namespace kv

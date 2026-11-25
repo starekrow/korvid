@@ -17,7 +17,7 @@
 //   that OS's to write: a line that must run everywhere is a script, started with spawn.
 #pragma once
 #include "korvid/core/types.h"
-#include "korvid/platform/khandle.h"
+#include "korvid/platform/os_handle.h"
 
 namespace kv {
 
@@ -30,11 +30,11 @@ struct ProcessDesc {
 
 struct Process {
     i64  pid = -1;               // the OS's id while it is known; -1 when there is no child
-    KHandle out_fd, err_fd;     // KHandleKind::Pipe: the read ends of its stdout and stderr
+    Handle out_fd, err_fd;     // OsKind::Pipe: the read ends of its stdout and stderr
     bool exited = false;
     i32  code = 0;               // once exited: its status, or 128 + the signal that ended it
     char error[160] = {};        // why spawn failed
-    KHandle process, group;      // the platform's own hold on the child and on what it started, where the OS gives one beyond the id
+    Handle process, group;      // the platform's own hold on the child and on what it started, where the OS gives one beyond the id
 
     // False with `error` set if the program cannot be started (not found, not executable,
     // no such directory), and *err (if given) its errno: ENOENT, EACCES, EINVAL for nothing

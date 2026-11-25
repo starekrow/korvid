@@ -213,6 +213,7 @@ struct FsWatchState {
 #if KV_FS_NATIVE
     FsNative*       n = nullptr;
     bool            wakes = false; // set_wake's fn is called by the native backend
+    Handle          notify;        // the native backend's descriptor as a handle (inotify's), made once: wake_handle's
     void          (*wake_fn)(void*) = nullptr; // what set_wake was last given: the same again is no work
     void*           wake_user = nullptr;
 #endif
@@ -245,6 +246,9 @@ bool FsWatcher::open(FsWatchBackend backend, f64 poll_interval, f64 remote_inter
         }
     }
 #endif
+#if KV_FS_NATIVE
+    if (s->native) s->notify = os_handle_make(OsKind::Notify, fs_native_fd(s->n), fs_native_name()); // null where the backend has none
+#endif
     state = s;
     return true;
 }
@@ -252,6 +256,7 @@ bool FsWatcher::open(FsWatchBackend backend, f64 poll_interval, f64 remote_inter
 void FsWatcher::close() {
     if (!state) return;
 #if KV_FS_NATIVE
+    os_handle_release(state->notify); // the handle stale first; the descriptor is the backend's to close
     if (state->n) fs_native_destroy(state->n);
 #endif
     for (FsPollRoot& r : state->roots) {
@@ -348,11 +353,11 @@ FsWatchBackend FsWatcher::root_backend(u32 id) const {
     return FsWatchBackend::Auto;
 }
 
-KHandle FsWatcher::wake_handle() const {
+Handle FsWatcher::wake_handle() const {
 #if KV_FS_NATIVE
-    if (state && state->native) return khandle_make(KHandleKind::Notify, fs_native_fd(state->n));
+    if (state && state->native) return state->notify;
 #endif
-    return KHandle{};
+    return Handle{};
 }
 
 f64 FsWatcher::due() const {

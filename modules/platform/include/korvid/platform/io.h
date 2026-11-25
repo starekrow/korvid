@@ -28,7 +28,7 @@
 #include "korvid/core/handle.h"
 #include "korvid/core/pool.h"
 #include "korvid/pack/zip.h"
-#include "korvid/platform/khandle.h"
+#include "korvid/platform/os_handle.h"
 
 namespace kv {
 
@@ -343,7 +343,7 @@ bool io_copy_file(const char* from, const char* to, u8 hash[32] = nullptr, i32* 
 // A file written in pieces, now: open (created or truncated), write and print as often as
 // need be, close. A failure sticks: what follows does nothing, and close reports it.
 struct IoFileWriter {
-    KHandle file;
+    Handle file;
     i32    error = 0;
     bool open(const char* path);
     bool write(const void* data, usize size);
@@ -392,8 +392,8 @@ bool io_is_dir(const char* path);
 // False with *err EWOULDBLOCK: another process has it, and `holder` (if given) is its
 // line. False with any other *err: the file cannot be made. flock on POSIX; LockFileEx on
 // Windows, on a byte past the end so the line stays readable.
-bool io_lock_file(const char* path, const char* who, KHandle* lock, char* holder = nullptr, u32 holder_cap = 0, i32* err = nullptr);
-void io_unlock_file(KHandle lock);
+bool io_lock_file(const char* path, const char* who, Handle* lock, char* holder = nullptr, u32 holder_cap = 0, i32* err = nullptr);
+void io_unlock_file(Handle lock);
 
 // The platform module's queue, or null if the module is not started.
 IoQueue* platform_io(Engine& e);

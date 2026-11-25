@@ -18,8 +18,8 @@ namespace kv {
 
 namespace {
 i32 fail_errno() { return errno_from_win32(GetLastError()); }
-HANDLE file_handle(KHandle f) { return (HANDLE)(intptr_t)f.os(); }
-KHandle file_of(HANDLE h) { return khandle_make(KHandleKind::File, (i64)(intptr_t)h); }
+HANDLE file_handle(Handle f) { return (HANDLE)(intptr_t)os_handle_value(f); }
+Handle file_of(HANDLE h, const char* path) { return os_handle_make(OsKind::File, (i64)(intptr_t)h, path); }
 
 // One operation on an overlapped handle, waited for: the bytes moved, 0 at the end of the
 // file, or -1 with *err set. The event is the operation's own, so a completion of another
@@ -42,41 +42,46 @@ i64 overlapped_wait(HANDLE h, bool write, void* buf, DWORD want, u64 at, i32* er
 }
 } // namespace
 
-KHandle os_file_open(const char* path, bool write, i32* err) {
+Handle os_file_open(const char* path, bool write, i32* err) {
     WidePath wp;
-    if (!wp.set(path, err)) return KHandle{};
+    if (!wp.set(path, err)) return Handle{};
     const wchar_t* w = wp.w;
     // Readers let others read, write and delete meanwhile, as POSIX descriptors do.
     // Overlapped, for the ring: see the top of the file.
     HANDLE h = write ? CreateFileW(w, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr)
                      : CreateFileW(w, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
-    if (h == INVALID_HANDLE_VALUE) { *err = fail_errno(); return KHandle{}; }
-    return file_of(h);
+    if (h == INVALID_HANDLE_VALUE) { *err = fail_errno(); return Handle{}; }
+    return file_of(h, path);
 }
 
-void os_file_close(KHandle f) { if (f.is_open()) CloseHandle(file_handle(f)); }
+// The slot first, so every copy of the handle is stale before the OS can give the value
+// to something else; closing one already closed does nothing.
+void os_file_close(Handle f) {
+    i64 v = os_handle_release(f);
+    if (v >= 0) CloseHandle((HANDLE)(intptr_t)v);
+}
 
-bool os_file_sync(KHandle f, i32* err) {
+bool os_file_sync(Handle f, i32* err) {
     if (FlushFileBuffers(file_handle(f))) return true;
     *err = fail_errno();
     return false;
 }
 
-KHandle os_file_lock(const char* path, i32* err) {
+Handle os_file_lock(const char* path, i32* err) {
     WidePath wp;
-    if (!wp.set(path, err)) return KHandle{};
+    if (!wp.set(path, err)) return Handle{};
     HANDLE h = CreateFileW(wp.w, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE) { *err = fail_errno(); return KHandle{}; }
+    if (h == INVALID_HANDLE_VALUE) { *err = fail_errno(); return Handle{}; }
     OVERLAPPED ov{};
-    if (!LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &ov)) { *err = fail_errno(); CloseHandle(h); return KHandle{}; }
-    return file_of(h); // closing it lets the lock go
+    if (!LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &ov)) { *err = fail_errno(); CloseHandle(h); return Handle{}; }
+    return file_of(h, path); // closing it lets the lock go
 }
 
 void os_dir_sync(const char*) {}
 
-bool os_file_size(KHandle f, u64* size, i32* err) {
+bool os_file_size(Handle f, u64* size, i32* err) {
     LARGE_INTEGER li;
     if (!GetFileSizeEx(file_handle(f), &li)) { *err = fail_errno(); return false; }
     *size = (u64)li.QuadPart;
@@ -84,16 +89,22 @@ bool os_file_size(KHandle f, u64* size, i32* err) {
 }
 
 // At the offset, waited for. One call moves at most 1 GiB.
-i64 os_file_read_at(KHandle f, void* buf, usize n, u64 at, i32* err) {
+i64 os_file_read_at(Handle f, void* buf, usize n, u64 at, i32* err) {
     DWORD want = n > (1u << 30) ? (1u << 30) : (DWORD)n;
-    return overlapped_wait(file_handle(f), false, buf, want, at, err);
+    if (!os_handle_open(f)) { *err = EBADF; return -1; } // closed: never whatever has the value now
+    i64 got = overlapped_wait(file_handle(f), false, buf, want, at, err);
+    if (got > 0) os_handle_count(f, (u64)got, 0);
+    return got;
 }
 
 // At the end of the file (an offset of all ones: an overlapped handle has no position), so
 // a file written from its creation is written in order. One call moves at most 1 GiB.
-i64 os_file_write(KHandle f, const void* buf, usize n, i32* err) {
+i64 os_file_write(Handle f, const void* buf, usize n, i32* err) {
     DWORD want = n > (1u << 30) ? (1u << 30) : (DWORD)n;
-    return overlapped_wait(file_handle(f), true, (void*)buf, want, ~0ull, err);
+    if (!os_handle_open(f)) { *err = EBADF; return -1; }
+    i64 put = overlapped_wait(file_handle(f), true, (void*)buf, want, ~0ull, err);
+    if (put > 0) os_handle_count(f, 0, (u64)put);
+    return put;
 }
 
 // The entry's own record, as a listing of its directory has it: the reparse tag says a
@@ -417,13 +428,13 @@ namespace kv {
 // what it covers, and the holder's line must stay readable. Not overlapped (the lock is
 // asked for and answered at once), not inherited, so a child the holder starts does not
 // hold it.
-KHandle os_file_lock_try(const char* path, const char* who, char* holder, u32 cap, i32* err) {
+Handle os_file_lock_try(const char* path, const char* who, char* holder, u32 cap, i32* err) {
     if (holder && cap) holder[0] = 0;
     WidePath wp;
-    if (!wp.set(path, err)) return KHandle{};
+    if (!wp.set(path, err)) return Handle{};
     HANDLE h = CreateFileW(wp.w, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                            nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE) { if (err) *err = fail_errno(); return KHandle{}; }
+    if (h == INVALID_HANDLE_VALUE) { if (err) *err = fail_errno(); return Handle{}; }
     OVERLAPPED at{};
     at.Offset     = 0xFFFFFFFEu; // the lock's byte: past any line, so the line stays readable
     at.OffsetHigh = 0x7FFFFFFFu;
@@ -439,13 +450,13 @@ KHandle os_file_lock_try(const char* path, const char* who, char* holder, u32 ca
         }
         CloseHandle(h);
         if (err) *err = held ? EWOULDBLOCK : errno_from_win32(why);
-        return KHandle{};
+        return Handle{};
     }
     char line[160];
     int n = kv::format(line, sizeof line, "%s %lu\n", who ? who : "", (unsigned long)GetCurrentProcessId());
     DWORD wrote = 0;
     if (n > 0 && SetFilePointer(h, 0, nullptr, FILE_BEGIN) == 0 && SetEndOfFile(h)) WriteFile(h, line, (DWORD)n, &wrote, nullptr);
-    return file_of(h); // closing it lets the lock go
+    return file_of(h, path); // closing it lets the lock go
 }
 
 } // namespace kv

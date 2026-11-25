@@ -3,6 +3,7 @@
 #pragma once
 #include "korvid/platform/module.h"
 #include "platform_state.h"
+#include "os_handle_table.h"
 
 namespace kv {
 
@@ -16,18 +17,18 @@ void platform_wake_state(PlatformState& s);
 // handles or the thread cannot be had. A handle of a kind this OS cannot watch
 // (platform_watches_kind) is an error, logged with its kind: left out, the rest watched,
 // and the answer false. PlatformWatch::add asks first, so it never gives one.
-bool platform_wake_set(Engine& e, const void* owner, const KHandle* handles, u32 n);
+bool platform_wake_set(Engine& e, const void* owner, const Handle* handles, u32 n);
 // Whether a handle of this kind can be watched here: a socket everywhere; a pipe or a
 // notify descriptor on POSIX only (Windows' watch is WSAPoll, which takes sockets).
-bool platform_watches_kind(Engine& e, KHandleKind kind);
+bool platform_watches_kind(Engine& e, OsKind kind);
 
 bool       wake_watch_supported();
 // Whether a handle of this kind can be watched here: wake_watch_set is given only those.
-bool       wake_watch_takes(KHandleKind k);
+bool       wake_watch_takes(OsKind k);
 // Null when the OS cannot watch. The thread starts at the first socket given.
 WakeWatch* wake_watch_create(PlatformState& s);
 void       wake_watch_destroy(WakeWatch* w); // stops and joins the thread
-bool       wake_watch_set(WakeWatch* w, const void* owner, const KHandle* fds, u32 n);
+bool       wake_watch_set(WakeWatch* w, const void* owner, const Handle* fds, u32 n);
 // Watches again what woke the thread since the last call.
 void       wake_watch_rearm(WakeWatch* w);
 

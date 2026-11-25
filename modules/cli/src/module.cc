@@ -336,7 +336,7 @@ void cli_shutdown(Engine& e, ModuleInstance& self) {
 void cli_pump(TickContext& ctx) {
     CliState& cli = ctx.state_as<CliState>();
     Engine& e = *ctx.engine;
-    for (KHandle fd; (fd = cli.listener.accept()).is_open();) {
+    for (Handle fd; os_handle_open(fd = cli.listener.accept());) {
         if (cli.session_count >= kMaxSessions) { net_close(fd); KV_WARN("cli", "connection refused: %u sessions", kMaxSessions); continue; }
         Session& s = cli.sessions[cli.session_count++];
         s = Session{};

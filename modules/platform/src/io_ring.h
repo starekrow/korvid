@@ -6,6 +6,7 @@
 // reads and writes. Every function is a no-op (create returns null) where there is no ring.
 #pragma once
 #include "korvid/platform/io.h"
+#include "os_handle_table.h"
 
 namespace kv {
 
@@ -16,9 +17,9 @@ void    io_ring_destroy(IoRing* ring);
 // Room for another submission before the next enter.
 bool    io_ring_can_push(const IoRing* ring);
 // Queues a read of `len` bytes at `offset` into `buf`; `user` comes back on the completion.
-void    io_ring_push_read(IoRing* ring, KHandle fd, void* buf, u32 len, u64 offset, u64 user);
+void    io_ring_push_read(IoRing* ring, Handle fd, void* buf, u32 len, u64 offset, u64 user);
 // Queues a write of `len` bytes from `buf` at `offset`.
-void    io_ring_push_write(IoRing* ring, KHandle fd, const void* buf, u32 len, u64 offset, u64 user);
+void    io_ring_push_write(IoRing* ring, Handle fd, const void* buf, u32 len, u64 offset, u64 user);
 // Submits what was pushed; waits for `min_complete` completions (0: none). False on error.
 bool    io_ring_enter(IoRing* ring, u32 min_complete);
 // Takes one completion: `res` is bytes read or a negative errno. False when none is ready.

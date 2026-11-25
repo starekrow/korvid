@@ -203,34 +203,22 @@ void platform_set_waiter(Engine& e, const PlatformWaiter* w) {
     os_mutex_unlock(&s->wait_lock);
 }
 
-const char* khandle_kind_name(KHandleKind k) {
-    switch (k) {
-    case KHandleKind::None:   return "none";
-    case KHandleKind::File:   return "file";
-    case KHandleKind::Socket: return "socket";
-    case KHandleKind::Pipe:   return "pipe";
-    case KHandleKind::Notify: return "notify";
-    case KHandleKind::Process: return "process";
-    }
-    return "?";
-}
+bool platform_watches_kind(Engine&, OsKind kind) { return wake_watch_supported() && wake_watch_takes(kind); }
 
-bool platform_watches_kind(Engine&, KHandleKind kind) { return wake_watch_supported() && wake_watch_takes(kind); }
-
-bool platform_wake_set(Engine& e, const void* owner, const KHandle* handles, u32 n) {
+bool platform_wake_set(Engine& e, const void* owner, const Handle* handles, u32 n) {
     PlatformState* s = state(e);
     if (!s || !wake_watch_supported()) return false;
     // Only what this OS can watch goes to the thread. A handle of another kind is the
     // caller's mistake (platform_watches_kind says beforehand): named, left out, and the
     // answer false, so the owner asks to be woken by the clock as it would with no watch.
-    KHandle taken[64];
+    Handle taken[64];
     u32 count = 0;
     bool all = true;
     for (u32 i = 0; i < n; ++i) {
-        if (!handles[i].is_open()) continue;
-        if (!wake_watch_takes(handles[i].kind())) {
+        if (!os_handle_open(handles[i])) continue;
+        if (!wake_watch_takes(os_handle_kind(handles[i]))) {
             KV_ERROR("platform", "platform_wake_set: a %s handle cannot wake a waiting loop on this OS; it is not watched",
-                     khandle_kind_name(handles[i].kind()));
+                     os_kind_name(os_handle_kind(handles[i])));
             all = false;
             continue;
         }

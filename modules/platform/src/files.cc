@@ -15,8 +15,8 @@ void IoBytes::free() {
 bool io_read_file(const char* path, IoBytes* out, Allocator* alloc, i32* err) {
     *out = IoBytes{};
     i32 e = 0;
-    KHandle f = os_file_open(path, false, &e);
-    if (!f.is_open()) { if (err) *err = e; return false; }
+    Handle f = os_file_open(path, false, &e);
+    if (!os_handle_open(f)) { if (err) *err = e; return false; }
     u64 size = 0;
     if (!os_file_size(f, &size, &e)) { os_file_close(f); if (err) *err = e; return false; }
     Allocator* a = alloc ? alloc : mem_general();
@@ -48,11 +48,11 @@ bool io_write_file(const char* path, const void* data, usize size, i32* err) {
 bool IoFileWriter::open(const char* path) {
     error = 0;
     file = os_file_open(path, true, &error);
-    return file.is_open();
+    return os_handle_open(file);
 }
 
 bool IoFileWriter::write(const void* data, usize size) {
-    if (!file.is_open() || error) { if (!error) error = EBADF; return false; }
+    if (!os_handle_open(file) || error) { if (!error) error = EBADF; return false; }
     const u8* p = (const u8*)data;
     while (size) {
         i64 n = os_file_write(file, p, size, &error);
@@ -74,8 +74,8 @@ bool IoFileWriter::print(const char* fmt, ...) {
 }
 
 bool IoFileWriter::close() {
-    if (file.is_open()) os_file_close(file);
-    file = KHandle{};
+    if (os_handle_open(file)) os_file_close(file);
+    file = Handle{};
     if (!error) return true;
     return false;
 }
@@ -101,16 +101,16 @@ bool io_is_dir(const char* path) { return os_path_kind(path) == OsPathKind::Dir;
 
 namespace kv {
 
-bool io_lock_file(const char* path, const char* who, KHandle* lock, char* holder, u32 holder_cap, i32* err) {
-    *lock = KHandle{};
+bool io_lock_file(const char* path, const char* who, Handle* lock, char* holder, u32 holder_cap, i32* err) {
+    *lock = Handle{};
     if (!path || !path[0]) { if (err) *err = ENOENT; return false; }
     i32 why = 0;
     *lock = os_file_lock_try(path, who, holder, holder_cap, &why);
-    if (lock->is_open()) return true;
+    if (!lock->is_null()) return true;
     if (err) *err = why ? why : EIO;
     return false;
 }
 
-void io_unlock_file(KHandle lock) { os_file_close(lock); }
+void io_unlock_file(Handle lock) { os_file_close(lock); }
 
 } // namespace kv

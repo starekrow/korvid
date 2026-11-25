@@ -262,7 +262,7 @@ struct GoldbergState {
     f64             share = 1.0;
     Array<Hold>     holds;
     Array<Held>     held;
-    KHandle         lock;                // the lock on the output tree's state, while held (io_lock_file)
+    Handle         lock;                // the lock on the output tree's state, while held (io_lock_file)
     f64             watch_floor = 0;     // the least time a held file waits: over the polling watcher's interval
     bool            watch_sync = false;  // host.watch_sync: the watcher heard out before a run's exit is delivered
     char            out_dir[600] = {};   // the output tree
@@ -330,7 +330,7 @@ void tell_programs(GoldbergState& s, const char* verb, const char* output) {
 // New connections taken, hellos read, what was told sent, the gone let go.
 void serve_programs(GoldbergState& s) {
     if (!s.listener.is_open()) return;
-    for (KHandle fd = s.listener.accept(); fd.is_open(); fd = s.listener.accept()) {
+    for (Handle fd = s.listener.accept(); os_handle_open(fd); fd = s.listener.accept()) {
         GoldbergState::Program* p = (GoldbergState::Program*)mem_alloc(sizeof(GoldbergState::Program));
         *p = GoldbergState::Program{};
         p->sock.adopt(fd);
@@ -1410,7 +1410,7 @@ int host_remove_work(lua_State* L) {
 int host_lock(lua_State* L) {
     GoldbergState& s = *state_of(L);
     char holder[128];
-    if (s.lock.is_open()) { lua_pushboolean(L, 1); return 1; }
+    if (os_handle_open(s.lock)) { lua_pushboolean(L, 1); return 1; }
     // A file beside the state, locked for as long as the process lives: the OS lets go of it
     // when the process ends, however it ends, so there is no stale lock to clear.
     i32 err = 0;
@@ -2011,7 +2011,7 @@ void goldberg_shutdown(Engine& e, ModuleInstance& self) {
     if (s->L) lua_close(s->L);
     s->watcher.close();
     io_unlock_file(s->lock);
-    s->lock = KHandle{};
+    s->lock = Handle{};
     s->holds.free();
     s->held.free();
     for (Pending& p : s->pending) if (p.text) mem_free(p.text);

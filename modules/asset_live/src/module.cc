@@ -52,7 +52,7 @@ u16 tree_port(const LiveState& s) {
 }
 
 void drop(LiveState& s) {
-    if (s.sock.fd.is_open()) s.sock.close();
+    if (os_handle_open(s.sock.fd)) s.sock.close();
     s.sock = NetSocket{};
     s.said_hello = false;
     s.line_len = 0;
@@ -79,7 +79,7 @@ bool live_poll(LiveState& s) {
     u32 heard = s.stats.changed + s.stats.removed;
     f64 now = time_now();
     if (!s.sock.is_open()) {
-        if (s.sock.fd.is_open() || s.stats.connected) drop(s);
+        if (os_handle_open(s.sock.fd) || s.stats.connected) drop(s);
         if (now < s.next_try) return false;
         s.next_try = now + k_retry;
         u16 port = tree_port(s);
@@ -171,7 +171,7 @@ void live_shutdown(Engine& e, ModuleInstance& self) {
     if (!s) return;
     engine_remove_waker(e, live_wake, s);
     if (s->watched) platform_unwatch(e, s);
-    if (s->sock.fd.is_open()) s->sock.close();
+    if (os_handle_open(s->sock.fd)) s->sock.close();
     s->sock.out.free();
 }
 

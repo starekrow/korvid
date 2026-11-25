@@ -4,6 +4,7 @@
 // it with SO_EXCLUSIVEADDRUSE instead; and there is no SIGPIPE to suppress.
 #include "korvid/platform/net.h"
 #include "../os_err.h"
+#include "../os_handle_table.h"
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "wide.h"
@@ -55,8 +56,13 @@ i32 errno_from_wsa(int code) {
     }
 }
 
-SOCKET socket_of(KHandle fd) { return (SOCKET)fd.os(); }
-KHandle handle_of(SOCKET s) { return s == INVALID_SOCKET ? KHandle{} : khandle_make(KHandleKind::Socket, (i64)s); }
+SOCKET socket_of(Handle fd) { return (SOCKET)os_handle_value(fd); }
+Handle handle_of(SOCKET s, const char* what) { return s == INVALID_SOCKET ? Handle{} : os_handle_make(OsKind::Socket, (i64)s, what); }
+// The slot first, then the socket: every copy of the handle is stale before the OS reuses the value.
+void close_socket(Handle fd) {
+    i64 v = os_handle_release(fd);
+    if (v >= 0) closesocket((SOCKET)v);
+}
 
 bool set_nonblocking(SOCKET s) {
     u_long on = 1;
@@ -91,41 +97,45 @@ bool NetListener::open(u16 want_port, NetScope scope, i32* err) {
     }
     int len = sizeof addr;
     if (getsockname(s, (sockaddr*)&addr, &len) == 0) port = ntohs(addr.sin_port);
-    fd = handle_of(s);
+    char what[48];
+    kv::format(what, sizeof what, "listener %s:%u", scope == NetScope::Loopback ? "127.0.0.1" : "0.0.0.0", port);
+    fd = handle_of(s, what);
     return true;
 }
 
 void NetListener::close() {
-    if (fd.is_open()) closesocket(socket_of(fd));
-    fd = KHandle{};
+    close_socket(fd);
+    fd = Handle{};
     port = 0;
 }
 
-KHandle NetListener::accept() {
-    if (!fd.is_open()) return KHandle{};
+Handle NetListener::accept() {
+    if (!os_handle_open(fd)) return Handle{};
     SOCKET c = ::accept(socket_of(fd), nullptr, nullptr);
     if (c == INVALID_SOCKET) {
         int e = WSAGetLastError();
         if (!would_block(e)) KV_WARN("net", "accept: %s", net_error(e));
-        return KHandle{};
+        return Handle{};
     }
     // An accepted socket takes the listener's non-blocking mode; set it anyway, and keep
     // it out of child processes.
     SetHandleInformation((HANDLE)c, HANDLE_FLAG_INHERIT, 0);
-    return handle_of(c);
+    char what[48];
+    kv::format(what, sizeof what, "accepted on :%u", port);
+    return handle_of(c, what);
 }
 
-void NetSocket::adopt(KHandle new_fd) {
+void NetSocket::adopt(Handle new_fd) {
     close();
-    if (new_fd.is_open() && new_fd.kind() != KHandleKind::Socket) {
-        KV_ERROR("net", "adopt: a %s handle is not a socket", khandle_kind_name(new_fd.kind()));
+    if (os_handle_open(new_fd) && os_handle_kind(new_fd) != OsKind::Socket) {
+        KV_ERROR("net", "adopt: a %s handle is not a socket", os_kind_name(os_handle_kind(new_fd)));
         return;
     }
     fd = new_fd;
     closed = false;
     error = 0;
-    link_state = fd.is_open() ? NetLink::Up : NetLink::None; // accepted: connected already. net_connect_local says Connecting
-    if (fd.is_open()) {
+    link_state = os_handle_open(fd) ? NetLink::Up : NetLink::None; // accepted: connected already. net_connect_local says Connecting
+    if (os_handle_open(fd)) {
         set_nonblocking(socket_of(fd));
         BOOL one = TRUE;
         setsockopt(socket_of(fd), IPPROTO_TCP, TCP_NODELAY, (const char*)&one, sizeof one); // lines, not bulk
@@ -133,7 +143,7 @@ void NetSocket::adopt(KHandle new_fd) {
 }
 
 NetLink NetSocket::link() {
-    if (link_state != NetLink::Connecting || !fd.is_open()) return link_state;
+    if (link_state != NetLink::Connecting || !os_handle_open(fd)) return link_state;
     // A connect that has finished makes the socket writable; one that failed is in the
     // exception set (and, on later Windows, writable too). Asked without waiting.
     SOCKET s = socket_of(fd);
@@ -152,9 +162,9 @@ NetLink NetSocket::link() {
 
 i32 NetSocket::read(void* buf, u32 cap) {
     if (link_state == NetLink::Connecting && link() == NetLink::Connecting) return 0; // nothing can have arrived yet
-    if (!fd.is_open() || closed || cap == 0) return closed ? -1 : 0;
+    if (!os_handle_open(fd) || closed || cap == 0) return closed ? -1 : 0;
     int n = ::recv(socket_of(fd), (char*)buf, (int)(cap > 0x7FFFFFFFu ? 0x7FFFFFFFu : cap), 0);
-    if (n > 0) { bytes_in += (u64)n; return (i32)n; }
+    if (n > 0) { bytes_in += (u64)n; os_handle_count(fd, (u64)n, 0); return (i32)n; }
     if (n == 0) { closed = true; return -1; }
     int e = WSAGetLastError();
     if (would_block(e)) return 0;
@@ -164,7 +174,7 @@ i32 NetSocket::read(void* buf, u32 cap) {
 }
 
 bool NetSocket::write(const void* data, u32 size) {
-    if (!fd.is_open() || closed) return false;
+    if (!os_handle_open(fd) || closed) return false;
     if (out.len + size > out_limit) { dropped += size; return false; }
     memcpy(out.push_n(size), data, size);
     return true;
@@ -173,7 +183,7 @@ bool NetSocket::write(const void* data, u32 size) {
 bool NetSocket::write_str(const char* s) { return write(s, (u32)strlen(s)); }
 
 void NetSocket::flush() {
-    if (!fd.is_open() || closed || out.len == 0) return;
+    if (!os_handle_open(fd) || closed || out.len == 0) return;
     u32 sent = 0;
     while (sent < out.len) {
         int n = ::send(socket_of(fd), (const char*)out.data + sent, (int)(out.len - sent), 0);
@@ -186,6 +196,7 @@ void NetSocket::flush() {
         break;
     }
     bytes_out += sent;
+    if (sent) os_handle_count(fd, 0, sent);
     if (sent) {
         memmove(out.data, out.data + sent, out.len - sent);
         out.len -= sent;
@@ -193,8 +204,8 @@ void NetSocket::flush() {
 }
 
 void NetSocket::close() {
-    if (fd.is_open()) closesocket(socket_of(fd));
-    fd = KHandle{};
+    close_socket(fd);
+    fd = Handle{};
     out.free(); // the queue's memory with it: its allocator stays, for the next use
     closed = false;
     link_state = NetLink::None;
@@ -216,11 +227,13 @@ bool net_connect_local(u16 port, NetSocket* out, i32* err) {
             return os_fail(err, errno_from_wsa(e));
         }
     }
-    out->adopt(handle_of(s));
+    char what[48];
+    kv::format(what, sizeof what, "to 127.0.0.1:%u", port);
+    out->adopt(handle_of(s, what));
     out->link_state = NetLink::Connecting; // link() finds out which way it went
     return true;
 }
 
-void net_close(KHandle fd) { if (fd.is_open()) closesocket(socket_of(fd)); }
+void net_close(Handle fd) { close_socket(fd); }
 
 } // namespace kv

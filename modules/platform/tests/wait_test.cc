@@ -9,6 +9,8 @@
 #include "korvid/core/test.h"
 #include "korvid/core/time.h"
 #include "korvid/platform/net.h"
+#include "korvid/platform/process.h"
+#include "korvid/core/format.h"
 
 namespace {
 
@@ -65,11 +67,11 @@ void test_wait(kv::TestCtx& c) {
         NetListener l;
         NetSocket client, server;
         KV_CHECK(c, l.open(0) && net_connect_local(l.port, &client));
-        for (u32 i = 0; i < 200 && !server.fd.is_open(); ++i) {
-            KHandle fd = l.accept();
-            if (fd.is_open()) server.adopt(fd); else time_sleep(0.005);
+        for (u32 i = 0; i < 200 && !os_handle_open(server.fd); ++i) {
+            Handle fd = l.accept();
+            if (os_handle_open(fd)) server.adopt(fd); else time_sleep(0.005);
         }
-        KV_CHECK(c, server.fd.is_open());
+        KV_CHECK(c, os_handle_open(server.fd));
         int owner = 0;
         {
             PlatformWatch pw(e);
@@ -94,14 +96,24 @@ void test_wait(kv::TestCtx& c) {
         client.write_str("y");
         client.flush();
         KV_CHECK(c, platform_wait(e, 0.1) == PlatformWoken::Time);
-        // A handle's kind travels with it, and a watch takes each kind as this OS can.
-        KHandle none;
-        KHandle file = khandle_make(KHandleKind::File, 3);
-        KHandle pipe = khandle_make(KHandleKind::Pipe, 5);
-        KV_CHECK(c, !none.is_open() && none.kind() == KHandleKind::None && none.os() == -1);
-        KV_CHECK(c, file.is_open() && file.kind() == KHandleKind::File && file.os() == 3 && file != server.fd);
-        KV_CHECK(c, !khandle_make(KHandleKind::Socket, -1).is_open());
-        KV_CHECK(c, server.fd.kind() == KHandleKind::Socket);
+        // A handle knows what it names, and a watch takes each kind as this OS can. A
+        // real file (a lock's) and a real child's pipes: every handle here is one the
+        // platform issued, as any holder's is.
+        char lock_dir[256], lock_path[400];
+        KV_CHECK(c, io_make_temp_dir("kv-wait-kinds", lock_dir, sizeof lock_dir));
+        format(lock_path, sizeof lock_path, "%s/a.lock", lock_dir);
+        Handle none, file;
+        KV_CHECK(c, io_lock_file(lock_path, "wait_test", &file));
+        KV_CHECK(c, !os_handle_open(none) && os_handle_kind(none) == OsKind::None);
+        KV_CHECK(c, os_handle_open(file) && os_handle_kind(file) == OsKind::File && file != server.fd);
+        KV_CHECK(c, os_handle_kind(server.fd) == OsKind::Socket && os_handle_kind(l.fd) == OsKind::Socket);
+        Process child;
+#if defined(_WIN32)
+        KV_CHECK(c, child.shell("ping -n 3 127.0.0.1 >nul"));
+#else
+        KV_CHECK(c, child.shell("sleep 2"));
+#endif
+        KV_CHECK(c, os_handle_kind(child.out_fd) == OsKind::Pipe && os_handle_kind(child.err_fd) == OsKind::Pipe);
         {
             PlatformWatch pw(e);
             pw.add(none);                                  // nothing: nothing asked
@@ -109,8 +121,8 @@ void test_wait(kv::TestCtx& c) {
             pw.add(file);                                  // a mistake on any OS: one error line, not watched
             KV_CHECK(c, pw.count == 0 && pw.due == 0.0);
             f64 before = time_now();
-            pw.add(pipe);                                  // watched (POSIX), or asked again soon (Windows): never both
-            KV_CHECK(c, (pw.count == 1) != (pw.due > 0.0));
+            pw.add(child);                                 // its pipes watched (POSIX), or asked again soon (Windows): never both
+            KV_CHECK(c, (pw.count == 2) != (pw.due > 0.0));
             KV_CHECK(c, pw.due == 0.0 || (pw.due >= before && pw.due <= time_now() + kPlatformSoon));
             pw.at(100.0);
             pw.at(50.0);
@@ -122,6 +134,7 @@ void test_wait(kv::TestCtx& c) {
             PlatformWatch pw(e);
             pw.add(file);
             pw.add(server);
+            KV_CHECK(c, pw.count == 1);
             platform_watch(e, &owner, pw);
         }
         client.write_str("z");
@@ -137,6 +150,31 @@ void test_wait(kv::TestCtx& c) {
         }
         server.flush();
         platform_unwatch(e, &owner);
+
+        // A closed handle is stale, everywhere at once: every copy stops naming anything,
+        // and a watch that still lists it leaves it out instead of polling a dead number.
+        Handle pipe_copy = child.out_fd, file_copy = file;
+        child.close();
+        io_unlock_file(file);
+        KV_CHECK(c, !os_handle_open(pipe_copy) && os_handle_kind(pipe_copy) == OsKind::None);
+        KV_CHECK(c, !os_handle_open(file_copy) && !os_handle_open(file));
+        {
+            NetListener gone;
+            KV_CHECK(c, gone.open(0));
+            Handle was = gone.fd;
+            PlatformWatch pw(e);
+            pw.add(gone);
+            KV_CHECK(c, pw.count == 1);
+            platform_watch(e, &owner, pw);      // watched...
+            gone.close();                       // ...and closed under the watch
+            KV_CHECK(c, !os_handle_open(was));
+            KV_CHECK(c, platform_wait(e, 0.1) == PlatformWoken::Time); // no wake, no error: it is simply not there
+            PlatformWatch again(e);
+            again.add(was);                     // a stale handle is nothing to watch
+            KV_CHECK(c, again.count == 0 && again.due == 0.0);
+            platform_unwatch(e, &owner);
+        }
+        io_remove_tree(lock_dir);
 
         // A queue's task wakes the loop as it finishes: no poll for it.
         IoQueue q;

@@ -160,8 +160,8 @@ bool SockJob::begin(u32 conns, bool line_mode, f64 seconds, Allocator* a) {
     // Accept them all before the clock starts.
     f64 deadline = time_now() + 2.0;
     while (server_count < n && time_now() < deadline) {
-        KHandle fd = listener.accept();
-        if (!fd.is_open()) { time_sleep(0.0005); continue; }
+        Handle fd = listener.accept();
+        if (!os_handle_open(fd)) { time_sleep(0.0005); continue; }
         servers[server_count].sock.out.alloc = alloc;
         servers[server_count].sock.out_limit = kOutLimit;
         servers[server_count++].sock.adopt(fd);

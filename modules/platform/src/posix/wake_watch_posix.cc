@@ -22,7 +22,7 @@ constexpr u32 kMaxWatched = 64;
 struct WakeWatch {
     PlatformState* s = nullptr;
     OsMutex  lock;
-    struct Entry { const void* owner; KHandle fd; bool armed; };
+    struct Entry { const void* owner; Handle fd; bool armed; };
     Entry    list[kMaxWatched];
     u32      count = 0;
     bool     fired = false; // something was left out of the poll since the last rearm
@@ -49,7 +49,12 @@ void watch_main(void* arg) {
         os_mutex_lock(&w.lock);
         if (w.stop) { os_mutex_unlock(&w.lock); return; }
         for (u32 i = 0; i < w.count; ++i)
-            if (w.list[i].armed) fds[n++] = {(int)w.list[i].fd.os(), POLLIN, 0};
+            if (w.list[i].armed) {
+                // What the handle names now: one closed since it was stated is stale, and left out,
+                // where its number would have been polled for whatever has it next.
+                i64 v = os_handle_value(w.list[i].fd);
+                if (v >= 0) fds[n++] = {(int)v, POLLIN, 0};
+            }
         os_mutex_unlock(&w.lock);
         int r = poll(fds, (nfds_t)n, -1);
         if (r < 0) {
@@ -67,7 +72,7 @@ void watch_main(void* arg) {
             if (!fds[k].revents) continue;
             // Readable, closed or gone: the loop's pass finds out which. Left out till rearmed.
             for (u32 i = 0; i < w.count; ++i)
-                if ((int)w.list[i].fd.os() == fds[k].fd && w.list[i].armed) { w.list[i].armed = false; w.fired = true; woke = true; }
+                if ((int)os_handle_value(w.list[i].fd) == fds[k].fd && w.list[i].armed) { w.list[i].armed = false; w.fired = true; woke = true; }
         }
         os_mutex_unlock(&w.lock);
         if (woke) platform_wake_state(*w.s);
@@ -78,7 +83,7 @@ void watch_main(void* arg) {
 
 bool wake_watch_supported() { return true; }
 // poll takes whatever is a descriptor that becomes readable; a file on a disk always is.
-bool wake_watch_takes(KHandleKind k) { return k == KHandleKind::Socket || k == KHandleKind::Pipe || k == KHandleKind::Notify; }
+bool wake_watch_takes(OsKind k) { return k == OsKind::Socket || k == OsKind::Pipe || k == OsKind::Notify; }
 
 WakeWatch* wake_watch_create(PlatformState& s) {
     WakeWatch* w = new (mem_alloc(sizeof(WakeWatch))) WakeWatch{};
@@ -113,7 +118,7 @@ void wake_watch_destroy(WakeWatch* w) {
     mem_free(w);
 }
 
-bool wake_watch_set(WakeWatch* w, const void* owner, const KHandle* fds, u32 n) {
+bool wake_watch_set(WakeWatch* w, const void* owner, const Handle* fds, u32 n) {
     bool changed = false, fits = true;
     os_mutex_lock(&w->lock);
     // The owner's sockets no longer given go; those still given keep whether they are armed.
@@ -127,7 +132,7 @@ bool wake_watch_set(WakeWatch* w, const void* owner, const KHandle* fds, u32 n) 
         changed = true;
     }
     for (u32 k = 0; k < n; ++k) {
-        if (!fds[k].is_open()) continue;
+        if (!os_handle_open(fds[k])) continue;
         bool have = false;
         for (u32 i = 0; i < w->count; ++i) if (w->list[i].owner == owner && w->list[i].fd == fds[k]) have = true;
         if (have) continue;

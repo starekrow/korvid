@@ -20,6 +20,7 @@
 #include "korvid/core/format.h"
 #include "wide.h"
 #include "../os_err.h"
+#include "../os_handle_table.h"
 #include <errno.h>
 #include <string.h>
 
@@ -110,25 +111,30 @@ void close_handle(HANDLE& h) {
     h = nullptr;
 }
 
-HANDLE as_handle(KHandle v) { return v.is_open() ? (HANDLE)(intptr_t)v.os() : nullptr; }
-KHandle pipe_of(HANDLE h) { return khandle_make(KHandleKind::Pipe, (i64)(intptr_t)h); }
+HANDLE as_handle(Handle v) { return os_handle_open(v) ? (HANDLE)(intptr_t)os_handle_value(v) : nullptr; }
+Handle pipe_of(HANDLE h, const char* what) { return os_handle_make(OsKind::Pipe, (i64)(intptr_t)h, what); }
+// The slot first, then the handle: every copy is stale before the OS reuses the value.
+void close_os(Handle& v) {
+    i64 os = os_handle_release(v);
+    if (os >= 0) CloseHandle((HANDLE)(intptr_t)os);
+    v = Handle{};
+}
 
-i32 pipe_read(KHandle& fd, void* buf, u32 cap) {
+i32 pipe_read(Handle& fd, void* buf, u32 cap) {
     HANDLE h = as_handle(fd);
     if (!h) return -1;
     DWORD avail = 0;
     if (!PeekNamedPipe(h, nullptr, 0, nullptr, &avail, nullptr)) {
-        CloseHandle(h); // broken: the child has closed its end and everything is read
-        fd = KHandle{};
+        close_os(fd); // broken: the child has closed its end and everything is read
         return -1;
     }
     if (avail == 0) return 0;
     DWORD got = 0;
     if (!ReadFile(h, buf, avail < cap ? avail : cap, &got, nullptr)) {
-        CloseHandle(h);
-        fd = KHandle{};
+        close_os(fd);
         return -1;
     }
+    os_handle_count(fd, got, 0);
     return (i32)got;
 }
 
@@ -268,10 +274,14 @@ bool Process::spawn(const ProcessDesc& desc, i32* err) {
     ResumeThread(pi.hThread);
     close_handle(pi.hThread);
     pid    = (i64)pi.dwProcessId;
-    out_fd = pipe_of(out_r);
-    err_fd = pipe_of(err_r);
-    process = khandle_make(KHandleKind::Process, (i64)(intptr_t)pi.hProcess);
-    group   = job ? khandle_make(KHandleKind::Process, (i64)(intptr_t)job) : KHandle{};
+    char label[160];
+    format(label, sizeof label, "stdout of %s", what);
+    out_fd = pipe_of(out_r, label);
+    format(label, sizeof label, "stderr of %s", what);
+    err_fd = pipe_of(err_r, label);
+    process = os_handle_make(OsKind::Process, (i64)(intptr_t)pi.hProcess, what);
+    format(label, sizeof label, "the job of %s", what);
+    group   = job ? os_handle_make(OsKind::Process, (i64)(intptr_t)job, label) : Handle{};
     exited = false;
     code   = 0;
     return true;
@@ -289,19 +299,19 @@ bool Process::running() {
 // Anonymous pipes cannot be waited on: a look at each, then a short wait on the process
 // (which ends at once if it exits), until something is there or the time is up.
 void Process::wait(f64 seconds) {
-    auto has = [](KHandle fd) {
+    auto has = [](Handle fd) {
         HANDLE h = as_handle(fd);
         if (!h) return false;
         DWORD avail = 0;
         return !PeekNamedPipe(h, nullptr, 0, nullptr, &avail, nullptr) || avail > 0; // data, or the end
     };
-    if (!out_fd.is_open() && !err_fd.is_open()) seconds = seconds < 0.001 ? seconds : 0.001;
+    if (!os_handle_open(out_fd) && !os_handle_open(err_fd)) seconds = seconds < 0.001 ? seconds : 0.001;
     ULONGLONG until = GetTickCount64() + (ULONGLONG)(seconds * 1000.0);
     for (;;) {
         if (has(out_fd) || has(err_fd)) return;
         ULONGLONG now = GetTickCount64();
         if (now >= until) return;
-        if (process.is_open() && !exited) WaitForSingleObject(as_handle(process), 1);
+        if (os_handle_open(process) && !exited) WaitForSingleObject(as_handle(process), 1);
         else Sleep(1);
     }
 }
@@ -311,7 +321,7 @@ i32 Process::read_err(void* buf, u32 cap) { return pipe_read(err_fd, buf, cap); 
 
 void Process::kill() {
     if (pid < 0 || exited) return;
-    if (!group.is_open() || !TerminateJobObject(as_handle(group), kKilledCode)) TerminateProcess(as_handle(process), kKilledCode);
+    if (!os_handle_open(group) || !TerminateJobObject(as_handle(group), kKilledCode)) TerminateProcess(as_handle(process), kKilledCode);
 }
 
 void Process::close() {
@@ -319,16 +329,11 @@ void Process::close() {
         kill();
         WaitForSingleObject(as_handle(process), INFINITE);
     }
-    HANDLE h = as_handle(out_fd);
-    close_handle(h);
-    h = as_handle(err_fd);
-    close_handle(h);
-    HANDLE proc = as_handle(process), job = as_handle(group);
-    close_handle(proc);
-    close_handle(job); // KILL_ON_JOB_CLOSE: whatever the child left running ends here
-    process = group = KHandle{};
+    close_os(out_fd);
+    close_os(err_fd);
+    close_os(process);
+    close_os(group); // KILL_ON_JOB_CLOSE: whatever the child left running ends here
     pid = -1;
-    out_fd = err_fd = KHandle{};
     exited = false;
     code = 0;
 }

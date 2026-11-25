@@ -61,7 +61,7 @@ const RingApi& ring_api() {
     return a;
 }
 
-HANDLE ring_file_handle(KHandle f) { return (HANDLE)(intptr_t)f.os(); }
+HANDLE ring_file_handle(Handle f) { return (HANDLE)(intptr_t)os_handle_value(f); }
 
 constexpr IORING_VERSION kRingVersionWrites = (IORING_VERSION)300; // IORING_VERSION_3
 
@@ -122,7 +122,7 @@ bool io_ring_can_push(const IoRing* ring) {
     return ring && ring->unsubmitted < ring->entries && ring->in_flight < ring->entries;
 }
 
-void io_ring_push_read(IoRing* ring, KHandle fd, void* buf, u32 len, u64 offset, u64 user) {
+void io_ring_push_read(IoRing* ring, Handle fd, void* buf, u32 len, u64 offset, u64 user) {
     ++ring->in_flight;
     ++ring->unsubmitted;
     HRESULT hr = ring_api().read(ring->handle, IoRingHandleRefFromHandle(ring_file_handle(fd)), IoRingBufferRefFromPointer(buf), len, offset,
@@ -130,7 +130,7 @@ void io_ring_push_read(IoRing* ring, KHandle fd, void* buf, u32 len, u64 offset,
     if (FAILED(hr)) { --ring->unsubmitted; ring_fail(ring, user, hr); }
 }
 
-void io_ring_push_write(IoRing* ring, KHandle fd, const void* buf, u32 len, u64 offset, u64 user) {
+void io_ring_push_write(IoRing* ring, Handle fd, const void* buf, u32 len, u64 offset, u64 user) {
     ++ring->in_flight;
     ++ring->unsubmitted;
     // The builder takes the buffer as writable; it only reads it.

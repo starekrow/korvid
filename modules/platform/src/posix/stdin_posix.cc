@@ -1,4 +1,5 @@
 #include "korvid/platform/stdin.h"
+#include "../os_handle_table.h"
 #include <errno.h>
 #include <poll.h>
 #include <unistd.h>
@@ -7,7 +8,12 @@ namespace kv {
 
 bool io_stdin_is_terminal() { return isatty(STDIN_FILENO) != 0; }
 
-KHandle io_stdin_handle() { return khandle_make(KHandleKind::Pipe, STDIN_FILENO); }
+// Descriptor 0, as a handle made once and never released: stdin is the process's for its
+// whole life, and nothing here closes it.
+Handle io_stdin_handle() {
+    static Handle in = os_handle_make(OsKind::Pipe, STDIN_FILENO, "stdin");
+    return in;
+}
 
 i32 io_stdin_read(void* buf, u32 cap) {
     for (;;) {

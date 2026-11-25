@@ -3,29 +3,30 @@
 // every platform: they are what IoCompletion::error carries and what os_error_text describes.
 #pragma once
 #include "korvid/platform/io.h"
+#include "os_handle_table.h"
 #include "os_err.h"
 
 namespace kv {
 
 // Opens for reading, or for writing (created, or truncated if it exists). -1 with *err set
 // on failure. The file is not inherited by child processes.
-KHandle os_file_open(const char* path, bool write, i32* err);
-void   os_file_close(KHandle f);
-bool   os_file_size(KHandle f, u64* size, i32* err);
+Handle os_file_open(const char* path, bool write, i32* err);
+void   os_file_close(Handle f);
+bool   os_file_size(Handle f, u64* size, i32* err);
 // Up to n bytes at offset `at`, without moving any file position: the count, 0 at the end,
 // or -1 with *err set. Interrupted reads are retried.
-i64    os_file_read_at(KHandle f, void* buf, usize n, u64 at, i32* err);
+i64    os_file_read_at(Handle f, void* buf, usize n, u64 at, i32* err);
 // Up to n bytes at the file's position: the count, or -1 with *err set.
-i64    os_file_write(KHandle f, const void* buf, usize n, i32* err);
+i64    os_file_write(Handle f, const void* buf, usize n, i32* err);
 // What was written, on the disk (fsync, FlushFileBuffers). False with *err.
-bool   os_file_sync(KHandle f, i32* err);
+bool   os_file_sync(Handle f, i32* err);
 // Opens path (made if missing) and holds an exclusive lock on it until os_file_close:
 // another process that asks waits. Between processes only (flock, LockFileEx). -1 with *err.
-KHandle os_file_lock(const char* path, i32* err);
+Handle os_file_lock(const char* path, i32* err);
 // The same lock asked for without waiting, for a program that must be the only one at
 // something: none with *err EWOULDBLOCK when another process holds it, `holder` (if given)
 // then its line; else `who` and this process's id written as the file's one line.
-KHandle os_file_lock_try(const char* path, const char* who, char* holder, u32 cap, i32* err);
+Handle os_file_lock_try(const char* path, const char* who, char* holder, u32 cap, i32* err);
 // That a rename into dir is on the disk: the directory's own entry flushed (POSIX; nothing
 // on Windows, whose MoveFileEx is asked to write through).
 void   os_dir_sync(const char* dir);
