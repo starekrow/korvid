@@ -25,17 +25,32 @@ struct WindowDesc {
     bool          vsync   = true; // a preference the renderer reads; the window does not apply it
     WindowSurface surface = WindowSurface::Software;
     bool          borderless = false; // no title bar or frame; still resizable by the desktop
+    // An alpha channel and no frame: what is drawn clear shows what is behind the window,
+    // where the platform composites (HostWindow::transparent() says whether it does). The
+    // renderer is told through RendererDesc::transparent and presents premultiplied alpha.
+    bool          transparent = false;
 };
+
+// What a part of a window is for, when the OS asks what is under a point (HostWindow::grips):
+// the OS moves the window from a Move grip and resizes it from an edge or a corner, with its
+// own snapping, tiling and keyboard. Edges and corners by compass point.
+enum class WindowGrip : u8 { Move, N, NE, E, SE, S, SW, W, NW, None };
+// One part: a rect in framebuffer pixels, top-left origin, and what it is for.
+struct WindowGripRect { rect2 rect; WindowGrip grip; };
+// The most a window keeps; more are dropped, with a warning once.
+constexpr u32 KV_WINDOW_GRIPS = 64;
 
 // TODO(wayland): mouse resizing stalls on GNOME Wayland. GNOME has no server-side
 // decorations, so SDL3 uses libdecor, which repaints the frame synchronously inside every
 // xdg configure; Mutter sends one configure per pointer motion, so the event pump never
 // drains while the mouse moves. Cost scales with output size (2.5-4.3 ms per configure at
 // display scale 2 on a 4K panel, enough to stall completely; ~10 fps on a laptop panel).
-// Keyboard resizes and borderless windows are unaffected. Remedy when it matters: open
-// borderless on Wayland and provide edge resizing through SDL_SetWindowHitTest, so the
-// engine owns the frame and each configure costs only a few protocol calls. Diagnose with
-// `testbed --hitch-ms 50` plus WAYLAND_DEBUG=1; the hitch lines use libwayland's timestamps.
+// Keyboard resizes and borderless windows are unaffected. A borderless window resized by
+// its own edges (HostWindow::grips, SDL_SetWindowHitTest underneath) owns its frame, and
+// each configure costs only a few protocol calls: a program that draws its frame does not
+// stall. What is left: a window with the desktop's frame still stalls, and the frame loop
+// opens one unless --borderless. Diagnose with `testbed --hitch-ms 50` plus WAYLAND_DEBUG=1;
+// the hitch lines use libwayland's timestamps.
 
 // The process's entry, for a frame loop's main: calls run(argc, argv, ctx) and returns what
 // it returns, as a plain call on the desktop. On iOS the OS owns the main thread's loop:
@@ -118,7 +133,9 @@ struct HostWindow {
     // the system will not give its pixels.
     // `rotates`: each frame is a different buffer (iOS's ring), so last frame's pixels are not
     // in it; a caller that redraws only what changed keeps its own and copies it in.
-    struct SoftwareFrame { u8* pixels = nullptr; u32 width = 0, height = 0, pitch = 0; bool rgba = false; bool rotates = false; };
+    // `alpha`: the fourth byte is alpha, premultiplied, and shows: a transparent window's
+    // (transparent()). Else it is ignored, and the frame is opaque.
+    struct SoftwareFrame { u8* pixels = nullptr; u32 width = 0, height = 0, pitch = 0; bool rgba = false; bool rotates = false; bool alpha = false; };
     bool software_frame(SoftwareFrame* out);
     // The size the next software_frame() is asked to be, smaller than the window's: a host
     // that can scale a frame up to the window as it shows it (iOS: Core Animation does) gives
@@ -146,6 +163,33 @@ struct HostWindow {
     // While on, the pointer keeps reporting to this window outside it (a drag); false where
     // the platform cannot.
     bool capture_mouse(bool on);
+
+    // ---- a window that is not a rectangle --------------------------------------------
+    // Whether what is drawn clear shows what is behind: asked for (WindowDesc::transparent)
+    // and composited. False where the system draws no alpha (X11 with no compositor): the
+    // window is opaque there, and shape() is what cuts it out.
+    bool transparent() const { return transparent_; }
+    // The window's input shape: `alpha`, one byte a pixel, `w` x `h` with rows `w` bytes
+    // apart, scaled to the window. Where it is under 128 the window takes no input, and a
+    // click there goes to what is behind; where there is no compositor it is cut out of
+    // the picture too, one bit a pixel. Copied: give it again when the picture changes; a
+    // resize keeps it, scaled to the new size. Null for the whole rect. Drawn alpha and
+    // the shape are two things: a soft edge is drawn at half alpha and is in or out here.
+    // False (with a line logged, once) where the window is not a transparent one, or the
+    // platform cannot. Allocates a copy, and costs O(window pixels) now and at each resize.
+    bool shape(const u8* alpha, u32 w, u32 h);
+    // What each part of the window is for (WindowGrip), for a window with no frame: when the
+    // OS asks what is under a point, the last rect in the list that holds it answers, and
+    // the OS moves or resizes the window itself. A press on a grip is the OS's: the program
+    // sees no button for it. Copied, KV_WINDOW_GRIPS at most; an empty list gives the
+    // window back its ordinary input. False where the platform cannot ask (a phone).
+    bool grips(const WindowGripRect* list, u32 count);
+    // What the last grips() list says is under (x, y), framebuffer pixels: None when no rect
+    // holds it. What a backend answers the OS with, from the thread that pumps.
+    WindowGrip grip_at(f32 x, f32 y) const;
+    // What a resize, the OS's or the user's, is held to, in framebuffer pixels: 0 for no
+    // bound. Kept, and given again as the scale changes.
+    void bounds(u32 min_w, u32 min_h, u32 max_w, u32 max_h);
 
     // Some OSes take the window's surface away while the program runs and give another
     // later (Android, whenever the app leaves the screen). fn(ctx, null) is called from
@@ -182,6 +226,13 @@ struct HostWindow {
     u32   software_want_[2] = {};      // software_size()'s
     f64   input_delay_ = 0.0;          // input_delay()'s
     u32   wake_queued_ = 0;            // atomic: a wake the backend queued that no pump has taken yet
+    bool  transparent_ = false;        // transparent()'s
+    Array<u8> shape_;                  // shape()'s mask, as given; empty: none
+    u32   shape_w_ = 0, shape_h_ = 0;
+    WindowGripRect grips_[KV_WINDOW_GRIPS] = {}; // grips()'s list
+    u32   grip_count_ = 0;
+    u32   bounds_[4] = {};             // bounds()': min w, min h, max w, max h
+    f32   bounds_scale_ = 0.0f;        // the backend's: the pixel scale they were last applied at
 };
 
 } // namespace kv

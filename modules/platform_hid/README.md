@@ -117,14 +117,64 @@ shape. SDL3 (Linux, macOS) and Win32 do all of it (Win32 reads and writes the cl
 CRLFs as LFs, and gives the window its IME only while text input is on); iOS and Android
 have stubs.
 
+## A window that is not a rectangle
+
+A skin is its own outline, dragged by whatever part of itself it says. Three calls make a
+window one (`docs/PRDs/Engine-Slice-13-PRD.md`, KR39 and KR41); `window --round` and
+`window --grips` show them.
+
+**Transparent** (`WindowDesc::transparent`). The window opens with an alpha channel and no
+frame. Where the system composites, what is drawn clear shows what is behind:
+`HostWindow::transparent()` says whether it does, and the open's log line says which it got.
+A software frame then carries alpha in its fourth byte, premultiplied (`SoftwareFrame::alpha`);
+a renderer is told through `RendererDesc::transparent`, and the frame loop's `--transparent`
+does both and clears each frame to nothing.
+
+**The shape** (`HostWindow::shape(alpha, w, h)`). A mask the program gives, a byte a pixel,
+scaled to the window and cut at 128: under it the window takes no input, and a click goes
+to the window behind. Where nothing composites, it also cuts the window out of the
+picture, one bit a pixel. Kept across a resize, scaled to the new size; given again when
+the picture changes. Drawn alpha and the shape are two things: a soft edge drawn at half
+alpha is either in the shape or out of it.
+
+**Grips and bounds** (`HostWindow::grips(list, count)`, `bounds(min_w, min_h, max_w, max_h)`).
+Rects in framebuffer pixels, each a `WindowGrip`: `Move`, an edge or a corner, or `None`,
+a rect that is the program's over a grip under it. When the OS asks what is under a point,
+the last rect that holds it answers, and the OS does the move or the resize itself, with
+its own snapping and tiling; the program sees no button for it. A borderless window with
+grips owns its frame, so the GNOME Wayland resize stall (below) does not reach it. Bounds
+hold any resize, in pixels, 0 for none, and follow a change of scale. Krome gives both
+from a screen's `grip=` nodes and its root's size range
+([krome](../krome/README.md#behaviour-worth-knowing)).
+
+**What each platform does**, as found on SDL 3.4.2:
+
+| platform | alpha | input through the clear parts | grips, bounds |
+|---|---|---|---|
+| Wayland (GNOME) | always composited; Vulkan presents premultiplied | the surface's input region, set by the engine: SDL's window shape gives Wayland none | SDL's hit test (`xdg_toplevel` move and resize); `set_min_size`, `set_max_size` |
+| X11, with a compositor | an ARGB visual, which the engine asks SDL for (SDL gives a Vulkan window none of its own); Vulkan presents premultiplied | the Shape extension's input shape, through SDL | SDL's hit test (`_NET_WM_MOVERESIZE`); the WM's size hints |
+| X11, without | none: the window is opaque, and the shape is also its bounding shape, cut one bit a pixel and hard edged | the same shape | the same, where a window manager runs |
+| Win32 | not written yet (slice 13, milestone 3): a transparent window opens as an ordinary one, and `shape` says so once | none | not written yet |
+| macOS | through SDL; not tried | through SDL; not tried | through SDL; not tried |
+| Android, iOS | not offered | | |
+
+The X11 rows were measured on a rootful Xwayland (no compositor) and on GNOME's Xwayland
+(composited): the window's depth, its bounding and input shapes and its pixels, and, on the
+rootful one, a click on a clear corner reaching a window behind. The Wayland row was read
+from the protocol (`WAYLAND_DEBUG=1`) and seen on GNOME: the clear corners, a click through
+them, a move by a grip and a resize held to its bounds. A move or resize by a grip on X11
+is not seen yet. On X11 the engine reaches Xlib and Xext, and on Wayland
+libwayland-client, through SDL's own libraries, opened by name: it links none.
+
 ## Quick reference
 
 Header `korvid/platform_hid/host_window.h`:
 
 | name | kind | what |
 |---|---|---|
-| `WindowDesc` | record | `title`, `width`, `height`, `vsync` (a preference the renderer reads), `surface` (`Software`, `Vulkan`), `borderless` |
-| `HostWindow` | record | `open(desc)`, `close()`, `is_open()`, `width()`, `height()`, `vsync()`, `focused()`, `visible()`, `hidden_why()`, `minimize(on)`, `pump(bus, input)`, `wait(seconds)`, `wake()`, `input_delay()`, `present_blank()`, `native_handle()` |
+| `WindowDesc` | record | `title`, `width`, `height`, `vsync` (a preference the renderer reads), `surface` (`Software`, `Vulkan`), `borderless`, `transparent` |
+| `HostWindow` | record | `open(desc)`, `close()`, `is_open()`, `width()`, `height()`, `vsync()`, `focused()`, `visible()`, `hidden_why()`, `minimize(on)`, `pump(bus, input)`, `wait(seconds)`, `wake()`, `input_delay()`, `present_blank()`, `native_handle()`; `transparent()`, `shape(alpha, w, h)`, `grips(list, count)`, `grip_at(x, y)`, `bounds(min_w, min_h, max_w, max_h)` |
+| `WindowGrip`, `WindowGripRect`, `KV_WINDOW_GRIPS` | enum, record, constant | `Move`, `N` ... `NW` by compass point, `None` (the program's); a rect in framebuffer pixels and its grip; 64 kept |
 
 Header `korvid/platform_hid/input.h`:
 
@@ -180,7 +230,10 @@ What the module registers with the engine:
   `KeyDown` and `KeyUp` events.
 - **Mouse resizing on GNOME Wayland stalls the pump** for the whole drag: SDL's libdecor
   repaints the frame inside every configure. Keyboard resizes and borderless windows are
-  fine; `host_window.h` has the diagnosis and the remedy.
+  fine, and a borderless window resized by its own grips is too; `host_window.h` has the
+  diagnosis.
+- **A shape asks for a transparent window.** `shape` on a window opened without
+  `WindowDesc::transparent` warns once and keeps the rectangle: SDL shapes only those.
 - **The module starts headless.** Startup brings up SDL's event subsystem only; video
   and gamepads come up with the first window, or with `platform_video_up(e)` for code
   that needs a video driver before one (the Vulkan renderer loads its loader through
@@ -191,7 +244,8 @@ What the module registers with the engine:
 
 ## Not in this module
 
-Touch, more than one window, controller rumble.
+Touch, more than one window (slice 13's KR40), placing a window and the display's bounds
+(KR42), controller rumble.
 
 ## Android
 

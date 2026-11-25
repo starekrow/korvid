@@ -627,6 +627,7 @@ void HostWindow::close() {
     focused_ = false;
     hidden_  = 0;
     hidden_sent_ = WindowHidden::None;
+    hid_window_parts_reset(*this);
     KV_INFO("window", "closed");
 }
 
@@ -803,5 +804,17 @@ bool HostWindow::touch_screen() const { return false; }
 int platform_app_main(int argc, char** argv, int (*run)(int argc, char** argv, void* ctx), void* ctx) {
     return run(argc, argv, ctx);
 }
+
+// TODO(slice 13, milestone 3): the shape (a window region, or a layered window), the grips
+// (WM_NCHITTEST, from the window's thread, so the list it reads is copied under the lock)
+// and the bounds (WM_GETMINMAXINFO). Until then a Win32 window keeps its rect and its frame.
+bool hid_window_shape(HostWindow&) {
+    static bool told = false;
+    if (!told) KV_INFO("window", "a shaped window is not written for Win32 yet: the window stays a rectangle");
+    told = true;
+    return false;
+}
+bool hid_window_grips(HostWindow&) { return false; }
+void hid_window_bounds(HostWindow&) {}
 
 } // namespace kv

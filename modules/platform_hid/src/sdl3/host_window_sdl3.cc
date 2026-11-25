@@ -92,6 +92,304 @@ void hid_backend_shutdown() {
     if (SDL_WasInit(0) == 0) SDL_Quit(); // the last SDL user out (platform_audio may still hold audio)
 }
 
+namespace {
+
+// Whether what a transparent window draws clear shows what is behind it. Wayland and macOS
+// composite every window. X11 composites when a compositing manager holds the screen's
+// _NET_WM_CM_Sn selection; without one an ARGB window shows its clear parts black. Xlib is
+// SDL's, opened by name as SDL opens it, so the engine links no X library of its own.
+bool sdl_composited(SDL_Window* w, bool x11_alpha) {
+    if (!(SDL_GetWindowFlags(w) & SDL_WINDOW_TRANSPARENT)) return false;
+    if (strcmp(SDL_GetCurrentVideoDriver(), "x11") != 0) return true;
+#if defined(__APPLE__)
+    return true;
+#else
+    SDL_PropertiesID props = SDL_GetWindowProperties(w);
+    void* dpy = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, nullptr);
+    i64 screen = SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_SCREEN_NUMBER, 0);
+    static SDL_SharedObject* x11 = SDL_LoadObject("libX11.so.6");
+    if (!dpy || !x11) return true; // cannot ask: take SDL's word, an ARGB visual
+    using InternAtom = unsigned long (*)(void*, const char*, int);
+    using SelectionOwner = unsigned long (*)(void*, unsigned long);
+    auto intern = (InternAtom)SDL_LoadFunction(x11, "XInternAtom");
+    auto owner  = (SelectionOwner)SDL_LoadFunction(x11, "XGetSelectionOwner");
+    if (!intern || !owner) return true;
+    char name[32];
+    SDL_snprintf(name, sizeof name, "_NET_WM_CM_S%d", (int)screen);
+    // And the window has an alpha visual: SDL gives one to a window it draws (its software
+    // surface, GL), not to a Vulkan window, unless asked (x11_alpha_visual), and does not
+    // say which it gave.
+    return x11_alpha && owner(dpy, intern(dpy, name, 0)) != 0;
+#endif
+}
+
+// A 32-bit TrueColor visual's id on X11, for SDL_HINT_VIDEO_X11_WINDOW_VISUALID, so a
+// transparent Vulkan window has alpha to present: from a connection of its own, since
+// SDL's display is not to be had before a window. 0 where there is none or no Xlib.
+unsigned long x11_alpha_visual() {
+#if defined(__APPLE__)
+    return 0;
+#else
+    static SDL_SharedObject* x11 = SDL_LoadObject("libX11.so.6");
+    if (!x11) return 0;
+    struct VisualInfo { void* visual; unsigned long visualid; int screen, depth, c_class; unsigned long masks[3]; int colormap_size, bits_per_rgb; };
+    using Open = void* (*)(const char*);
+    using Close = int (*)(void*);
+    using Screen = int (*)(void*);
+    using Match = int (*)(void*, int, int, int, VisualInfo*);
+    auto open_d  = (Open)SDL_LoadFunction(x11, "XOpenDisplay");
+    auto close_d = (Close)SDL_LoadFunction(x11, "XCloseDisplay");
+    auto screen  = (Screen)SDL_LoadFunction(x11, "XDefaultScreen");
+    auto match   = (Match)SDL_LoadFunction(x11, "XMatchVisualInfo");
+    if (!open_d || !close_d || !screen || !match) return 0;
+    void* dpy = open_d(nullptr);
+    if (!dpy) return 0;
+    VisualInfo vi{};
+    constexpr int kTrueColor = 4; // X.h's
+    unsigned long id = match(dpy, screen(dpy), 32, kTrueColor, &vi) ? vi.visualid : 0;
+    close_d(dpy);
+    return id;
+#endif
+}
+
+// X11 with no compositor: SDL gives a transparent window's shape as its input shape alone,
+// and the clear parts show black. The same shape as the window's bounding shape cuts them
+// out, one bit a pixel (`shape` null: the whole rect again). Through SDL's Xlib and Xext,
+// opened by name. Nothing on another driver, or with a compositor.
+void sdl_x11_bounding(SDL_Window* w, const SDL_Surface* shape) {
+#if defined(__APPLE__)
+    (void)w; (void)shape;
+#else
+    if (strcmp(SDL_GetCurrentVideoDriver(), "x11") != 0) return;
+    SDL_PropertiesID props = SDL_GetWindowProperties(w);
+    void* dpy = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, nullptr);
+    unsigned long win = (unsigned long)SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);
+    static SDL_SharedObject* x11 = SDL_LoadObject("libX11.so.6");
+    static SDL_SharedObject* xext = SDL_LoadObject("libXext.so.6");
+    if (!dpy || !win || !x11 || !xext) {
+        static bool told = false;
+        if (!told) KV_INFO("window", "no Xext to cut the window's shape out: its clear parts show black");
+        told = true;
+        return;
+    }
+    using CreateBitmap = unsigned long (*)(void*, unsigned long, const char*, unsigned, unsigned);
+    using FreePixmap = int (*)(void*, unsigned long);
+    using CombineMask = void (*)(void*, unsigned long, int, int, int, unsigned long, int);
+    auto create  = (CreateBitmap)SDL_LoadFunction(x11, "XCreateBitmapFromData");
+    auto release = (FreePixmap)SDL_LoadFunction(x11, "XFreePixmap");
+    auto combine = (CombineMask)SDL_LoadFunction(xext, "XShapeCombineMask");
+    if (!create || !release || !combine) return;
+    constexpr int kShapeBounding = 0, kShapeSet = 0; // X11/extensions/shape.h's
+    if (!shape) { combine(dpy, win, kShapeBounding, 0, 0, 0, kShapeSet); return; }
+    // A bitmap's rows are whole bytes, least significant bit first.
+    u32 stride = ((u32)shape->w + 7) / 8;
+    Array<u8> bits;
+    u8* b = bits.push_n(stride * (u32)shape->h);
+    memset(b, 0, (usize)stride * (u32)shape->h);
+    for (int y = 0; y < shape->h; ++y) {
+        const u32* row = (const u32*)((const u8*)shape->pixels + (usize)y * (usize)shape->pitch);
+        for (int x = 0; x < shape->w; ++x)
+            if (row[x] >> 24) b[(usize)y * stride + (u32)x / 8] |= (u8)(1u << (x & 7));
+    }
+    unsigned long pm = create(dpy, win, (const char*)b, (unsigned)shape->w, (unsigned)shape->h);
+    bits.free();
+    if (!pm) return;
+    combine(dpy, win, kShapeBounding, 0, 0, pm, kShapeSet);
+    release(dpy, pm);
+#endif
+}
+
+// Wayland: SDL keeps a window's shape for its own renderer's alpha and gives the compositor
+// no input region, so a click on a clear part still lands on the window. The engine sets
+// the surface's input region itself, from the shape's runs (window units, as the surface's
+// coordinates are), through SDL's libwayland-client opened by name, and the next present
+// commits it. A compositor of its own is bound once on SDL's display, on a queue of its
+// own, so nothing of SDL's is dispatched here. `shape` null: input everywhere again.
+// The protocol's numbers are wayland.xml's; the calls are libwayland-client's ABI, written
+// out so no Wayland header is needed.
+struct WlLib {
+    void* (*marshal)(void*, u32, const void*, u32, u32, ...) = nullptr; // wl_proxy_marshal_flags
+    u32   (*version)(void*) = nullptr;                                   // wl_proxy_get_version
+    void* (*wrapper)(void*) = nullptr;                                   // wl_proxy_create_wrapper
+    void  (*wrapper_destroy)(void*) = nullptr;
+    void  (*set_queue)(void*, void*) = nullptr;
+    int   (*add_listener)(void*, void (**)(void), void*) = nullptr;
+    void* (*create_queue)(void*) = nullptr;                              // wl_display_create_queue
+    int   (*roundtrip_queue)(void*, void*) = nullptr;
+    const void* registry_iface = nullptr;   // wl_registry_interface
+    const void* compositor_iface = nullptr; // wl_compositor_interface
+    const void* region_iface = nullptr;     // wl_region_interface
+    void* queue = nullptr;
+    void* compositor = nullptr;
+    bool  tried = false;
+};
+WlLib g_wl;
+
+void wl_global(void* data, void* registry, u32 name, const char* iface, u32 version) {
+    WlLib& l = *(WlLib*)data;
+    if (l.compositor || strcmp(iface, "wl_compositor") != 0) return;
+    u32 v = version < 4 ? version : 4;
+    // wl_registry.bind (opcode 0), new_id untyped: name, the interface's name, version, the id.
+    l.compositor = l.marshal(registry, 0, l.compositor_iface, v, 0, name, "wl_compositor", v, nullptr);
+}
+void wl_global_remove(void*, void*, u32) {}
+
+void* wl_compositor_for(void* display) {
+    WlLib& l = g_wl;
+    if (l.tried) return l.compositor;
+    l.tried = true;
+    SDL_SharedObject* so = SDL_LoadObject("libwayland-client.so.0");
+    if (!so) return nullptr;
+    l.marshal         = (decltype(l.marshal))SDL_LoadFunction(so, "wl_proxy_marshal_flags");
+    l.version         = (decltype(l.version))SDL_LoadFunction(so, "wl_proxy_get_version");
+    l.wrapper         = (decltype(l.wrapper))SDL_LoadFunction(so, "wl_proxy_create_wrapper");
+    l.wrapper_destroy = (decltype(l.wrapper_destroy))SDL_LoadFunction(so, "wl_proxy_wrapper_destroy");
+    l.set_queue       = (decltype(l.set_queue))SDL_LoadFunction(so, "wl_proxy_set_queue");
+    l.add_listener    = (decltype(l.add_listener))SDL_LoadFunction(so, "wl_proxy_add_listener");
+    l.create_queue    = (decltype(l.create_queue))SDL_LoadFunction(so, "wl_display_create_queue");
+    l.roundtrip_queue = (decltype(l.roundtrip_queue))SDL_LoadFunction(so, "wl_display_roundtrip_queue");
+    l.registry_iface  = (const void*)SDL_LoadFunction(so, "wl_registry_interface");
+    l.compositor_iface = (const void*)SDL_LoadFunction(so, "wl_compositor_interface");
+    l.region_iface    = (const void*)SDL_LoadFunction(so, "wl_region_interface");
+    if (!l.marshal || !l.version || !l.wrapper || !l.wrapper_destroy || !l.set_queue || !l.add_listener || !l.create_queue ||
+        !l.roundtrip_queue || !l.registry_iface || !l.compositor_iface || !l.region_iface) return nullptr;
+    l.queue = l.create_queue(display);
+    void* d = l.wrapper(display);
+    if (!l.queue || !d) return nullptr;
+    l.set_queue(d, l.queue);
+    void* registry = l.marshal(d, 1, l.registry_iface, l.version(d), 0, nullptr); // wl_display.get_registry
+    l.wrapper_destroy(d);
+    if (!registry) return nullptr;
+    static void (*listener[2])(void) = {(void (*)(void))wl_global, (void (*)(void))wl_global_remove};
+    l.add_listener(registry, listener, &l);
+    l.roundtrip_queue(display, l.queue);
+    // The registry stays: destroying it is a request a compositor of this age may refuse.
+    return l.compositor;
+}
+
+void sdl_wayland_input(SDL_Window* w, const SDL_Surface* shape) {
+    if (strcmp(SDL_GetCurrentVideoDriver(), "wayland") != 0) return;
+    SDL_PropertiesID props = SDL_GetWindowProperties(w);
+    void* display = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nullptr);
+    void* surface = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr);
+    void* compositor = display && surface ? wl_compositor_for(display) : nullptr;
+    if (!compositor) {
+        static bool told = false;
+        if (!told) KV_WARN("window", "no Wayland compositor to give an input region to: clicks on the clear parts reach the window");
+        told = true;
+        return;
+    }
+    WlLib& l = g_wl;
+    constexpr u32 kSetInputRegion = 5, kCreateRegion = 1, kRegionAdd = 1, kRegionDestroy = 0, kMarshalDestroy = 1;
+    if (!shape) { l.marshal(surface, kSetInputRegion, nullptr, l.version(surface), 0, nullptr); return; }
+    void* region = l.marshal(compositor, kCreateRegion, l.region_iface, l.version(compositor), 0, nullptr);
+    if (!region) return;
+    // Each row's runs of input, and a run as tall as the rows below it that have the same
+    // runs: a disc is a few hundred rects.
+    auto in = [&](int x, int y) { return (((const u32*)((const u8*)shape->pixels + (usize)y * (usize)shape->pitch))[x] >> 24) != 0; };
+    auto same_row = [&](int a, int b) {
+        for (int x = 0; x < shape->w; ++x) if (in(x, a) != in(x, b)) return false;
+        return true;
+    };
+    for (int y = 0; y < shape->h;) {
+        int y1 = y + 1;
+        while (y1 < shape->h && same_row(y, y1)) ++y1;
+        for (int x = 0; x < shape->w;) {
+            if (!in(x, y)) { ++x; continue; }
+            int x1 = x + 1;
+            while (x1 < shape->w && in(x1, y)) ++x1;
+            l.marshal(region, kRegionAdd, nullptr, l.version(region), 0, x, y, x1 - x, y1 - y);
+            x = x1;
+        }
+        y = y1;
+    }
+    l.marshal(surface, kSetInputRegion, nullptr, l.version(surface), 0, region);
+    l.marshal(region, kRegionDestroy, nullptr, l.version(region), kMarshalDestroy);
+}
+
+// SDL's hit test asks in window units; the grips are framebuffer pixels.
+SDL_HitTestResult sdl_hit_test(SDL_Window*, const SDL_Point* p, void* data) {
+    const HostWindow& w = *(const HostWindow*)data;
+    f32 k = w.pixel_scale();
+    switch (w.grip_at((f32)p->x * k, (f32)p->y * k)) {
+    case WindowGrip::Move: return SDL_HITTEST_DRAGGABLE;
+    case WindowGrip::N:    return SDL_HITTEST_RESIZE_TOP;
+    case WindowGrip::NE:   return SDL_HITTEST_RESIZE_TOPRIGHT;
+    case WindowGrip::E:    return SDL_HITTEST_RESIZE_RIGHT;
+    case WindowGrip::SE:   return SDL_HITTEST_RESIZE_BOTTOMRIGHT;
+    case WindowGrip::S:    return SDL_HITTEST_RESIZE_BOTTOM;
+    case WindowGrip::SW:   return SDL_HITTEST_RESIZE_BOTTOMLEFT;
+    case WindowGrip::W:    return SDL_HITTEST_RESIZE_LEFT;
+    case WindowGrip::NW:   return SDL_HITTEST_RESIZE_TOPLEFT;
+    case WindowGrip::None: break;
+    }
+    return SDL_HITTEST_NORMAL;
+}
+
+} // namespace
+
+// The mask scaled to the window's size in window units (what SDL's shape is in), nearest
+// neighbour, and cut at a half: SDL's backends each read its alpha with their own threshold
+// (X11's shape is one bit), so it gets 0 or 255 and nothing between.
+bool hid_window_shape(HostWindow& hw) {
+    SDL_Window* w = (SDL_Window*)hw.native_;
+    if (!w) return false;
+    if (!(SDL_GetWindowFlags(w) & SDL_WINDOW_TRANSPARENT)) {
+        static bool told = false;
+        if (!told) KV_WARN("window", "a shape on a window not opened transparent (WindowDesc::transparent): it stays a rectangle");
+        told = true;
+        return false;
+    }
+    if (!hw.shape_.len) {
+        if (!hw.transparent_) sdl_x11_bounding(w, nullptr);
+        sdl_wayland_input(w, nullptr);
+        return SDL_SetWindowShape(w, nullptr);
+    }
+    int ww = 0, wh = 0;
+    if (!SDL_GetWindowSize(w, &ww, &wh) || ww <= 0 || wh <= 0) return false;
+    SDL_Surface* s = SDL_CreateSurface(ww, wh, SDL_PIXELFORMAT_ARGB8888);
+    if (!s) return false;
+    for (int y = 0; y < wh; ++y) {
+        u32* row = (u32*)((u8*)s->pixels + (usize)y * (usize)s->pitch);
+        const u8* src = hw.shape_.data + (usize)((u64)y * hw.shape_h_ / (u32)wh) * hw.shape_w_;
+        for (int x = 0; x < ww; ++x) row[x] = src[(u64)x * hw.shape_w_ / (u32)ww] >= 128 ? 0xFFFFFFFFu : 0x00FFFFFFu;
+    }
+    bool ok = SDL_SetWindowShape(w, s);
+    if (ok && !hw.transparent_) sdl_x11_bounding(w, s);
+    if (ok) sdl_wayland_input(w, s);
+    SDL_DestroySurface(s);
+    if (!ok) {
+        static bool told = false;
+        if (!told) KV_WARN("window", "SDL_SetWindowShape: %s", SDL_GetError());
+        told = true;
+    }
+    return ok;
+}
+
+bool hid_window_grips(HostWindow& hw) {
+    SDL_Window* w = (SDL_Window*)hw.native_;
+    if (!w) return false;
+    if (!SDL_SetWindowHitTest(w, hw.grip_count_ ? sdl_hit_test : nullptr, &hw)) {
+        static bool told = false;
+        if (!told) KV_WARN("window", "SDL_SetWindowHitTest: %s", SDL_GetError());
+        told = true;
+        return false;
+    }
+    return true;
+}
+
+// SDL's sizes are window units: a minimum rounds up, a maximum down.
+void hid_window_bounds(HostWindow& hw) {
+    SDL_Window* w = (SDL_Window*)hw.native_;
+    if (!w) return;
+    f32 k = hw.pixel_scale();
+    hw.bounds_scale_ = k;
+    auto up   = [&](u32 px) { return px ? (int)((f32)px / k + 0.999f) : 0; };
+    auto down = [&](u32 px) { return px ? (int)((f32)px / k) : 0; };
+    SDL_SetWindowMinimumSize(w, up(hw.bounds_[0]), up(hw.bounds_[1]));
+    SDL_SetWindowMaximumSize(w, down(hw.bounds_[2]), down(hw.bounds_[3]));
+}
+
 bool HostWindow::open(const WindowDesc& desc) {
     KV_ASSERT(!native_);
     if (!hid_video_up()) return false; // the module starts headless
@@ -99,6 +397,7 @@ bool HostWindow::open(const WindowDesc& desc) {
     if (desc.surface == WindowSurface::Vulkan) flags |= SDL_WINDOW_VULKAN; // also loads the Vulkan loader
     if (desc.surface == WindowSurface::Metal) flags |= SDL_WINDOW_METAL;   // SDL_Metal_CreateView needs it
     if (desc.borderless) flags |= SDL_WINDOW_BORDERLESS;
+    if (desc.transparent) flags |= SDL_WINDOW_TRANSPARENT | SDL_WINDOW_BORDERLESS;
 #if defined(__APPLE__)
     // Retina: without this the backing store is in window points and the system scales it
     // up, so a 2x display shows a quarter of the pixels. With it the framebuffer is in
@@ -107,7 +406,16 @@ bool HostWindow::open(const WindowDesc& desc) {
     // would change that and every measurement made there, so it is not set there yet.)
     flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #endif
+    bool x11_visual = false;
+    if (desc.transparent && strcmp(SDL_GetCurrentVideoDriver(), "x11") == 0) {
+        if (unsigned long id = x11_alpha_visual()) {
+            char hex[24];
+            SDL_snprintf(hex, sizeof hex, "0x%lx", id);
+            x11_visual = SDL_SetHint(SDL_HINT_VIDEO_X11_WINDOW_VISUALID, hex);
+        }
+    }
     SDL_Window* w = SDL_CreateWindow(desc.title, (int)desc.width, (int)desc.height, flags);
+    if (x11_visual) SDL_ResetHint(SDL_HINT_VIDEO_X11_WINDOW_VISUALID);
     if (!w) {
         KV_ERROR("window", "SDL_CreateWindow failed: %s", SDL_GetError());
         return false;
@@ -120,10 +428,12 @@ bool HostWindow::open(const WindowDesc& desc) {
     width_   = (u32)pw;
     height_  = (u32)ph;
     focused_ = (SDL_GetWindowFlags(w) & SDL_WINDOW_INPUT_FOCUS) != 0;
+    transparent_ = desc.transparent && sdl_composited(w, x11_visual);
 #if KV_LIVE_RESIZE_TIMER
     modal_timer_ = modal_timer_start(this);
 #endif
-    KV_INFO("window", "opened '%s' %ux%u px", desc.title, width_, height_);
+    KV_INFO("window", "opened '%s' %ux%u px%s", desc.title, width_, height_,
+            !desc.transparent ? "" : transparent_ ? ", transparent" : ", opaque: nothing composites its alpha; a shape cuts it out");
     return true;
 }
 
@@ -139,6 +449,7 @@ void HostWindow::close() {
     focused_ = false;
     hidden_  = 0;
     hidden_sent_ = WindowHidden::None;
+    hid_window_parts_reset(*this);
     KV_INFO("window", "closed");
 }
 
@@ -166,8 +477,8 @@ bool HostWindow::software_frame(SoftwareFrame* out) {
     }
     bool rgba;
     switch (s->format) {
-    case SDL_PIXELFORMAT_XRGB8888: case SDL_PIXELFORMAT_ARGB8888: rgba = false; break; // B, G, R, X in memory
-    case SDL_PIXELFORMAT_XBGR8888: case SDL_PIXELFORMAT_ABGR8888: rgba = true; break;  // R, G, B, X
+    case SDL_PIXELFORMAT_XRGB8888: case SDL_PIXELFORMAT_ARGB8888: rgba = false; break; // B, G, R, X (or A) in memory
+    case SDL_PIXELFORMAT_XBGR8888: case SDL_PIXELFORMAT_ABGR8888: rgba = true; break;  // R, G, B, X (or A)
     default:
         if (!told) KV_WARN("window", "the window's surface is %s, not 32 bits a pixel: nothing drawn", SDL_GetPixelFormatName(s->format));
         told = true;
@@ -180,7 +491,7 @@ bool HostWindow::software_frame(SoftwareFrame* out) {
     }
     if (SDL_MUSTLOCK(s) && !SDL_LockSurface(s)) return false;
     software_ = s;
-    *out = SoftwareFrame{(u8*)s->pixels, (u32)s->w, (u32)s->h, (u32)s->pitch, rgba};
+    *out = SoftwareFrame{(u8*)s->pixels, (u32)s->w, (u32)s->h, (u32)s->pitch, rgba, false, transparent_ && SDL_ISPIXELFORMAT_ALPHA(s->format)};
     return true;
 }
 
@@ -326,6 +637,9 @@ void translate(HostWindow& w, const SDL_Event& e, EventBus& bus, Input& input) {
             if (nw != w.width_ || nh != w.height_) {
                 w.width_  = nw;
                 w.height_ = nh;
+                if (w.shape_.len) hid_window_shape(w); // the mask, scaled to the new size
+                // Bounds are pixels, SDL's are window units: a new scale changes them.
+                if ((w.bounds_[0] | w.bounds_[1] | w.bounds_[2] | w.bounds_[3]) && w.pixel_scale() != w.bounds_scale_) hid_window_bounds(w);
                 bus.emit(WindowResized{nw, nh});
             }
             break;

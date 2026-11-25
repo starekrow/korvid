@@ -555,6 +555,7 @@ void HostWindow::close() {
     focused_ = false;
     hidden_  = 0;
     hidden_sent_ = WindowHidden::None;
+    hid_window_parts_reset(*this);
     KV_INFO("window", "closed");
 }
 
@@ -744,5 +745,10 @@ void HostWindow::on_modal(void (*fn)(void* ctx), void* ctx) {
     modal_fn_  = fn; // never called: nothing on Android holds the game's thread in a loop of its own
     modal_ctx_ = ctx;
 }
+
+// A window that is not a rectangle: not offered on a phone, where the window is the screen.
+bool hid_window_shape(HostWindow&) { return false; }
+bool hid_window_grips(HostWindow&) { return false; }
+void hid_window_bounds(HostWindow&) {}
 
 } // namespace kv
