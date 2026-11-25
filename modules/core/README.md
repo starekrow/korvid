@@ -417,8 +417,8 @@ Header `korvid/core/utf8.h`, `json.h`, `kbor.h`, `base64.h`, `cli.h`, `random.h`
 | `KV_TRACE`, `KV_DEBUG_LOG`, `KV_INFO`, `KV_WARN`, `KV_ERROR`, `LogLevel`, `log_set_level`, `log_level`, `log_write` | macros, enum, functions | one line per call, `[ INFO] tag: text`; Warn and Error to stderr, the rest to stdout |
 | `TestCtx`, `KV_CHECK(ctx, expr)`, `test_report(ctx, exe)` | record, macro, function | one test executable per module, no registration |
 | `format`, `vformat` | functions | snprintf's contract and language |
-| `output_set_sink`, `output_write` | functions | where the standard streams go, for a platform that has none |
-| `print`, `vprint`, `print_err`, `vprint_err`, `print_flush` | functions | to stdout (buffered) and stderr |
+| `output_set_sink`, `output_write`, `output_flush` | functions | raw bytes to stdout or stderr, and the flush that goes with them; where the standard streams go, for a platform that has none |
+| `print`, `vprint`, `print_err`, `vprint_err`, `print_flush`, `print_flush_lines` | functions | to stdout (buffered) and stderr |
 
 Header `korvid/core/os_memory.h`: `os_page_size`, `os_reserve`, `os_commit`, `os_decommit`,
 `os_release`, `os_page_align`: the page layer, the only ported part of the memory system.

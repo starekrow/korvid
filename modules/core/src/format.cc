@@ -70,6 +70,7 @@ void print_flush() {
     atomic_store(&g_line_ended, 0u, MO_RELEASE);
     if (!g_sink) fflush(stdout);
 }
+void output_flush() { print_flush(); }
 
 void print_flush_lines() {
     if (atomic_load(&g_line_ended, MO_ACQUIRE)) print_flush();

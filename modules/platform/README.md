@@ -6,7 +6,7 @@ links no external library, so a tool built on the engine (`kpack`) needs nothing
 installed on the build machine beyond the compiler. The window, the keyboard and gamepads
 are `platform_hid`'s; the audio device is `platform_audio`'s. Nothing here blocks the
 thread that calls it unless its name or its header says it is for tools (the blocking
-file calls, `Process::wait`): everything else is polled or pumped once per frame, by the
+file calls, `Process::wait`, `NetSocket::write_now`): everything else is polled or pumped once per frame, by the
 frame loop in a game and by the `tool` module in a tool. The module's own threads are
 few and never call a caller's code but to wake it: the queue's task workers once
 `start_tasks` asks for them, the ring's workers where the OS has no ring of its own
@@ -68,7 +68,8 @@ tells of (a polled root's walk).
 **Processes** (`process.h`). `Process::spawn` takes an argument vector, a working
 directory and additions to the environment; `running`, `read_out`, `read_err` and `kill`
 never block; `wait(seconds)` is for a thread that owns the child and has nothing else to
-do. The child has no stdin and its own process group (a job object on Windows), so
+do. A process whose spawn failed and is used anyway reads as a child that printed nothing
+and exited 0, so check spawn's answer (`error` says why). The child has no stdin and its own process group (a job object on Windows), so
 killing it takes what it started. `process_supported()` is false only on iOS. For tools.
 
 **Standard input** (`stdin.h`). `io_stdin_read` takes what has arrived on the process's
@@ -335,8 +336,8 @@ Header `korvid/platform/net.h`:
 
 | name | kind | what |
 |---|---|---|
-| `NetListener` | record | `open(port, scope, &err)` (port 0: the OS picks, see `port`; `NetScope::Loopback` or `Any`), `close()`, `is_open()`, `accept()` (a `Handle`, or null) |
-| `NetSocket` | record | `adopt(handle)`, `read(buf, cap)` (bytes, 0, or -1 closed), `write(data, size)`, `write_str(s)`, `flush()`, `close()`, `is_open()`, `out_limit`, `closed`, `bytes_in`, `bytes_out`, `dropped` |
+| `NetListener` | record | `open(port, scope, &err)` (port 0: the OS picks, see `port`; `NetScope::Loopback` or `Any`; `error` keeps why it failed), `close()`, `is_open()`, `accept()` (a `Handle`, or null) |
+| `NetSocket` | record | `adopt(handle)`, `read(buf, cap)` (bytes, 0, or -1 closed), `write(data, size)`, `write_str(s)`, `write_now(data, size)` (blocks till the kernel has it all, or false: over), `flush()`, `pending()`, `room()`, `close()`, `is_open()`, `link()`, `out_limit`, `closed`, `error`, `bytes_in`, `bytes_out`, `dropped` |
 | `net_connect_local(port, &sock)` | function | a non-blocking connect to loopback, for tools and tests |
 
 Header `korvid/platform/module.h`:
@@ -376,9 +377,19 @@ What the module registers with the engine:
   on an NVMe here against 34 ms unbounded. `pumps_capped` says how often the budget held
   something back.
 - **Completions you do not reap are leaked at shutdown with a warning** naming the path.
-- **Sockets never block and never stall.** A queue past `out_limit` drops and counts;
-  `closed` says the peer went away. Served from a tick system, a connection's throughput
-  is bounded by what the kernel buffers hold per tick.
+- **Sockets never block and never stall**, but for `write_now`. A queue past `out_limit`
+  drops and counts; `closed` says the peer went away. Served from a tick system, a
+  connection's throughput is bounded by what the kernel buffers hold per tick.
+- **A program that does one thing at a time** can write straight-line code: `write_now`
+  sends everything or says the connection is over, `Process::wait` sleeps till the child
+  writes, `io_read_file` and `io_write_file` block. A loop of `write` and `flush` that
+  retries until the bytes are taken never ends once the peer has gone: `write` refuses a
+  closed socket for good.
+- **Used after it is over, a socket, listener or process tells you**, in a dev or debug
+  build: a warning, once per object, when code writes to a connection that is over, reads
+  a socket after `close()`, accepts on a listener whose open failed (with the reason), or
+  reads, polls, waits on or kills a process that is not running (with spawn's `error`).
+  The calls still return quietly (false, 0, -1), as they do in ship.
 - **No external libraries.** Keep it that way: a module that needs SDL, a GPU or a sound
   card is a module of its own (`platform_hid`, `platform_audio`, a renderer), so a tool
   that does not need one never links it.

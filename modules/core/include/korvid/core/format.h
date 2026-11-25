@@ -45,6 +45,8 @@ void vprint(const char* fmt, va_list args);
 void print_err(const char* fmt, ...) KV_PRINTF(1, 2);
 void vprint_err(const char* fmt, va_list args);
 // Pushes out what print has buffered for stdout, now. Nothing to do when a sink is set.
+// Code that blocks for a while calls it itself: the engine's own flushes come at the end
+// of a tick and before a loop waits.
 void print_flush();
 // The same if a line has ended on stdout since the last flush, and nothing if not: one
 // atomic read. What a loop calls once a pass; engine_frame and platform_wait do.
@@ -61,8 +63,13 @@ void output_set_sink(OutputSink sink);
 // One write to the sink or the stream, as print and the log make them: `len` bytes as they
 // are, no format string, so it is the way to put raw bytes (a child's output, a file) on
 // stdout. Buffered and flushed as print is (above): bytes that do not end in '\n' wait
-// for print_flush. In a tool, stdout and stderr are binary on Windows too
+// for output_flush. In a tool, stdout and stderr are binary on Windows too
 // (os_stdio_binary): nothing is added to a '\n'.
 void output_write(bool err, const char* text, usize len);
+// Pushes out what output_write and print have buffered for stdout, now: print_flush, by
+// the name that goes with output_write. The engine flushes after each tick and before a
+// loop waits; code that blocks for a while (a command that does its work in a loop of its
+// own) flushes for itself, or what it wrote sits in the buffer till it returns.
+void output_flush();
 
 } // namespace kv

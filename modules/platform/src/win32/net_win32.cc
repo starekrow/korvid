@@ -4,6 +4,7 @@
 // it with SO_EXCLUSIVEADDRUSE instead; and there is no SIGPIPE to suppress.
 #include "korvid/platform/net.h"
 #include "../os_err.h"
+#include "../misuse.h"
 #include "../os_handle_table.h"
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
@@ -45,6 +46,9 @@ i32 errno_from_wsa(int code) {
     case WSAEADDRNOTAVAIL: return EADDRNOTAVAIL;
     case WSAECONNREFUSED:  return ECONNREFUSED;
     case WSAECONNRESET:    return ECONNRESET;
+    case WSAECONNABORTED:  return ECONNABORTED; // what a send to a peer that reset says on Windows
+    case WSAESHUTDOWN:     return EPIPE;
+    case WSAENOTCONN:      return ENOTCONN;
     case WSAENETUNREACH:   return ENETUNREACH;
     case WSAEHOSTUNREACH:  return EHOSTUNREACH;
     case WSAETIMEDOUT:     return ETIMEDOUT;
@@ -81,9 +85,10 @@ SOCKET new_socket() {
 
 bool NetListener::open(u16 want_port, NetScope scope, i32* err) {
     close();
-    if (!winsock_up()) return os_fail(err, ENETDOWN);
+    auto fail = [&](i32 why) { error = why; return os_fail(err, why); };
+    if (!winsock_up()) return fail(ENETDOWN);
     SOCKET s = new_socket();
-    if (s == INVALID_SOCKET) return os_fail(err, errno_from_wsa(WSAGetLastError()));
+    if (s == INVALID_SOCKET) return fail(errno_from_wsa(WSAGetLastError()));
     BOOL one = TRUE;
     setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char*)&one, sizeof one);
     sockaddr_in addr{};
@@ -93,13 +98,14 @@ bool NetListener::open(u16 want_port, NetScope scope, i32* err) {
     if (bind(s, (sockaddr*)&addr, sizeof addr) != 0 || listen(s, 8) != 0 || !set_nonblocking(s)) {
         int e = WSAGetLastError();
         closesocket(s);
-        return os_fail(err, errno_from_wsa(e));
+        return fail(errno_from_wsa(e));
     }
     int len = sizeof addr;
     if (getsockname(s, (sockaddr*)&addr, &len) == 0) port = ntohs(addr.sin_port);
     char what[48];
     kv::format(what, sizeof what, "listener %s:%u", scope == NetScope::Loopback ? "127.0.0.1" : "0.0.0.0", port);
     fd = handle_of(s, what);
+    error = 0;
     return true;
 }
 
@@ -107,10 +113,11 @@ void NetListener::close() {
     close_socket(fd);
     fd = Handle{};
     port = 0;
+    warned = false;
 }
 
 Handle NetListener::accept() {
-    if (!os_handle_open(fd)) return Handle{};
+    if (!os_handle_open(fd)) { misuse_listener(*this); return Handle{}; }
     SOCKET c = ::accept(socket_of(fd), nullptr, nullptr);
     if (c == INVALID_SOCKET) {
         int e = WSAGetLastError();
@@ -134,6 +141,7 @@ void NetSocket::adopt(Handle new_fd) {
     fd = new_fd;
     closed = false;
     error = 0;
+    warned = false;
     link_state = os_handle_open(fd) ? NetLink::Up : NetLink::None; // accepted: connected already. net_connect_local says Connecting
     if (os_handle_open(fd)) {
         set_nonblocking(socket_of(fd));
@@ -162,7 +170,8 @@ NetLink NetSocket::link() {
 
 i32 NetSocket::read(void* buf, u32 cap) {
     if (link_state == NetLink::Connecting && link() == NetLink::Connecting) return 0; // nothing can have arrived yet
-    if (!os_handle_open(fd) || closed || cap == 0) return closed ? -1 : 0;
+    if (!os_handle_open(fd) && !closed) { misuse_socket(*this, "read"); return 0; }
+    if (closed || cap == 0) return closed ? -1 : 0;
     int n = ::recv(socket_of(fd), (char*)buf, (int)(cap > 0x7FFFFFFFu ? 0x7FFFFFFFu : cap), 0);
     if (n > 0) { bytes_in += (u64)n; os_handle_count(fd, (u64)n, 0); return (i32)n; }
     if (n == 0) { closed = true; return -1; }
@@ -174,10 +183,54 @@ i32 NetSocket::read(void* buf, u32 cap) {
 }
 
 bool NetSocket::write(const void* data, u32 size) {
-    if (!os_handle_open(fd) || closed) return false;
+    if (!os_handle_open(fd) || closed) { misuse_socket(*this, "write"); return false; }
     if (out.len + size > out_limit) { dropped += size; return false; }
     memcpy(out.push_n(size), data, size);
     return true;
+}
+
+namespace {
+// Until `s` can be written or a quarter-second passes: a connect settled either way, room
+// in the kernel's buffer, or an error for the next send to find.
+void wait_writable(SOCKET s) {
+    fd_set can_write, failed;
+    FD_ZERO(&can_write); FD_ZERO(&failed);
+    FD_SET(s, &can_write); FD_SET(s, &failed);
+    timeval quarter{0, 250000};
+    select(0, nullptr, &can_write, &failed, &quarter);
+}
+
+// All of `data` to the kernel, waiting for room as it goes; false when the connection is over.
+bool send_waiting(NetSocket& sock, const u8* data, u32 size) {
+    SOCKET s = socket_of(sock.fd);
+    u32 sent = 0;
+    while (sent < size) {
+        int n = ::send(s, (const char*)data + sent, (int)(size - sent), 0);
+        if (n > 0) {
+            sent += (u32)n;
+            sock.bytes_out += (u64)n;
+            os_handle_count(sock.fd, 0, (u64)n);
+            continue;
+        }
+        int e = WSAGetLastError();
+        if (would_block(e)) { wait_writable(s); continue; }
+        sock.error = errno_from_wsa(e);
+        sock.closed = true;
+        return false;
+    }
+    return true;
+}
+} // namespace
+
+bool NetSocket::write_now(const void* data, u32 size) {
+    if (!os_handle_open(fd) || closed) { misuse_socket(*this, "write_now"); return false; }
+    while (link() == NetLink::Connecting) wait_writable(socket_of(fd));
+    if (closed) return false; // the connect failed: `error` says why
+    if (out.len) {
+        if (!send_waiting(*this, out.data, out.len)) return false;
+        out.len = 0;
+    }
+    return size == 0 || send_waiting(*this, (const u8*)data, size);
 }
 
 bool NetSocket::write_str(const char* s) { return write(s, (u32)strlen(s)); }
@@ -209,6 +262,7 @@ void NetSocket::close() {
     out.free(); // the queue's memory with it: its allocator stays, for the next use
     closed = false;
     link_state = NetLink::None;
+    warned = false;
 }
 
 bool net_connect_local(u16 port, NetSocket* out, i32* err) {

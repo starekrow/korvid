@@ -73,6 +73,16 @@ A command with nothing to wait for prints and calls `tool_finish` itself. A comm
 must not block: the work belongs in systems, so it can use the I/O queue and the job
 pool like anything else in the engine.
 
+A command that blocks anyway (a loop of its own, waiting on a socket or a child) runs
+before the first tick, so nothing else runs while it does: no system, timer or handler,
+no I/O queue completions, no Work, no `--cli-port`, and what it prints waits in stdout's
+buffer until it calls `output_flush`. The engine does not object. That is enough for a
+one-shot tool built only of blocking calls (`io_read_file`, `io_write_file`,
+`NetSocket::write_now`, `Process::wait`), and nothing more. The smallest shape that does
+not block is one system that does a step each tick and calls `engine_want_ticks` while it
+has more to do; [a tool that waits](#a-tool-that-waits) is the same with a waker in place
+of `engine_want_ticks`, so it sleeps when there is nothing to do.
+
 **The executable** is a module with `output = "exe"` whose deps include `tool` and whose
 `main` is:
 

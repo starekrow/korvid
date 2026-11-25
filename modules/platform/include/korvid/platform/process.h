@@ -39,6 +39,7 @@ struct Process {
     i32  code = 0;               // once exited: its status, or 128 + the signal that ended it
     char error[160] = {};        // why spawn failed
     Handle process, group;      // the platform's own hold on the child and on what it started, where the OS gives one beyond the id
+    bool warned = false;         // a dev or debug build has warned of its use while not open
 
     // False with `error` set if the program cannot be started (not found, not executable,
     // no such directory), and *err (if given) its errno: ENOENT, EACCES, EINVAL for nothing
@@ -54,6 +55,12 @@ struct Process {
         return spawn(d, err);
     }
     bool is_open() const { return pid >= 0; }
+    // On a process that is not open (its spawn failed, it never had one, or it was
+    // closed), running() is false, the reads are -1, code is 0, and wait and kill do
+    // nothing: a loop that does not check spawn's answer ends at once, as if a child had
+    // run, printed nothing and succeeded. A dev or debug build warns at the first such
+    // call, with spawn's `error`.
+    //
     // Asks the OS once; true until the child has ended. Output may remain to be read
     // after it has: read until both streams return -1.
     bool running();

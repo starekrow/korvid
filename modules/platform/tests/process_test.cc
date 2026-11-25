@@ -55,7 +55,7 @@ void test_process(kv::TestCtx& c) {
     KV_CHECK(c, run_out(p, out, err) && p.exited && p.code == 3);
     KV_CHECK(c, strcmp(out.data, "to-out\n") == 0 && strcmp(err.data, "to-err\n") == 0);
     p.close();
-    KV_CHECK(c, !p.is_open() && !p.running());
+    KV_CHECK(c, !p.is_open() && !p.running() && p.warned == (KV_DEV != 0)); // used after close: told, in dev and debug
 
     // A program found on PATH, with arguments passed as they are (no shell between).
     out.len = err.len = 0;
@@ -165,6 +165,11 @@ void test_process(kv::TestCtx& c) {
         ProcessDesc nd;
         nd.argv = Span<const char* const>(none, 1);
         KV_CHECK(c, !p.spawn(nd, &why) && why == ENOENT && p.error[0]);
+        // Used anyway, as code that does not look would: an empty child that succeeded,
+        // and in a dev or debug build a warning with spawn's reason, once.
+        char none_buf[16];
+        KV_CHECK(c, !p.running() && p.read_out(none_buf, sizeof none_buf) == -1 && p.code == 0);
+        KV_CHECK(c, p.warned == (KV_DEV != 0));
         why = 0;
         KV_CHECK(c, !p.spawn(ProcessDesc{}, &why) && why == EINVAL);
     }

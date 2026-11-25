@@ -1,8 +1,13 @@
 // Korvid platform: non-blocking TCP. A listener accepts; a socket reads what has arrived
 // and queues what is to be sent, draining it when the pump flushes. Nothing here blocks
-// and nothing spawns a thread: whoever owns a socket polls it once per frame. The CLI's
-// transport, and a game's if it wants one. IPv4 loopback by default; a listener may open
-// to every interface, and should think before it does.
+// but write_now, and nothing spawns a thread: whoever owns a socket polls it once per
+// frame. The CLI's transport, and a game's if it wants one. IPv4 loopback by default; a
+// listener may open to every interface, and should think before it does.
+//
+// A socket or listener used after it is over or closed (a write to a connection gone, a
+// read after close(), an accept on a listener whose open failed) says false, 0 or -1 as
+// below, and a dev or debug build also logs a warning, once per socket, naming what
+// happened: code that does not check gets told rather than spinning in silence.
 #pragma once
 #include "korvid/core/array.h"
 #include "korvid/platform/os_handle.h"
@@ -15,13 +20,18 @@ enum class NetScope : u8 { Loopback, Any };
 struct NetListener {
     Handle fd;      // OsKind::Socket
     u16   port = 0; // the bound port; what the OS chose when asked for 0
+    i32   error = 0; // why the last open failed, as an errno (EADDRINUSE); 0 once one succeeds
+    bool  warned = false; // a dev or debug build has warned of its use while not open
 
-    // False (*err: EADDRINUSE, EACCES, the OS's errno) if it cannot listen. Nothing is
-    // logged: the failure is the caller's to report, with err (os_error_text).
+    // False (*err and `error`: EADDRINUSE, EACCES, the OS's errno) if it cannot listen.
+    // Nothing is logged: the failure is the caller's to report (os_error_text). A port in
+    // use is EADDRINUSE on every OS (Windows' exclusive-use bind included).
     bool open(u16 port, NetScope scope = NetScope::Loopback, i32* err = nullptr);
     void close();
     bool is_open() const { return os_handle_open(fd); }
-    // A connected socket, or none (not is_open) when nobody is waiting. Non-blocking.
+    // A connected socket, or none (not is_open) when nobody is waiting. Non-blocking. On a
+    // listener that is not open, none, and a dev or debug build's warning saying why (its
+    // open's error): a loop waiting on it would wait for ever.
     Handle accept();
 };
 
@@ -36,7 +46,8 @@ struct NetSocket {
     bool      closed = false;        // over: the peer went away (read saw the end, or a send failed), or the connect failed
     NetLink   link_state = NetLink::None; // what link() last found
     i32       error = 0;             // why it is closed, as an errno: ECONNREFUSED, ECONNRESET; 0 for a peer that closed in order
-    u64       bytes_in = 0, bytes_out = 0, dropped = 0; // read; taken by the kernel at flush(); refused by write past out_limit
+    u64       bytes_in = 0, bytes_out = 0, dropped = 0; // read; taken by the kernel (flush, write_now); refused by write past out_limit
+    bool      warned = false;        // a dev or debug build has warned of its use after it was over or closed
 
     // Takes ownership of a socket (from accept) and makes it non-blocking.
     void adopt(Handle fd);
@@ -48,17 +59,30 @@ struct NetSocket {
     // set, never as an empty stream.
     NetLink link();
     // Bytes read into buf, 0 when nothing has arrived, -1 when it is over: `error` 0 if the
-    // peer closed in order, else why.
+    // peer closed in order, else why. After close() (or on a socket never adopted) it is 0,
+    // as if nothing had arrived yet, and a dev or debug build warns.
     i32  read(void* buf, u32 cap);
-    // Queues bytes; false if the queue would pass out_limit (then nothing is queued).
+    // Queues bytes; false if the queue would pass out_limit (then nothing is queued), and
+    // false for good once the socket is over or closed: a loop that retries until write
+    // takes its bytes must also stop when is_open() turns false, or it never ends (a dev or
+    // debug build warns at the first such write). write_now is that loop, done right.
     bool write(const void* data, u32 size);
     bool write_str(const char* s);
+    // Sends `data` now, after whatever is still queued, waiting while the kernel will take
+    // no more: true once the kernel has all of it, false if the connection is over, with
+    // `error` saying why (or was over before the call: then a dev or debug build warns).
+    // Nothing is dropped and out_limit does not apply; nothing is left for flush(). It
+    // blocks the calling thread while the peer is not reading, and waits out a connect
+    // still under way. For a tool that does one thing at a time; code that must not block
+    // uses write, room() and flush.
+    bool write_now(const void* data, u32 size);
     // Backpressure, for a caller that would rather hold its data than have write drop it:
     // what is queued and not yet sent, and how much more write will take. Two reads of
     // fields: nothing is asked of the OS.
     u32  pending() const { return out.len; }
     u32  room() const { return out.len < out_limit ? out_limit - out.len : 0; }
-    // Sends what the kernel will take now.
+    // Sends what the kernel will take now, without waiting: what it will not take stays
+    // queued for the next flush.
     void flush();
     // Closes the socket and gives the queue's memory back: nothing else to free. What was
     // still pending() is not sent: flush until it is 0 first, to send everything.

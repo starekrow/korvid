@@ -1,6 +1,7 @@
 #include "korvid/platform/net.h"
 #include "korvid/core/os_error.h"
 #include "../os_err.h"
+#include "../misuse.h"
 #include "../os_handle_table.h"
 #include "korvid/core/log.h"
 #include "korvid/core/format.h"
@@ -66,8 +67,9 @@ int tcp_socket() {
 
 bool NetListener::open(u16 want_port, NetScope scope, i32* err) {
     close();
+    auto fail = [&](i32 why) { error = why; return os_fail(err, why); };
     int s = tcp_socket();
-    if (s < 0) return os_fail(err, errno);
+    if (s < 0) return fail(errno);
     int one = 1;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
     sockaddr_in addr{};
@@ -77,13 +79,14 @@ bool NetListener::open(u16 want_port, NetScope scope, i32* err) {
     if (bind(s, (sockaddr*)&addr, sizeof addr) != 0 || listen(s, 8) != 0 || !set_nonblocking(s)) {
         int e = errno;
         ::close(s);
-        return os_fail(err, e);
+        return fail(e);
     }
     socklen_t len = sizeof addr;
     if (getsockname(s, (sockaddr*)&addr, &len) == 0) port = ntohs(addr.sin_port);
     char what[48];
     kv::format(what, sizeof what, "listener %s:%u", scope == NetScope::Loopback ? "127.0.0.1" : "0.0.0.0", port);
     fd = os_handle_make(OsKind::Socket, s, what);
+    error = 0;
     return true;
 }
 
@@ -91,10 +94,11 @@ void NetListener::close() {
     close_socket(fd);
     fd = Handle{};
     port = 0;
+    warned = false;
 }
 
 Handle NetListener::accept() {
-    if (!os_handle_open(fd)) return Handle{};
+    if (!os_handle_open(fd)) { misuse_listener(*this); return Handle{}; }
 #if KV_NET_APPLE
     // A socket accepted from a non-blocking listener does not inherit O_NONBLOCK on macOS
     // (it does not on Linux either, which is why accept4 is asked for it there).
@@ -121,6 +125,7 @@ void NetSocket::adopt(Handle new_fd) {
     fd = new_fd;
     closed = false;
     error = 0;
+    warned = false;
     link_state = os_handle_open(fd) ? NetLink::Up : NetLink::None; // accepted: connected already. net_connect_local says Connecting
     if (os_handle_open(fd)) {
         set_nonblocking((int)os_handle_value(fd));
@@ -145,7 +150,8 @@ NetLink NetSocket::link() {
 
 i32 NetSocket::read(void* buf, u32 cap) {
     if (link_state == NetLink::Connecting && link() == NetLink::Connecting) return 0; // nothing can have arrived yet
-    if (!os_handle_open(fd) || closed || cap == 0) return closed ? -1 : 0;
+    if (!os_handle_open(fd) && !closed) { misuse_socket(*this, "read"); return 0; }
+    if (closed || cap == 0) return closed ? -1 : 0;
     ssize_t n = ::recv((int)os_handle_value(fd), buf, cap, 0);
     if (n > 0) { bytes_in += (u64)n; os_handle_count(fd, (u64)n, 0); return (i32)n; }
     if (n == 0) { closed = true; return -1; }
@@ -156,10 +162,50 @@ i32 NetSocket::read(void* buf, u32 cap) {
 }
 
 bool NetSocket::write(const void* data, u32 size) {
-    if (!os_handle_open(fd) || closed) return false;
+    if (!os_handle_open(fd) || closed) { misuse_socket(*this, "write"); return false; }
     if (out.len + size > out_limit) { dropped += size; return false; }
     memcpy(out.push_n(size), data, size);
     return true;
+}
+
+namespace {
+// Until `fd` can be written or a quarter-second passes: a connect settled either way, room
+// in the kernel's buffer, or an error for the next send to find.
+void wait_writable(int fd) {
+    struct pollfd p = {fd, POLLOUT, 0};
+    ::poll(&p, 1, 250);
+}
+
+// All of `data` to the kernel, waiting for room as it goes; false when the connection is over.
+bool send_waiting(NetSocket& sock, const u8* data, u32 size) {
+    int fd = (int)os_handle_value(sock.fd);
+    u32 sent = 0;
+    while (sent < size) {
+        ssize_t n = ::send(fd, data + sent, size - sent, kSendFlags);
+        if (n > 0) {
+            sent += (u32)n;
+            sock.bytes_out += (u64)n;
+            os_handle_count(sock.fd, 0, (u64)n);
+            continue;
+        }
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) { wait_writable(fd); continue; }
+        sock.error = n < 0 ? errno : 0;
+        sock.closed = true;
+        return false;
+    }
+    return true;
+}
+} // namespace
+
+bool NetSocket::write_now(const void* data, u32 size) {
+    if (!os_handle_open(fd) || closed) { misuse_socket(*this, "write_now"); return false; }
+    while (link() == NetLink::Connecting) wait_writable((int)os_handle_value(fd));
+    if (closed) return false; // the connect failed: `error` says why
+    if (out.len) {
+        if (!send_waiting(*this, out.data, out.len)) return false;
+        out.len = 0;
+    }
+    return size == 0 || send_waiting(*this, (const u8*)data, size);
 }
 
 bool NetSocket::write_str(const char* s) { return write(s, (u32)strlen(s)); }
@@ -190,6 +236,7 @@ void NetSocket::close() {
     out.free(); // the queue's memory with it: its allocator stays, for the next use
     closed = false;
     link_state = NetLink::None;
+    warned = false;
 }
 
 bool net_connect_local(u16 port, NetSocket* out, i32* err) {

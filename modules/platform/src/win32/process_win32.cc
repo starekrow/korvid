@@ -20,6 +20,7 @@
 #include "korvid/core/format.h"
 #include "wide.h"
 #include "../os_err.h"
+#include "../misuse.h"
 #include "../os_handle_table.h"
 #include <errno.h>
 #include <string.h>
@@ -288,7 +289,8 @@ bool Process::spawn(const ProcessDesc& desc, i32* err) {
 }
 
 bool Process::running() {
-    if (pid < 0 || exited) return false;
+    if (pid < 0) { misuse_process(*this, "running"); return false; }
+    if (exited) return false;
     if (WaitForSingleObject(as_handle(process), 0) == WAIT_TIMEOUT) return true;
     DWORD status = 0;
     exited = true;
@@ -299,6 +301,7 @@ bool Process::running() {
 // Anonymous pipes cannot be waited on: a look at each, then a short wait on the process
 // (which ends at once if it exits), until something is there or the time is up.
 void Process::wait(f64 seconds) {
+    if (pid < 0) misuse_process(*this, "wait");
     auto has = [](Handle fd) {
         HANDLE h = as_handle(fd);
         if (!h) return false;
@@ -316,11 +319,18 @@ void Process::wait(f64 seconds) {
     }
 }
 
-i32 Process::read_out(void* buf, u32 cap) { return pipe_read(out_fd, buf, cap); }
-i32 Process::read_err(void* buf, u32 cap) { return pipe_read(err_fd, buf, cap); }
+i32 Process::read_out(void* buf, u32 cap) {
+    if (pid < 0) misuse_process(*this, "read_out");
+    return pipe_read(out_fd, buf, cap);
+}
+i32 Process::read_err(void* buf, u32 cap) {
+    if (pid < 0) misuse_process(*this, "read_err");
+    return pipe_read(err_fd, buf, cap);
+}
 
 void Process::kill() {
-    if (pid < 0 || exited) return;
+    if (pid < 0) { misuse_process(*this, "kill"); return; }
+    if (exited) return;
     if (!os_handle_open(group) || !TerminateJobObject(as_handle(group), kKilledCode)) TerminateProcess(as_handle(process), kKilledCode);
 }
 
@@ -336,6 +346,7 @@ void Process::close() {
     pid = -1;
     exited = false;
     code = 0;
+    warned = false;
 }
 
 } // namespace kv

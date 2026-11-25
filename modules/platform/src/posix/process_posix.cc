@@ -3,6 +3,7 @@
 #include "korvid/core/format.h"
 #include "korvid/core/memory.h"
 #include "../os_err.h"
+#include "../misuse.h"
 #include "../os_handle_table.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -209,6 +210,7 @@ bool Process::spawn(const ProcessDesc& desc, i32* err) {
 }
 
 void Process::wait(f64 seconds) {
+    if (pid < 0) misuse_process(*this, "wait");
     pollfd fds[2];
     nfds_t n = 0;
     if (os_handle_open(out_fd)) fds[n++] = pollfd{(int)os_handle_value(out_fd), POLLIN, 0};
@@ -219,7 +221,8 @@ void Process::wait(f64 seconds) {
 }
 
 bool Process::running() {
-    if (pid < 0 || exited) return false;
+    if (pid < 0) { misuse_process(*this, "running"); return false; }
+    if (exited) return false;
     int status = 0;
     pid_t r = waitpid((pid_t)pid, &status, WNOHANG);
     if (r == 0) return true;
@@ -230,11 +233,18 @@ bool Process::running() {
     return false;
 }
 
-i32 Process::read_out(void* buf, u32 cap) { return proc_read(out_fd, buf, cap); }
-i32 Process::read_err(void* buf, u32 cap) { return proc_read(err_fd, buf, cap); }
+i32 Process::read_out(void* buf, u32 cap) {
+    if (pid < 0) misuse_process(*this, "read_out");
+    return proc_read(out_fd, buf, cap);
+}
+i32 Process::read_err(void* buf, u32 cap) {
+    if (pid < 0) misuse_process(*this, "read_err");
+    return proc_read(err_fd, buf, cap);
+}
 
 void Process::kill() {
-    if (pid < 0 || exited) return;
+    if (pid < 0) { misuse_process(*this, "kill"); return; }
+    if (exited) return;
     if (::kill((pid_t)-pid, SIGKILL) != 0) ::kill((pid_t)pid, SIGKILL);
 }
 
@@ -252,6 +262,7 @@ void Process::close() {
     out_fd = err_fd = Handle{};
     exited = false;
     code = 0;
+    warned = false;
 }
 
 } // namespace kv
