@@ -385,3 +385,47 @@ and:
   at once). `tools/determinism-check.sh` passes: rocks agrees with itself, and arcfire's
   recordings replay matched. `tools/doccheck.sh` reports nothing new. Android and iOS are
   not done here.
+
+**Linux, after the Windows port and the platform's rework: verified Nov 24, 2026.** The
+POSIX halves of milestone 4 and of the rework that followed (KHandle, errors by name,
+standing watches, accept and read that wait, the lock and stdin moved into the platform)
+were written on Windows and not compiled. On Linux, as landed:
+
+- **It did not build:** two of the platform's sources, which a unity build puts in one
+  file, each had a `Listing` of its own (`fs_watch_linux.cc` and `dev_mount.cc`); and in
+  `Process::spawn` the stderr pipe's array was named `err`, as the new error parameter is,
+  so its failures would have passed the pipe for the caller's errno (`-Wshadow` refused
+  it). Renamed, both.
+- **Stale files left in the tree:** the CLI's old `os_stdin.h` and `posix/` and `win32/`
+  sources, and goldberg's `lock.cc`, deleted by 8fbf91c, were still on disk untracked,
+  where kormake would compile them. Moved out of the tree before building.
+- **A wake for something already read** (milestone 3's, found by the alert test, which
+  failed 5 runs in 8): a socket that fired was watched again at the next wait's start, so
+  a wait that began with that wake already pending re-armed it unread, and it fired again
+  for the next wait. Taking the pending wake before re-arming moved the window, not
+  closed it: a socket could fire between the two (the thread sanitizer's slower build
+  failed 3 in 4). Now the platform counts the waits that return, the watching thread
+  stamps each fire with the count, and a wait re-arms only what fired before the last
+  return, which a pass has read since. Both watchers (the Windows one by hand, not
+  compiled here). Test (`platform wait`): something that arrived before the wait ends it
+  at once, and once read the next wait lasts its time; without the fix it fails every run.
+- **A data race in the handle table** (the thread sanitizer, in asset_live's test): a
+  handle's value was read without the lock, as promised, but plainly, while a close wrote
+  it under the lock. Between the generation check and that read, the slot could also be
+  released and made again for another descriptor, whose number the old handle would then
+  have given. The value and kind are atomic now, and the generation is checked again after
+  the value is read.
+- **Measured**, linux-dev, as at milestones 2 and 3: `ticker` still, decoupled, 43 to 45
+  waits in 10 s on Wayland and X11. On demand the window was covered on this desktop
+  during the runs, and milestone 3's binary, run beside it, did the same (X11 overran to
+  11.1 to 11.8 s with 18 to 23 waits, as slice 11 saw for a window not on screen). A CLI
+  request to an idle `ticker`: 0.5 ms median decoupled, 0.7 on demand. `kromescreens`
+  connected to `goldberg watch`: 50 waits in 12 still seconds, no poll. A save to the
+  window (`live_numbers.py`, 10 each): 7.1, 7.0, 6.2 and 50.0 ms (milestone 3: 6.1, 10.1,
+  7.3, 49.9). goldberg's own window: 29 wakeups a second, 0.6% CPU.
+- **Verified.** `kormake test` passes on linux-debug, linux-dev and linux-ship. core,
+  platform, cli, asset_live, tool and platform_hid pass under `address,undefined` and
+  `thread`, and platform's tests passed 5 runs of 5 under each of the plain and thread
+  builds. `tools/determinism-check.sh` passes (rocks agrees with itself; arcfire's
+  recordings replay matched). arcfire's and arcanum's demos hash as at milestone 3, tick
+  for tick (14,154 and 1,865, at the default rate and at `--rate 4`).

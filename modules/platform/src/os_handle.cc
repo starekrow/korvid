@@ -28,10 +28,10 @@ constexpr u32 kNone     = 0xFFFFFFFFu;
 constexpr u32 kKinds    = 6;
 
 struct OsSlot {
-    i64 os;         // the OS's value while alive
+    i64 os;         // the OS's value while alive: atomic (read without the lock)
     u32 gen;        // the generation, with kAlive while it is open: atomic
     u32 next_free;  // the free list, oldest first
-    u8  kind;       // OsKind
+    u8  kind;       // OsKind: atomic, as os
     u32 flags;      // OsHandleFlag bits: atomic
 #if KV_OS_HANDLE_INFO
     u16  by;        // mem_owner() at the open: the module index + 1, 0 outside any
@@ -63,8 +63,17 @@ OsSlot* slot_of(Handle h) {
     if (i >= atomic_load(&g_table.len, MO_ACQUIRE)) return nullptr;
     OsSlot& s = g_table.slots[i];
     if (atomic_load(&s.gen, MO_ACQUIRE) != (h.gen() | kAlive)) return nullptr;
-    if (s.kind >= kKinds || g_table.kind_id[s.kind] != h.kind()) return nullptr;
+    u8 kind = atomic_load(&s.kind, MO_RELAXED);
+    if (kind >= kKinds || g_table.kind_id[kind] != h.kind()) return nullptr;
     return &s;
+}
+
+// A slot's value for `h`, read without the lock: the generation again after it, so a slot
+// released (and made again for another descriptor) since slot_of looked gives -1, never
+// what the OS has given someone else under the same number.
+i64 slot_value(const OsSlot& s, Handle h) {
+    i64 v = atomic_load(&s.os, MO_ACQUIRE);
+    return atomic_load(&s.gen, MO_ACQUIRE) == (h.gen() | kAlive) ? v : -1;
 }
 
 void* resolve_slot(kv_handle h, void*) { return slot_of(Handle{h}); }
@@ -142,8 +151,8 @@ Handle os_handle_make(OsKind kind, i64 os, const char* what) {
         atomic_store(&t.len, len + 1, MO_RELEASE);
     }
     OsSlot& s = t.slots[i];
-    s.os        = os;
-    s.kind      = (u8)kind;
+    atomic_store(&s.os, os, MO_RELAXED);
+    atomic_store(&s.kind, (u8)kind, MO_RELAXED); // both published by the generation's release below
     atomic_store(&s.flags, 0u, MO_RELAXED);
     s.next_free = kNone;
 #if KV_OS_HANDLE_INFO
@@ -163,12 +172,12 @@ Handle os_handle_make(OsKind kind, i64 os, const char* what) {
 
 i64 os_handle_value(Handle h) {
     OsSlot* s = slot_of(h);
-    return s ? s->os : -1;
+    return s ? slot_value(*s, h) : -1;
 }
 
 i64 os_handle_value(Handle h, OsKind want) {
     OsSlot* s = slot_of(h);
-    return s && s->kind == (u8)want ? s->os : -1;
+    return s && atomic_load(&s->kind, MO_RELAXED) == (u8)want ? slot_value(*s, h) : -1;
 }
 
 i64 os_handle_release(Handle h) {
@@ -177,12 +186,12 @@ i64 os_handle_release(Handle h) {
     os_mutex_lock(&t.lock);
     OsSlot* s = slot_of(h); // again under the lock: two closers, one wins
     if (!s) { os_mutex_unlock(&t.lock); return -1; }
-    i64 os = s->os;
+    i64 os = atomic_load(&s->os, MO_RELAXED);
     u32 i = h.index();
     u32 gen = (s->gen & ~kAlive) + 1;
     if (gen > KV_HANDLE_MAX_GEN) gen = 1; // skip 0 on wrap
     atomic_store(&s->gen, gen, MO_RELEASE); // dead: every copy of the handle is stale
-    s->os = -1;
+    atomic_store(&s->os, (i64)-1, MO_RELAXED);
     // Appended: the slot comes back only after every other free one has been reused.
     s->next_free = kNone;
     if (t.free_tail == kNone) t.free_head = i;
@@ -221,14 +230,14 @@ bool os_handle_flag(Handle h, u32 flag) {
 
 OsKind os_handle_kind(Handle h) {
     OsSlot* s = slot_of(h);
-    return s ? (OsKind)s->kind : OsKind::None;
+    return s ? (OsKind)atomic_load(&s->kind, MO_RELAXED) : OsKind::None;
 }
 
 bool os_handle_info(Handle h, OsHandleInfo* out) {
     *out = OsHandleInfo{};
     OsSlot* s = slot_of(h);
     if (!s) return false;
-    out->kind = (OsKind)s->kind;
+    out->kind = (OsKind)atomic_load(&s->kind, MO_RELAXED);
 #if KV_OS_HANDLE_INFO
     format(out->what, sizeof out->what, "%s", s->what);
     out->opened_at = s->opened_at;
@@ -255,7 +264,7 @@ void os_handles_each(void (*fn)(void* user, Handle h, const OsHandleInfo& info),
     for (u32 i = 0; i < len; ++i) {
         OsSlot& s = t.slots[i];
         if (!(s.gen & kAlive)) continue;
-        Handle h = Handle::make(t.kind_id[s.kind], s.gen & ~kAlive, i);
+        Handle h = Handle::make(t.kind_id[atomic_load(&s.kind, MO_RELAXED)], s.gen & ~kAlive, i);
         OsHandleInfo info;
         if (os_handle_info(h, &info)) fn(user, h, info);
     }
