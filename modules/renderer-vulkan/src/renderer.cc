@@ -47,6 +47,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     r->start_time = time_now();
     r->validation  = desc.validation;
     r->vsync       = desc.vsync;
+    r->transparent = desc.transparent;
     r->want_width  = desc.width;
     r->want_height = desc.height;
 

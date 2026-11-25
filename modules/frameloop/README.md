@@ -135,6 +135,7 @@ renders once.
 | `--cpu-shaders all\|none` | whether the CPU renderer runs game shaders |
 | `--cpu-scale auto\|N` | the CPU renderer's window pixels per drawn pixel, 1 to 8 |
 | `--borderless` | no title bar; sidesteps the GNOME Wayland resize stall |
+| `--transparent` | an alpha channel and no frame: what is clear shows the desktop, where it composites (`FrameLoopConfig::transparent`) |
 | `--threads N` | the job pool's size, main thread included; 1 is serial; the default is every core |
 | `--seed N` | the engine's seed (`EngineConfig::seed`): every module's `ctx.rng()` starts from it and its name; a recording keeps it |
 | `--rate X` | the developer's rate from the start, as the CLI's `rate X`: a recorded run or a demo four times faster |
@@ -163,7 +164,7 @@ Header `korvid/frameloop/frameloop.h`:
 
 | name | kind | what |
 |---|---|---|
-| `FrameLoopConfig` | record | `title`, `width`, `height`, `vsync`, `borderless`, `validation`, `renderer`, `cpu_shaders`, `cpu_scale`, `exit_on_close`, `exit_on_escape`, `run_seconds`, `run_ticks`, `clear_color`, `report_every_seconds`, `sprite_rows` (the first size of the renderer's sprite table and the extract's: a game that draws many asks, so the tables never grow mid-run), `touchpad_layout`, `flags`, `options`, `recorded_actions`, `engine` (an `EngineConfig`), `pacing` |
+| `FrameLoopConfig` | record | `title`, `width`, `height`, `vsync`, `borderless`, `transparent`, `validation`, `renderer`, `cpu_shaders`, `cpu_scale`, `exit_on_close`, `exit_on_escape`, `run_seconds`, `run_ticks`, `clear_color`, `report_every_seconds`, `sprite_rows` (the first size of the renderer's sprite table and the extract's: a game that draws many asks, so the tables never grow mid-run), `touchpad_layout`, `flags`, `options`, `recorded_actions`, `engine` (an `EngineConfig`), `pacing` |
 | `Pacing` | enum | `Continuous`, `OnDemand`, `Decoupled` |
 | `ExitReason`, `ExitRequested{reason}` | enum, event | `WindowClosed`, `Escape`, `Timer` |
 | `frameloop_main(argc, argv, config)` | function | the whole run; returns the process exit code (2 for a bad option, 1 for a failed init) |

@@ -26,6 +26,12 @@ struct RendererDesc {
     u32   width         = 0;       // current framebuffer size in pixels
     u32   height        = 0;
     bool  vsync         = true;
+    // The window is a transparent one (HostWindow::transparent()): the frame's alpha is
+    // presented, premultiplied, and what is clear shows what is behind. The clear colour
+    // is taken as premultiplied: {0, 0, 0, 0} is nothing. Where the backend or the surface
+    // cannot, the frame is opaque and the backend logs it once. Vulkan does it; the CPU
+    // renderer and D3D12 and Metal do not yet (docs/PRDs/Engine-Slice-13-PRD.md).
+    bool  transparent   = false;
     bool  validation    = KV_DEBUG != 0; // request the validation layers when present
     u32   sprite_rows   = 0;       // the sprite tables' first size, a hint (0: the backend's default); they grow past it
     bool  cpu_shaders   = true;    // the CPU renderer: game shaders run (false: their materials draw with their blend's pipeline, and no post pass)

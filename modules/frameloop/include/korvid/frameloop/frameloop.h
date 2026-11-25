@@ -42,6 +42,10 @@ struct FrameLoopConfig {
     u32         height     = 720;
     bool        vsync      = true;
     bool        borderless = false;
+    // --transparent: a window with an alpha channel and no frame (WindowDesc::transparent).
+    // Where it composites, the loop clears each frame to nothing, whatever clear_color says,
+    // and the renderer presents the frame's alpha.
+    bool        transparent = false;
     bool        validation = KV_DEBUG != 0;
     RendererBackend renderer = RendererBackend::Auto; // --renderer auto|gpu|cpu: which bound backend draws
     bool        cpu_shaders = true; // --cpu-shaders all|none: the CPU renderer runs game shaders (RendererDesc::cpu_shaders)

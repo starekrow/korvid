@@ -219,6 +219,7 @@ struct RenderCore {
     char        base_path[512] = {};  // the executable's directory, where shaders/ is
     bool        validation = false;
     bool        vsync      = true;
+    bool        transparent = false;  // RendererDesc::transparent: present with the frame's alpha, premultiplied
     u32         want_width = 0, want_height = 0;
     f64         start_time = 0.0;     // the render time's zero
 

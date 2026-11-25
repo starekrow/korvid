@@ -93,8 +93,15 @@ bool create_swapchain(Renderer* r) {
                      (caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR);
     ci.preTransform     = unrotated ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR : caps.currentTransform;
     // Opaque where the surface offers it (every desktop does); Android's often offer only
-    // "inherit", which for an app's own window is opaque.
-    ci.compositeAlpha   = (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR :
+    // "inherit", which for an app's own window is opaque. A transparent window's frame is
+    // premultiplied (the sprite and UI blends keep it so, over a clear of nothing), and is
+    // presented so where the surface takes it: Wayland's and a composited X11's do.
+    bool premultiplied = r->transparent && (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR);
+    if (r->transparent && !premultiplied && r->swapchain_generation == 0)
+        KV_INFO("vulkan", "a transparent window, and a surface that composites no premultiplied alpha (it offers 0x%x): the frame is presented opaque",
+                (u32)caps.supportedCompositeAlpha);
+    ci.compositeAlpha   = premultiplied ? VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR :
+                          (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR :
                           (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR) ? VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR :
                           VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
     ci.presentMode      = present_mode;
@@ -138,9 +145,10 @@ bool create_swapchain(Renderer* r) {
     }
     // A live resize rebuilds this every frame; only the first one is worth an INFO line.
     log_write(r->swapchain_generation++ == 0 ? LogLevel::Info : LogLevel::Debug, "vulkan",
-              "swapchain %ux%u, %u images, format %d, %s", extent.width, extent.height, n,
+              "swapchain %ux%u, %u images, format %d, %s%s", extent.width, extent.height, n,
               (int)s.format, present_mode == VK_PRESENT_MODE_FIFO_KHR ? "fifo" :
-              present_mode == VK_PRESENT_MODE_MAILBOX_KHR ? "mailbox" : "immediate");
+              present_mode == VK_PRESENT_MODE_MAILBOX_KHR ? "mailbox" : "immediate",
+              premultiplied ? ", premultiplied alpha" : "");
     return true;
 }
 

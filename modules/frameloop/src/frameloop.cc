@@ -180,6 +180,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
             else { KV_ERROR("frameloop", "--pacing takes demand, continuous or decoupled, not '%s'", v); return false; }
         }
         else if (strcmp(argv[i], "--borderless") == 0) cfg.borderless = true;
+        else if (strcmp(argv[i], "--transparent") == 0) cfg.transparent = true;
         else if (strcmp(argv[i], "--hitch-ms") == 0 && i + 1 < argc) g_hitch_ms = atof(argv[++i]);
         else if (strcmp(argv[i], "--hash") == 0) g_hash_ticks = true;
         else if (strcmp(argv[i], "--hash-systems") == 0) g_hash_systems = true;
@@ -255,7 +256,7 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
         }
         else {
             KV_ERROR("frameloop", "usage: %s [--run-seconds N] [--quiet] [--validation|--no-validation] "
-                                  "[--no-vsync] [--renderer auto|gpu|cpu] [--cpu-shaders all|none] [--cpu-scale auto|N] [--borderless] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] [--size WxH] [--rate X] [--early-reads order|snapshot|ktable] "
+                                  "[--no-vsync] [--renderer auto|gpu|cpu] [--cpu-shaders all|none] [--cpu-scale auto|N] [--borderless] [--transparent] [--hitch-ms N] [--hash] [--hash-systems] [--trace-events] [--threads N] [--size WxH] [--rate X] [--early-reads order|snapshot|ktable] "
                                   "[--profile FILE] [--prof-report] [--screenshot FILE] [--screenshot-frame N] [--screenshot-tick N] [--check-sort] [--cli-port N] [--cli-stdin] [--cli-ascii] [--pack FILE]... [--assets DIR] [--io sync|ring] [--idle-margin-ms N] [--no-idle] [--overlay] [--touchpad] [--capacity KTABLE=N]... [--sprite-rows N] [--spike-hunt] [--record FILE] [--replay FILE] [--goldberg PORT] [--no-goldberg]", argv[0]);
             return false;
         }
@@ -292,6 +293,7 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
     desc.surface    = (WindowSurface)renderer_window_surface();
     desc.vsync      = s->config.vsync;
     desc.borderless = s->config.borderless;
+    desc.transparent = s->config.transparent;
     s->window = platform_open_window(engine, desc);
     if (!s->window) return false;
 
@@ -303,6 +305,7 @@ bool frameloop_startup(Engine& engine, ModuleInstance& self) {
     rd.width         = s->window->width();
     rd.height        = s->window->height();
     rd.vsync         = s->window->vsync();
+    rd.transparent   = s->window->transparent();
     rd.validation    = s->config.validation;
     rd.sprite_rows   = s->config.sprite_rows;
     s->renderer = renderer_create(engine, rd);
@@ -395,6 +398,7 @@ void render_frame(Engine& engine, FrameLoopState& s) {
     RenderView view;
     view.alpha       = engine.clock.alpha();
     view.clear_color = s.config.clear_color;
+    if (s.window && s.window->transparent()) view.clear_color = color{0.0f, 0.0f, 0.0f, 0.0f}; // nothing: the desktop shows
     Camera2 cam;
     if (const Camera2* c = sprite_camera(engine)) cam = camera_resolve(engine, *c, w, h, view.alpha);
     view.view     = camera_view(cam, w, h);

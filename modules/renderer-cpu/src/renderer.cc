@@ -62,6 +62,8 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     r->start_time  = time_now();
     r->validation  = desc.validation;
     r->vsync       = desc.vsync;
+    r->transparent = desc.transparent;
+    if (desc.transparent) KV_INFO(KV_RB_NAME, "a transparent window: this renderer draws no alpha yet, and presents it opaque");
     r->want_width  = desc.width;
     r->want_height = desc.height;
 
