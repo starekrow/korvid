@@ -245,13 +245,24 @@ void Process::wait(f64 seconds) {
     if (pid < 0) misuse_process(*this, "wait");
     pollfd fds[3];
     nfds_t n = 0;
+    bool pipes = os_handle_open(out_fd) || os_handle_open(err_fd);
     if (os_handle_open(out_fd)) fds[n++] = pollfd{(int)os_handle_value(out_fd), POLLIN, 0};
     if (os_handle_open(err_fd)) fds[n++] = pollfd{(int)os_handle_value(err_fd), POLLIN, 0};
     // The exit too, where the OS gives it as a descriptor: with both streams ended the wait
     // is for it alone. Without one, a millisecond at most, since only running() can tell.
+    // An exit that has happened already (its descriptor stays readable) is news only once
+    // the pipes are done: while something the child started holds them open, the wait is
+    // for the pipes, or a loop of waits would spin on the old news.
     bool exit_heard = !exited && os_handle_open(process);
+    if (exit_heard) {
+        pollfd now{(int)os_handle_value(process), POLLIN, 0};
+        if (poll(&now, 1, 0) > 0 && now.revents) {
+            if (!pipes) return;
+            exit_heard = false;
+        }
+    }
     if (exit_heard) fds[n++] = pollfd{(int)os_handle_value(process), POLLIN, 0};
-    if (!n || (!exit_heard && !os_handle_open(out_fd) && !os_handle_open(err_fd))) seconds = seconds < 0.001 ? seconds : 0.001;
+    if (!n || (!exit_heard && !pipes)) seconds = seconds < 0.001 ? seconds : 0.001;
     int ms = seconds <= 0 ? 0 : (int)(seconds * 1000.0 + 0.999);
     poll(n ? fds : nullptr, n, ms);
 }

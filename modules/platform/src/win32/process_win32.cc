@@ -18,6 +18,7 @@
 #include "korvid/platform/process.h"
 #include "korvid/core/array.h"
 #include "korvid/core/format.h"
+#include "korvid/core/time.h"
 #include "wide.h"
 #include "../os_err.h"
 #include "../misuse.h"
@@ -299,7 +300,11 @@ bool Process::running() {
 }
 
 // Anonymous pipes cannot be waited on: a look at each, then a short wait on the process
-// (which ends at once if it exits), until something is there or the time is up.
+// (which ends at once if it exits) and a high-resolution timer together, until something
+// is there or the time is up. The step starts at half a millisecond and doubles to 16
+// while nothing comes: a child that streams is read as fast as it writes, one that is
+// quiet costs about 60 looks a second. WaitForSingleObject's own milliseconds, and
+// GetTickCount64, would round each step up to the scheduler's 15.6 ms.
 void Process::wait(f64 seconds) {
     if (pid < 0) misuse_process(*this, "wait");
     auto has = [](Handle fd) {
@@ -308,14 +313,38 @@ void Process::wait(f64 seconds) {
         DWORD avail = 0;
         return !PeekNamedPipe(h, nullptr, 0, nullptr, &avail, nullptr) || avail > 0; // data, or the end
     };
-    if (!os_handle_open(out_fd) && !os_handle_open(err_fd)) seconds = seconds < 0.001 ? seconds : 0.001;
-    ULONGLONG until = GetTickCount64() + (ULONGLONG)(seconds * 1000.0);
+    bool child = os_handle_open(process) && !exited;
+    bool pipes = os_handle_open(out_fd) || os_handle_open(err_fd);
+    // An exit that has happened already is news only once the pipes are done: while
+    // something the child started still holds them open, the wait is for the pipes, or a
+    // loop of waits would spin on the old news.
+    if (child && WaitForSingleObject(as_handle(process), 0) == WAIT_OBJECT_0) {
+        if (!pipes) return;
+        child = false;
+    }
+    if (!pipes && !child) seconds = seconds < 0.001 ? seconds : 0.001;
+    static thread_local HANDLE timer = nullptr;
+    if (!timer) timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    f64 until = time_now() + seconds;
+    f64 step = 0.0005;
     for (;;) {
         if (has(out_fd) || has(err_fd)) return;
-        ULONGLONG now = GetTickCount64();
-        if (now >= until) return;
-        if (os_handle_open(process) && !exited) WaitForSingleObject(as_handle(process), 1);
-        else Sleep(1);
+        f64 left = until - time_now();
+        if (left <= 0.0) return;
+        // With both pipes ended only the exit is left to wait for: the whole time, on it.
+        f64 d = !pipes ? left : (step < left ? step : left);
+        step = step * 2.0 < 0.016 ? step * 2.0 : 0.016;
+        LARGE_INTEGER due;
+        due.QuadPart = -(LONGLONG)(d * 1e7); // relative, in 100 ns units
+        if (timer && SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE)) {
+            HANDLE both[2] = {timer, child ? as_handle(process) : nullptr};
+            DWORD r = WaitForMultipleObjects(child ? 2 : 1, both, FALSE, INFINITE);
+            if (r == WAIT_OBJECT_0 + 1) { CancelWaitableTimer(timer); return; } // it exited
+        } else if (child) {
+            if (WaitForSingleObject(as_handle(process), (DWORD)(d * 1000.0) + 1) == WAIT_OBJECT_0) return;
+        } else {
+            Sleep((DWORD)(d * 1000.0) + 1);
+        }
     }
 }
 
