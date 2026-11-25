@@ -283,8 +283,12 @@ which, by row of the platform table.
   owns its frame and does not stall; one with the desktop's frame still does.
 - **Seen on Wayland** (GNOME, by @starekrow): `window --grips` moves by its band and resizes
   by its handle, held to its bounds. Through about 300 sizes of one drag the loop ran 112 to
-  207 frames a second, its longest gap 21.7 ms: no stall. X11's move and resize are not
-  seen yet (XTest cannot drive a window manager's from here).
+  207 frames a second, its longest gap 21.7 ms: no stall.
+- **Seen on X11** (GNOME's Xwayland, composited, by @starekrow): the band moves the window
+  and the handle resizes it, stopped at exactly 160 and 720 pixels a side. Gaps rose to
+  20 to 25 ms near 720 x 720: the example redraws the frame and the shape at every size,
+  which costs with the area. X11 without a compositor needs a window manager for grips to
+  do anything, and is not tried.
 
 
 **Verified for milestones 1 and 2** (Nov 25): `kormake test` on linux-debug, linux-dev and

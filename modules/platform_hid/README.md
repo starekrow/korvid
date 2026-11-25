@@ -162,8 +162,9 @@ The X11 rows were measured on a rootful Xwayland (no compositor) and on GNOME's 
 (composited): the window's depth, its bounding and input shapes and its pixels, and, on the
 rootful one, a click on a clear corner reaching a window behind. The Wayland row was read
 from the protocol (`WAYLAND_DEBUG=1`) and seen on GNOME: the clear corners, a click through
-them, a move by a grip and a resize held to its bounds. A move or resize by a grip on X11
-is not seen yet. On X11 the engine reaches Xlib and Xext, and on Wayland
+them, a move by a grip and a resize held to its bounds. On GNOME's Xwayland a move and a
+resize by a grip were seen too, the resize stopped at both bounds; with no compositor,
+grips need a window manager, and are not tried. On X11 the engine reaches Xlib and Xext, and on Wayland
 libwayland-client, through SDL's own libraries, opened by name: it links none.
 
 ## Quick reference
