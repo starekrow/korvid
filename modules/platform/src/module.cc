@@ -155,15 +155,13 @@ void platform_pump_remove(Engine& e, PlatformPumpFn fn, void* user) {
     }
 }
 
-PlatformWoken platform_wait(Engine& e, f64 seconds) {
-    PlatformState* s = state(e);
-    if (!s) { if (seconds > 0.0) time_sleep(seconds); return PlatformWoken::Time; }
-    if (seconds <= 0.0) return PlatformWoken::Time; // no wait: a wake stays for the next
-    print_flush_lines(); // nothing printed sits in a buffer while the loop sleeps
-    ++s->waits.waits;
-    if (s->watch) wake_watch_rearm(s->watch); // what woke the last wait has been read by now
-    // A wake that came before the wait began ends it at once.
+namespace {
+PlatformWoken wait_body(PlatformState* s, f64 seconds) {
+    // A wake that came before the wait began ends it at once. What woke it has not been
+    // read yet (the pass after this one reads it), so nothing is watched again here.
     if (atomic_exchange(&s->woken, 0u, MO_ACQ_REL)) { ++s->waits.woken; return PlatformWoken::Wake; }
+    // A wait that waits: what fired before the last wait returned has been read since.
+    if (s->watch) wake_watch_rearm(s->watch, atomic_load(&s->wait_returns, MO_ACQUIRE));
     int ended = s->waiter.wait ? s->waiter.wait(s->waiter.user, seconds) : -1;
     if (ended < 0) {
         // No window to wait on: the event, till woken or the time is up. A set left from a
@@ -181,6 +179,18 @@ PlatformWoken platform_wait(Engine& e, f64 seconds) {
     if (ended > 0) { ++s->waits.window; return PlatformWoken::Window; }
     ++s->waits.timed;
     return PlatformWoken::Time;
+}
+} // namespace
+
+PlatformWoken platform_wait(Engine& e, f64 seconds) {
+    PlatformState* s = state(e);
+    if (!s) { if (seconds > 0.0) time_sleep(seconds); return PlatformWoken::Time; }
+    if (seconds <= 0.0) return PlatformWoken::Time; // no wait: a wake stays for the next
+    print_flush_lines(); // nothing printed sits in a buffer while the loop sleeps
+    ++s->waits.waits;
+    PlatformWoken why = wait_body(s, seconds);
+    atomic_add_fetch(&s->wait_returns, (u64)1, MO_RELEASE);
+    return why;
 }
 
 void platform_wake(Engine& e) {

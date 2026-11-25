@@ -113,8 +113,9 @@ PlatformWaits platform_waits(Engine& e);
 // What cannot be watched on an OS is asked again soon instead: the owner's code is the
 // same, and only how promptly it hears differs. The platform watches every owner's
 // handles from one thread, started when the first is given, at most 64 in all; past that,
-// soon. A handle that woke the loop is watched again at the next platform_wait (after
-// the pass that should have read it), so one nobody drains does not spin the thread.
+// soon. A handle that woke the loop is watched again at the first platform_wait to start
+// after a wait has returned since it fired, so a pass has run that should have read it;
+// one nobody drains wakes each wait, not the thread for ever.
 struct NetListener;
 struct NetSocket;
 struct FsWatcher;

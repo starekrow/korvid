@@ -38,7 +38,10 @@ bool       wake_watch_readable(Handle h);
 WakeWatch* wake_watch_create(PlatformState& s);
 void       wake_watch_destroy(WakeWatch* w); // stops and joins the thread
 bool       wake_watch_set(WakeWatch* w, const void* owner, const Handle* fds, u32 n);
-// Watches again what woke the thread since the last call.
-void       wake_watch_rearm(WakeWatch* w);
+// Watches again what woke the thread before the wait numbered `returned` returned (the
+// platform's wait_returns now): a pass has run since, and read it. What fired after (in
+// the pass, or in this very wait) stays out till the wait after: rearming it unread would
+// fire it again, and end that wait for nothing.
+void       wake_watch_rearm(WakeWatch* w, u64 returned);
 
 } // namespace kv

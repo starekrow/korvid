@@ -11,8 +11,17 @@
 #include "korvid/platform/net.h"
 #include "korvid/platform/process.h"
 #include "korvid/core/format.h"
+#include "korvid/core/atomic.h"
+#include "../src/platform_state.h"
 
 namespace {
+
+// Whether a wake is waiting for the next platform_wait (the watching thread has fired),
+// without taking it.
+bool wake_seen(kv::Engine& e) {
+    kv::PlatformState* s = kv::engine_module_state_as<kv::PlatformState>(e, "platform");
+    return s && kv::atomic_load(&s->woken, kv::MO_ACQUIRE) != 0;
+}
 
 using namespace kv;
 
@@ -89,6 +98,16 @@ void test_wait(kv::TestCtx& c) {
         KV_CHECK(c, platform_wait(e, 5.0) == PlatformWoken::Wake);
         // Read: the next wait lasts its time.
         char buf[8];
+        KV_CHECK(c, server.read(buf, sizeof buf) == 1);
+        KV_CHECK(c, platform_wait(e, 0.1) == PlatformWoken::Time);
+        // Arrived before the wait began: the wait ends at once, and is not the pass that
+        // reads it, so the socket is not watched again there. Read after, the next wait
+        // lasts its time (it once fired again on what was read, and ended it).
+        client.write_str("z");
+        client.flush();
+        for (u32 i = 0; i < 400 && !wake_seen(e); ++i) time_sleep(0.005);
+        KV_CHECK(c, platform_wait(e, 5.0) == PlatformWoken::Wake);
+        time_sleep(0.05); // a second firing, were the socket watched again, lands here
         KV_CHECK(c, server.read(buf, sizeof buf) == 1);
         KV_CHECK(c, platform_wait(e, 0.1) == PlatformWoken::Time);
         // Forgotten: what arrives wakes nothing.

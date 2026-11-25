@@ -3,6 +3,8 @@
 // that can be read wakes the loop once and is left out of the poll until the loop's next
 // wait arms it again (wake_watch_rearm), by which time the pass it woke has read it.
 #include "../wake_watch.h"
+#include "../platform_state.h"
+#include "korvid/core/atomic.h"
 #include "korvid/core/log.h"
 #include "korvid/core/memory.h"
 #include <errno.h>
@@ -23,10 +25,11 @@ struct WakeWatch {
     PlatformState* s = nullptr;
     OsMutex  lock;
     // `once`: a child's exit, which happens once and stays readable after: heard once, never rearmed.
-    struct Entry { const void* owner; Handle fd; bool armed; bool once; };
+    // `fired_at`: the platform's wait_returns when it last fired (wake_watch_rearm).
+    struct Entry { const void* owner; Handle fd; bool armed; bool once; u64 fired_at; };
     Entry    list[kMaxWatched];
     u32      count = 0;
-    bool     fired = false; // something was left out of the poll since the last rearm
+    bool     fired = false; // something is left out of the poll that a rearm may put back
     bool     stop  = false;
     int      ctl[2] = {-1, -1}; // the thread's own pipe: a byte in it means look again
     OsThread thread;
@@ -68,12 +71,18 @@ void watch_main(void* arg) {
             while (read(w.ctl[0], buf, sizeof buf) > 0) {}
         }
         bool woke = false;
+        u64 at = atomic_load(&w.s->wait_returns, MO_ACQUIRE);
         os_mutex_lock(&w.lock);
         for (u32 k = 1; k < n; ++k) {
             if (!fds[k].revents) continue;
             // Readable, closed or gone: the loop's pass finds out which. Left out till rearmed.
             for (u32 i = 0; i < w.count; ++i)
-                if ((int)os_handle_value(w.list[i].fd) == fds[k].fd && w.list[i].armed) { w.list[i].armed = false; w.fired = true; woke = true; }
+                if ((int)os_handle_value(w.list[i].fd) == fds[k].fd && w.list[i].armed) {
+                    w.list[i].armed = false;
+                    w.list[i].fired_at = at;
+                    w.fired = true;
+                    woke = true;
+                }
         }
         os_mutex_unlock(&w.lock);
         if (woke) platform_wake_state(*w.s);
@@ -147,7 +156,7 @@ bool wake_watch_set(WakeWatch* w, const void* owner, const Handle* fds, u32 n) {
         for (u32 i = 0; i < w->count; ++i) if (w->list[i].owner == owner && w->list[i].fd == fds[k]) have = true;
         if (have) continue;
         if (w->count == kMaxWatched) { fits = false; continue; }
-        w->list[w->count++] = WakeWatch::Entry{owner, fds[k], true, os_handle_kind(fds[k]) == OsKind::Process};
+        w->list[w->count++] = WakeWatch::Entry{owner, fds[k], true, os_handle_kind(fds[k]) == OsKind::Process, 0};
         changed = true;
     }
     bool start = !w->running && w->count;
@@ -161,12 +170,17 @@ bool wake_watch_set(WakeWatch* w, const void* owner, const Handle* fds, u32 n) {
     return fits;
 }
 
-void wake_watch_rearm(WakeWatch* w) {
+void wake_watch_rearm(WakeWatch* w, u64 returned) {
     os_mutex_lock(&w->lock);
-    bool again = w->fired;
-    if (again) {
-        for (u32 i = 0; i < w->count; ++i) if (!w->list[i].once) w->list[i].armed = true;
+    bool again = false;
+    if (w->fired) {
         w->fired = false;
+        for (u32 i = 0; i < w->count; ++i) {
+            WakeWatch::Entry& e = w->list[i];
+            if (e.armed || e.once) continue;
+            if (e.fired_at < returned) { e.armed = true; again = true; }
+            else w->fired = true; // fired since the last wait returned: unread yet, the next wait's
+        }
     }
     os_mutex_unlock(&w->lock);
     if (again) poke(*w);

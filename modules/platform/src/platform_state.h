@@ -19,6 +19,10 @@ struct PlatformState {
     PlatformWaiter waiter;
     PlatformWaits  waits;
     u32     woken = 0;      // atomic: platform_wake since the last wait took it
+    // atomic: the waits that have returned. The watching thread stamps what fires with it,
+    // and a wait watches again only what fired before the last return: what a pass since
+    // has read (wake_watch_rearm).
+    u64     wait_returns = 0;
     OsMutex wait_lock;
     OsEvent wait_event;
     struct WakeWatch* watch = nullptr; // platform_wake_set's thread and its sockets, once one is given
