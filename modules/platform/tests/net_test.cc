@@ -1,6 +1,7 @@
 #include "korvid/platform/net.h"
 #include "korvid/core/test.h"
 #include "korvid/core/time.h"
+#include <errno.h>
 #include <string.h>
 
 namespace {
@@ -52,19 +53,50 @@ void test_net(kv::TestCtx& c) {
     KV_CHECK(c, got == 3 && memcmp(buf, "ok\n", 3) == 0);
     KV_CHECK(c, client.bytes_out == 13 && server.bytes_in == 13 && server.bytes_out == 3 && client.bytes_in == 3);
 
-    // The queue has a limit; past it, a write is dropped and counted, never blocked on.
-    server.out_limit = 8;
-    KV_CHECK(c, server.write_str("12345678") && !server.write_str("9") && server.dropped == 1);
-    server.flush();
+    // The connection's state: an accepted socket is up from the start, a connecting one
+    // once the OS says so.
+    KV_CHECK(c, server.link() == NetLink::Up && server.error == 0);
+    KV_CHECK(c, client.link() == NetLink::Up && client.link_state == NetLink::Up && client.error == 0);
 
-    // Closing one end shows at the other as -1.
+    // The queue has a limit; past it, a write is dropped and counted, never blocked on.
+    // pending() and room() say where it stands before a write is tried.
+    server.out_limit = 8;
+    KV_CHECK(c, server.pending() == 0 && server.room() == 8);
+    KV_CHECK(c, server.write_str("12345") && server.pending() == 5 && server.room() == 3);
+    KV_CHECK(c, server.write_str("678") && server.room() == 0 && !server.write_str("9") && server.dropped == 1);
+    server.flush();
+    KV_CHECK(c, server.pending() == 0 && server.room() == 8); // loopback took it at once
+
+    // Closing one end shows at the other as -1, with no error: the peer closed in order
+    // (having read what was sent it: a close on unread bytes is a reset, and says so).
+    got = 0;
+    KV_CHECK(c, pump_until(client, server, [&] { i32 n = client.read(buf, sizeof buf); if (n > 0) got += (u32)n; return got >= 8; }));
     client.close();
     KV_CHECK(c, pump_until(client, server, [&] { return server.read(buf, sizeof buf) < 0; }));
-    KV_CHECK(c, server.closed && !server.is_open());
+    KV_CHECK(c, server.closed && !server.is_open() && server.error == 0);
 
+    // close() gives the queue's memory back: nothing is left for the owner to free.
+    server.write_str("x");
     server.close();
+    KV_CHECK(c, server.out.data == nullptr && server.link_state == NetLink::None);
+    u16 dead = l.port;
     l.close();
     KV_CHECK(c, !l.is_open());
-    server.out.free();
-    client.out.free();
+
+    // Nobody listening: the connect is refused, and that is told apart from a server that
+    // closed. link() says so; a caller that only reads sees -1 with the reason.
+    NetSocket lost;
+    i32 err = 0;
+    KV_CHECK(c, net_connect_local(dead, &lost, &err) && err == 0); // a socket was made: the answer comes later
+    NetLink state = NetLink::Connecting;
+    for (u32 i = 0; i < 5000 && state == NetLink::Connecting; ++i) { state = lost.link(); if (state == NetLink::Connecting) time_sleep(0.001); }
+    KV_CHECK(c, state == NetLink::Failed && lost.error == ECONNREFUSED && lost.closed && !lost.is_open());
+    KV_CHECK(c, lost.read(buf, sizeof buf) == -1);
+    lost.close();
+    NetSocket lost2; // the same, found by reading alone
+    KV_CHECK(c, net_connect_local(dead, &lost2));
+    i32 r = 0;
+    for (u32 i = 0; i < 5000 && r == 0; ++i) { r = lost2.read(buf, sizeof buf); if (r == 0) time_sleep(0.001); }
+    KV_CHECK(c, r == -1 && lost2.error == ECONNREFUSED && lost2.link_state == NetLink::Failed);
+    lost2.close();
 }

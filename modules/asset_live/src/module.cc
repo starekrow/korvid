@@ -53,7 +53,6 @@ u16 tree_port(const LiveState& s) {
 
 void drop(LiveState& s) {
     if (s.sock.fd.is_open()) s.sock.close();
-    s.sock.out.free(); // close() keeps the buffer for the next connection; this one is new
     s.sock = NetSocket{};
     s.said_hello = false;
     s.line_len = 0;

@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <poll.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -58,7 +59,7 @@ int tcp_socket() {
 bool NetListener::open(u16 want_port, NetScope scope, i32* err) {
     close();
     int s = tcp_socket();
-    if (s < 0) { int e = errno; KV_ERROR("net", "socket: %s", os_error_text(e)); return os_fail(err, e); }
+    if (s < 0) return os_fail(err, errno);
     int one = 1;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
     sockaddr_in addr{};
@@ -67,7 +68,6 @@ bool NetListener::open(u16 want_port, NetScope scope, i32* err) {
     addr.sin_addr.s_addr = htonl(scope == NetScope::Loopback ? INADDR_LOOPBACK : INADDR_ANY);
     if (bind(s, (sockaddr*)&addr, sizeof addr) != 0 || listen(s, 8) != 0 || !set_nonblocking(s)) {
         int e = errno;
-        KV_ERROR("net", "listen on port %u: %s", want_port, os_error_text(e));
         ::close(s);
         return os_fail(err, e);
     }
@@ -108,6 +108,8 @@ void NetSocket::adopt(KHandle new_fd) {
     }
     fd = new_fd;
     closed = false;
+    error = 0;
+    link_state = fd.is_open() ? NetLink::Up : NetLink::None; // accepted: connected already. net_connect_local says Connecting
     if (fd.is_open()) {
         set_nonblocking((int)fd.os());
         int one = 1;
@@ -115,12 +117,28 @@ void NetSocket::adopt(KHandle new_fd) {
     }
 }
 
+NetLink NetSocket::link() {
+    if (link_state != NetLink::Connecting || !fd.is_open()) return link_state;
+    // A connect that has finished, either way, makes the socket writable; SO_ERROR then
+    // says which way. Asked without waiting.
+    struct pollfd p = {(int)fd.os(), POLLOUT, 0};
+    if (::poll(&p, 1, 0) <= 0) return link_state;
+    int e = 0;
+    socklen_t len = sizeof e;
+    if (getsockopt((int)fd.os(), SOL_SOCKET, SO_ERROR, &e, &len) != 0) e = errno;
+    if (e) { error = e; closed = true; link_state = NetLink::Failed; }
+    else link_state = NetLink::Up;
+    return link_state;
+}
+
 i32 NetSocket::read(void* buf, u32 cap) {
+    if (link_state == NetLink::Connecting && link() == NetLink::Connecting) return 0; // nothing can have arrived yet
     if (!fd.is_open() || closed || cap == 0) return closed ? -1 : 0;
     ssize_t n = ::recv((int)fd.os(), buf, cap, 0);
     if (n > 0) { bytes_in += (u64)n; return (i32)n; }
     if (n == 0) { closed = true; return -1; }
     if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) return 0;
+    error = errno;
     closed = true;
     return -1;
 }
@@ -142,6 +160,7 @@ void NetSocket::flush() {
         if (n > 0) { sent += (u32)n; continue; }
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) break;
         if (n < 0 && (errno == ENOTCONN || errno == EINPROGRESS)) break; // still connecting
+        error = n < 0 ? errno : 0;
         closed = true;
         break;
     }
@@ -155,8 +174,9 @@ void NetSocket::flush() {
 void NetSocket::close() {
     if (fd.is_open()) ::close((int)fd.os());
     fd = KHandle{};
-    out.clear();
+    out.free(); // the queue's memory with it: its allocator stays, for the next use
     closed = false;
+    link_state = NetLink::None;
 }
 
 bool net_connect_local(u16 port, NetSocket* out, i32* err) {
@@ -169,11 +189,11 @@ bool net_connect_local(u16 port, NetSocket* out, i32* err) {
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (connect(s, (sockaddr*)&addr, sizeof addr) != 0 && errno != EINPROGRESS) {
         int e = errno;
-        KV_ERROR("net", "connect to port %u: %s", port, os_error_text(e));
         ::close(s);
         return os_fail(err, e);
     }
     out->adopt(khandle_make(KHandleKind::Socket, s));
+    out->link_state = NetLink::Connecting; // link() finds out which way it went
     return true;
 }
 

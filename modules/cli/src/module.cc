@@ -1,5 +1,6 @@
 #include "cli_internal.h"
 #include "korvid/core/engine.h"
+#include "korvid/core/os_error.h"
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/core/utf8.h"
@@ -307,7 +308,11 @@ bool cli_startup(Engine& e, ModuleInstance& self) {
         sess.ascii    = s->config.ascii;
     }
     if (s->config.port) {
-        if (!s->listener.open(s->config.port, s->config.local_only ? NetScope::Loopback : NetScope::Any)) return false;
+        i32 err = 0;
+        if (!s->listener.open(s->config.port, s->config.local_only ? NetScope::Loopback : NetScope::Any, &err)) {
+            KV_ERROR("cli", "cannot listen on port %u: %s", s->config.port, os_error_text(err));
+            return false;
+        }
         KV_INFO("cli", "listening on %s:%u", s->config.local_only ? "127.0.0.1" : "0.0.0.0", s->listener.port);
     }
     watch_sockets(e, *s);

@@ -77,7 +77,7 @@ bool NetListener::open(u16 want_port, NetScope scope, i32* err) {
     close();
     if (!winsock_up()) return os_fail(err, ENETDOWN);
     SOCKET s = new_socket();
-    if (s == INVALID_SOCKET) { int e = WSAGetLastError(); KV_ERROR("net", "socket: %s", net_error(e)); return os_fail(err, errno_from_wsa(e)); }
+    if (s == INVALID_SOCKET) return os_fail(err, errno_from_wsa(WSAGetLastError()));
     BOOL one = TRUE;
     setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char*)&one, sizeof one);
     sockaddr_in addr{};
@@ -86,7 +86,6 @@ bool NetListener::open(u16 want_port, NetScope scope, i32* err) {
     addr.sin_addr.s_addr = htonl(scope == NetScope::Loopback ? INADDR_LOOPBACK : INADDR_ANY);
     if (bind(s, (sockaddr*)&addr, sizeof addr) != 0 || listen(s, 8) != 0 || !set_nonblocking(s)) {
         int e = WSAGetLastError();
-        KV_ERROR("net", "listen on port %u: %s", want_port, net_error(e));
         closesocket(s);
         return os_fail(err, errno_from_wsa(e));
     }
@@ -124,6 +123,8 @@ void NetSocket::adopt(KHandle new_fd) {
     }
     fd = new_fd;
     closed = false;
+    error = 0;
+    link_state = fd.is_open() ? NetLink::Up : NetLink::None; // accepted: connected already. net_connect_local says Connecting
     if (fd.is_open()) {
         set_nonblocking(socket_of(fd));
         BOOL one = TRUE;
@@ -131,12 +132,33 @@ void NetSocket::adopt(KHandle new_fd) {
     }
 }
 
+NetLink NetSocket::link() {
+    if (link_state != NetLink::Connecting || !fd.is_open()) return link_state;
+    // A connect that has finished makes the socket writable; one that failed is in the
+    // exception set (and, on later Windows, writable too). Asked without waiting.
+    SOCKET s = socket_of(fd);
+    fd_set can_write, failed;
+    FD_ZERO(&can_write); FD_ZERO(&failed);
+    FD_SET(s, &can_write); FD_SET(s, &failed);
+    timeval none{0, 0};
+    if (select(0, nullptr, &can_write, &failed, &none) <= 0) return link_state;
+    int e = 0, len = sizeof e;
+    if (getsockopt(s, SOL_SOCKET, SO_ERROR, (char*)&e, &len) != 0) e = WSAGetLastError();
+    if (e == 0 && FD_ISSET(s, &failed)) e = WSAECONNREFUSED;
+    if (e) { error = errno_from_wsa(e); closed = true; link_state = NetLink::Failed; }
+    else link_state = NetLink::Up;
+    return link_state;
+}
+
 i32 NetSocket::read(void* buf, u32 cap) {
+    if (link_state == NetLink::Connecting && link() == NetLink::Connecting) return 0; // nothing can have arrived yet
     if (!fd.is_open() || closed || cap == 0) return closed ? -1 : 0;
     int n = ::recv(socket_of(fd), (char*)buf, (int)(cap > 0x7FFFFFFFu ? 0x7FFFFFFFu : cap), 0);
     if (n > 0) { bytes_in += (u64)n; return (i32)n; }
     if (n == 0) { closed = true; return -1; }
-    if (would_block(WSAGetLastError())) return 0;
+    int e = WSAGetLastError();
+    if (would_block(e)) return 0;
+    error = errno_from_wsa(e);
     closed = true;
     return -1;
 }
@@ -159,6 +181,7 @@ void NetSocket::flush() {
         int e = WSAGetLastError();
         if (would_block(e)) break;
         if (e == WSAENOTCONN) break; // still connecting
+        error = errno_from_wsa(e);
         closed = true;
         break;
     }
@@ -172,8 +195,9 @@ void NetSocket::flush() {
 void NetSocket::close() {
     if (fd.is_open()) closesocket(socket_of(fd));
     fd = KHandle{};
-    out.clear();
+    out.free(); // the queue's memory with it: its allocator stays, for the next use
     closed = false;
+    link_state = NetLink::None;
 }
 
 bool net_connect_local(u16 port, NetSocket* out, i32* err) {
@@ -188,12 +212,12 @@ bool net_connect_local(u16 port, NetSocket* out, i32* err) {
     if (connect(s, (sockaddr*)&addr, sizeof addr) != 0) {
         int e = WSAGetLastError();
         if (e != WSAEWOULDBLOCK) {
-            KV_ERROR("net", "connect to port %u: %s", port, net_error(e));
             closesocket(s);
             return os_fail(err, errno_from_wsa(e));
         }
     }
     out->adopt(handle_of(s));
+    out->link_state = NetLink::Connecting; // link() finds out which way it went
     return true;
 }
 
