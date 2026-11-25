@@ -72,14 +72,14 @@ reading the alpha back from a frame every time it changes does not pay.
 Drawn alpha and the input shape are two things. A soft edge is drawn at half alpha and is
 either in or out of the shape.
 
-**What each platform does.** As expected from each system's interfaces, to be confirmed
-at milestone 1 and written into `platform_hid`'s page as found:
+**What each platform does.** As found at milestone 1 (SDL 3.4.2; `platform_hid`'s page
+keeps it current):
 
 | platform | alpha | input through the clear parts |
 |---|---|---|
-| Wayland | composited always | the surface's input region, through SDL's window shape |
-| X11, with a compositor | an ARGB visual | the Shape extension's input shape |
-| X11, without | none: the shape cuts the window out one bit a pixel, hard edged | the same shape |
+| Wayland | composited always | the surface's input region, which the engine sets itself: SDL's window shape gives Wayland none (it keeps the shape for its own renderer's alpha) |
+| X11, with a compositor | an ARGB visual, which the engine asks SDL for by id: SDL gives one to a software or GL window, not to a Vulkan one | the Shape extension's input shape, through SDL's window shape |
+| X11, without | none: the shape is also the window's bounding shape, set by the engine (SDL sets the input shape alone), one bit a pixel, hard edged | the same shape |
 | Win32 | to be found: the flip-model swapchain on a window ignores alpha; a layered window, or a composition swapchain, is what gives it | to be found with it |
 | macOS | a layer that is not opaque | AppKit passes clicks where a clear window is clear |
 | Android, iOS | not offered | |
@@ -232,3 +232,63 @@ which, by row of the platform table.
    for this draft.
 7. **Before or after Krome's slices.** Milestones 1 and 2 need nothing from slices 7 and
    8 but a mask's bytes for `shape`, which a test can make. A skin needs all three.
+
+## Status
+
+**Milestone 1, transparent and shaped on SDL3 (KR39): built Nov 25, 2026.** As above, and:
+
+- **The platform.** `WindowDesc::transparent` opens with `SDL_WINDOW_TRANSPARENT` and no
+  frame; `HostWindow::transparent()` is whether it composites: on X11, whether a
+  compositing manager holds `_NET_WM_CM_Sn` and the window got the alpha visual asked for.
+  `HostWindow::shape` keeps a copy of the mask, cut at 128 and scaled to the window in
+  window units, and gives it again after each resize. A software frame says when its
+  fourth byte is alpha (`SoftwareFrame::alpha`). What SDL does not do, the engine does
+  through SDL's own Xlib, Xext and libwayland-client, opened by name: it links none of
+  them. The shared half is `src/window_parts.cc`; Win32, Android and iOS refuse.
+- **The renderers.** `RendererDesc::transparent`; Vulkan presents
+  `VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR` where the surface offers it, and its log line
+  says so. The sprite and UI blends already kept a premultiplied target, so nothing else
+  changed. The CPU renderer draws no alpha yet and says so; D3D12 and Metal are milestone 3.
+  The frame loop's `--transparent` opens such a window and clears to nothing.
+- **`examples/window --round`**: a disc with a soft edge in a 360 x 360 window, its shape
+  from the same coverage.
+- **Measured** with an Xlib probe: on a rootful Xwayland (no compositor) the window is
+  opaque, its bounding and input shapes are the disc's 207 rects (98,676 px; a disc of
+  radius 178 is 99,538), a click on a corner reaches a window behind and one inside reaches
+  the program. On GNOME's Xwayland (composited) the window is depth 32, its corners alpha
+  0 and the same input shape; XTest does not reach a rootless Xwayland's windows, so no
+  click was tried there. On Wayland the protocol shows the same 207 rects in
+  `set_input_region`. `kromedemo --transparent` presents premultiplied on Wayland and on
+  composited X11, opaque without a compositor, with no validation errors.
+- **Seen on Wayland** (GNOME, by @starekrow): the desktop shows at the disc's corners and
+  a click there reaches the window behind; a click inside is the program's. macOS is not
+  tried.
+
+**Milestone 2, grips and bounds (KR41): built Nov 25, 2026.** As above, and:
+
+- **Pixels, not window units.** Grips and bounds are framebuffer pixels, as the pointer and
+  `text_area` are; the backend divides by the scale. Bounds are given again when the scale
+  changes.
+- **`WindowGrip::None`**: a rect that is the program's. The last rect holding a point
+  answers, so a button inside a title bar is listed after it and stays the button's. Krome
+  lists, after the grips, the nodes that take a press of their own and its open overlays
+  (all of the window for a modal), and drops the ones over no grip. 64 rects at most.
+- **SDL3**: `SDL_SetWindowHitTest` while the list is not empty; `SDL_SetWindowMinimumSize`
+  and `MaximumSize`. On Wayland the protocol shows `set_min_size(160, 160)` and
+  `set_max_size(720, 720)` for `window --grips`.
+- **Krome**: `grip=` in the kernel, the `.kimb` check and Lua; given after a paint, when the
+  list or the bounds changed; a press on a grip is the OS's. `krome_tests`' `grips_test`
+  checks the list, the bounds at scales 1 and 2, the presses and an overlay.
+- **The `TODO(wayland)`** in `host_window.h` is restated: a borderless window with grips
+  owns its frame and does not stall; one with the desktop's frame still does.
+- **Seen on Wayland** (GNOME, by @starekrow): `window --grips` moves by its band and resizes
+  by its handle, held to its bounds. Through about 300 sizes of one drag the loop ran 112 to
+  207 frames a second, its longest gap 21.7 ms: no stall. X11's move and resize are not
+  seen yet (XTest cannot drive a window manager's from here).
+
+
+**Verified for milestones 1 and 2** (Nov 25): `kormake test` on linux-debug, linux-dev and
+linux-ship; `platform_hid` and `krome` under `--sanitize address,undefined` and `thread`
+(`frameloop` has no tests of its own); `tools/determinism-check.sh` (rocks in every
+configuration, arcfire's two recordings) unchanged; `tools/doccheck.sh` reports nothing
+new. Windows and macOS are not built here.
