@@ -140,7 +140,11 @@ in a script's tree, built in that file's scope.
 **The model** is a table the scripts see as `model`. Writing a key refills every text that
 reads it (`"Saved {saves} times"`), sets every binding on it, and rebuilds every `each` and
 `if` on it; a list changed in place says so with `changed("key")`. C++ writes scalars with
-`krome_set` (a `KromeSet` event) and lists and tables with `krome_set_doc` (KBOR).
+`krome_set` (a `KromeSet` event) and lists and tables with `krome_set_doc` (KBOR). Each is
+applied by the pump in the next frame's Frame cycle and asks for that frame, so a window
+that draws only when asked shows it, once. A string of any length arrives whole: past the
+event's `KROME_SET_TEXT` bytes Krome keeps it beside the event (kind 3), still in order with
+the other sets; a text that reads it shows all of it.
 
 **Events.** A press goes to the nearest node with an event, a binding or a `hit`, captured
 until the release; a release over it flips its binding, runs the screen's handler
@@ -208,8 +212,9 @@ clips for `clip` and `scroll`. A scroll box draws its bars over its content whil
 content is longer than it is (the look's `scrollbar-color`, `scrollbar-track`,
 `scrollbar-size`; std's `scrollbar` style); a press on the thumb drags it, on the track
 pages, and the box keeps the keyboard where it was. A layer whose screens did not change is not painted and
-not handed over; a still screen costs nothing. A new list asks the loop for a frame
-(`engine_want_frame`), so a window paced on demand shows it.
+not handed over; a still screen costs nothing. A list is handed over in the Frame cycle of
+the frame that draws it, so it asks for no frame of its own: what changed the screen asked
+already (a set, an asset landed, input). A transition mid-way asks for the next frame.
 
 ## Using it
 

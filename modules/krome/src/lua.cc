@@ -229,29 +229,47 @@ bool table_file(lua_State* L, int idx, int uses_idx, Arena& arena, KimbFile& f, 
 
 } // namespace
 
-// Each node that reads the model shows its text with the values filled in.
+namespace {
+void push_path(lua_State* L, int store, const char* path);
+
+// A model value's text appended to `out`, read while Lua still holds it: a string of any
+// length whole (S2), where a copy into a buffer first cut it at 127 bytes.
+void append_value(KromeModule& s, KromeScreen& sc, const char* key, Array<char>& out) {
+    lua_State* L = s.L;
+    if (!L || sc.store == LUA_NOREF) return;
+    // A dotted key is a path into the model ("sel.type": a field of a table).
+    int pushed = 1;
+    if (strchr(key, '.')) push_path(L, sc.store, key);
+    else { lua_rawgeti(L, LUA_REGISTRYINDEX, sc.store); lua_getfield(L, -1, key); pushed = 2; }
+    usize len = 0;
+    const char* v;
+    char num[64];
+    if (lua_type(L, -1) == LUA_TSTRING) v = lua_tolstring(L, -1, &len);
+    else { v = value_text(L, -1, num, sizeof num); len = strlen(v); }
+    if (len) memcpy(out.push_n((u32)len), v, len);
+    lua_pop(L, pushed);
+}
+} // namespace
+
+// Each node that reads the model shows its text with the values filled in, however long.
 void krome_fill_node(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node) {
     const char* raw = tree.raw_text(node);
-    char out[1024];
-    usize n = 0;
-    char val[128];
-    for (const char* p = raw; *p && n + 1 < sizeof out;) {
-        if (p[0] == '{' && p[1] == '{') { out[n++] = '{'; p += 2; continue; }
+    Array<char> out{};
+    out.alloc = s.general; // its own: reading the model can run Lua, which may fill another
+    for (const char* p = raw; *p;) {
+        if (p[0] == '{' && p[1] == '{') { out.push('{'); p += 2; continue; }
         const char* end = *p == '{' ? strchr(p + 1, '}') : nullptr;
-        if (!end) { out[n++] = *p++; continue; }
+        if (!end) { out.push(*p++); continue; }
         char key[96];
         usize klen = (usize)(end - p - 1);
         if (klen >= sizeof key) klen = sizeof key - 1;
         memcpy(key, p + 1, klen);
         key[klen] = 0;
-        if (key[0] != '*') { // {*tag}: a span's look (slice 3), nothing to show
-            // A dotted key is a path into the model ("sel.type": a field of a table).
-            const char* v = strchr(key, '.') ? krome_model_path_text(s, sc, key, val, sizeof val) : krome_model_value_text(s, sc, key, val, sizeof val);
-            for (; *v && n + 1 < sizeof out; ++v) out[n++] = *v;
-        }
+        if (key[0] != '*') append_value(s, sc, key, out); // {*tag}: a span's look (slice 3), nothing to show
         p = end + 1;
     }
-    tree.set_shown(node, out, (u32)n);
+    tree.set_shown(node, out.len ? out.data : "", out.len);
+    out.free();
 }
 
 namespace {

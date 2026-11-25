@@ -156,6 +156,15 @@ void advance(KromeModule& s, KromeScreen& sc) {
     }
 }
 
+// The whole of a kind-3 set's string, taken: the caller frees it. Null if it is not there.
+char* take_set_text(KromeModule& s, f64 index) {
+    u32 i = (u32)index;
+    if (index < 0.0 || i >= s.set_texts.len) return nullptr;
+    char* t = s.set_texts[i];
+    s.set_texts[i] = nullptr;
+    return t;
+}
+
 // Phase Frame, main thread: documents that have landed, screens that can go a step
 // further, rebuilds asked for (a theme switch), and model values from outside.
 void krome_pump(TickContext& ctx) {
@@ -182,9 +191,13 @@ void krome_pump(TickContext& ctx) {
     s.set_docs.clear();
     for (const KromeSet& set : ctx.received<KromeSet>()) {
         KromeScreen* sc = krome_screen(s, Name{set.screen});
-        if (!sc || !sc->ready) continue;
+        char* whole = set.kind == 3 ? take_set_text(s, set.number) : nullptr;
+        if (!sc || !sc->ready) { free_in(s.general, whole, whole ? strlen(whole) + 1 : 0); continue; }
         const char* key = name_str(Name{set.key});
-        if (set.kind == 2) {
+        if (set.kind == 3) {
+            if (whole) krome_model_set_string(s, *sc, key, whole);
+            free_in(s.general, whole, whole ? strlen(whole) + 1 : 0);
+        } else if (set.kind == 2) {
             char text[KROME_SET_TEXT + 1];
             memcpy(text, set.text, KROME_SET_TEXT);
             text[KROME_SET_TEXT] = 0;
@@ -193,6 +206,10 @@ void krome_pump(TickContext& ctx) {
             krome_model_set_number(s, *sc, key, set.number, set.kind == 1);
         }
     }
+    // Every long string taken: the indexes start again from 0.
+    bool left = false;
+    for (char* t : s.set_texts) if (t) left = true;
+    if (!left) s.set_texts.len = 0;
     s.ctx = nullptr;
 }
 
@@ -282,6 +299,7 @@ bool krome_startup(Engine& e, ModuleInstance& self) {
     s->docs.alloc = &self.general;
     s->provided.alloc = &self.general;
     s->set_docs.alloc = &self.general;
+    s->set_texts.alloc = &self.general;
     s->fonts.alloc = &self.general;
     s->images.alloc = &self.general;
     s->layers.alloc = &self.general;
@@ -300,6 +318,8 @@ void krome_shutdown(Engine&, ModuleInstance& self) {
     krome_free_docs(*s);
     for (KromeModule::SetDoc& d : s->set_docs) free_in(s->general, d.data, d.size ? d.size : 1);
     s->set_docs.free();
+    for (char* t : s->set_texts) if (t) free_in(s->general, t, strlen(t) + 1);
+    s->set_texts.free();
     krome_free_view(*s);
     krome_lua_close(*s);
     krome_free_behaviours(*s);
@@ -610,11 +630,25 @@ void send(Engine& e, Name screen, const char* key, f64 number, u32 kind, const c
     set.kind = kind;
     if (text) {
         usize n = strlen(text);
-        if (n > KROME_SET_TEXT) n = KROME_SET_TEXT;
-        memcpy(set.text, text, n);
+        // Longer than the event holds: kept whole here, the event saying which (S2). The
+        // event keeps its place among the other sets, so the order is the caller's.
+        KromeModule* s = n > KROME_SET_TEXT ? krome_state(e) : nullptr;
+        if (s) {
+            char* whole = (char*)alloc_in(s->general, n + 1, 1);
+            memcpy(whole, text, n + 1);
+            set.kind = 3;
+            set.number = (f64)s->set_texts.len;
+            s->set_texts.push(whole);
+        }
+        memcpy(set.text, text, n < KROME_SET_TEXT ? n : KROME_SET_TEXT);
     }
     e.events.emit(set);
+    // The pump that applies it runs in the Frame cycle: without a frame asked for, a loop
+    // that draws only when asked (decoupled pacing) would not apply it until something
+    // else drew (S1). The frame that applies it draws what it changed.
+    engine_want_frame(e);
 }
+
 } // namespace
 
 void krome_set_doc(Engine& e, Name screen, const char* key, const void* kbor, usize size) {
@@ -623,6 +657,7 @@ void krome_set_doc(Engine& e, Name screen, const char* key, const void* kbor, us
     KromeModule::SetDoc d{screen, name_intern(key), (u8*)alloc_in(s->general, size ? size : 1, 16), size};
     if (size) memcpy(d.data, kbor, size);
     s->set_docs.push(d);
+    engine_want_frame(e); // applied in the Frame cycle, as krome_set's
 }
 
 void krome_set(Engine& e, Name screen, const char* key, f64 value) { send(e, screen, key, value, 0, nullptr); }

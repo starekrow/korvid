@@ -40,7 +40,10 @@ struct KromeEvent { u64 screen; u64 node; u64 event; f64 value; f32 x = 0.0f, y 
 // hash (0 when the each names none). A screen's Lua sees it as on.<event>(first, count, total).
 struct KromeView { u64 screen; u64 event; u32 first; u32 count; u32 total; u32 pad; };
 
-// In: a model value from outside. kind: 0 a number, 1 a boolean (number 0 or 1), 2 a string.
+// In: a model value from outside. kind: 0 a number, 1 a boolean (number 0 or 1), 2 a string
+// (text, up to KROME_SET_TEXT bytes, NUL-terminated if shorter), 3 a longer string: krome_set
+// keeps it whole in Krome, `number` says which, and `text` holds its first bytes (for the
+// trace and the CLI). A 3 is krome_set's alone: one made by hand finds nothing.
 constexpr u32 KROME_SET_TEXT = 56;
 struct KromeSet { u64 screen; u64 key; f64 number; u32 kind; u32 pad; char text[KROME_SET_TEXT]; };
 
@@ -74,7 +77,9 @@ void krome_close(Engine& e, Name screen);
 // Its script has run and its tree is built (false while it loads, and when it failed).
 bool krome_ready(Engine& e, Name screen);
 
-// Model values from C++: each an event, applied by Krome's pump before the tick's Sim.
+// Model values from C++: each an event, applied by Krome's pump in the next frame's Frame
+// cycle, in the order they were set; each asks for that frame (engine_want_frame). A string of any length: past KROME_SET_TEXT it is kept whole
+// beside the event (kind 3), still in order with the other sets.
 void krome_set(Engine& e, Name screen, const char* key, f64 value);
 void krome_set(Engine& e, Name screen, const char* key, const char* value);
 void krome_set_bool(Engine& e, Name screen, const char* key, bool value);

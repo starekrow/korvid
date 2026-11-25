@@ -15,6 +15,7 @@ void test_behave(kv::TestCtx&);
 void test_virtual(kv::TestCtx&);
 void test_sparse(kv::TestCtx&);
 void test_sparse_text(kv::TestCtx&);
+void test_set(kv::TestCtx&);
 void test_hooks(kv::TestCtx&);
 void test_rebuild(kv::TestCtx&);
 void test_reload(kv::TestCtx&);
@@ -34,6 +35,7 @@ int main() {
     test_virtual(c);
     test_sparse(c);
     test_sparse_text(c);
+    test_set(c);
     test_hooks(c);
     test_rebuild(c);
     test_reload(c);

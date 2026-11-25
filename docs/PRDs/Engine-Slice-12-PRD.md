@@ -429,3 +429,40 @@ were written on Windows and not compiled. On Linux, as landed:
   builds. `tools/determinism-check.sh` passes (rocks agrees with itself; arcfire's
   recordings replay matched). arcfire's and arcanum's demos hash as at milestone 3, tick
   for tick (14,154 and 1,865, at the default rate and at `--rate 4`).
+
+**Milestone 5, one present and the long string (S1, S2): built Nov 24, 2026.** Different
+from the shape:
+
+- **S1's other callers** (For review, 5): Krome paints only from `krome.paint`, a Frame-cycle
+  system, and the Frame cycle runs only in the frame loop's body and its live-resize
+  frame, each of which draws straight after. `frameloop_step` runs no Frame cycle, so no
+  paint. The request at the hand-over is gone; the one for a transition mid-way and the
+  one while a font, an image or a shape is still on its way stay.
+- **A `krome_set` alone drew nothing under decoupled pacing.** The test counts presents
+  through the CPU renderer with no window, the frames stepped as decoupled pacing steps
+  them (a frame only when one is wanted). As landed, one `krome_set` presented 0 frames:
+  sets are applied by `krome.pump` in the Frame cycle, and nothing asked for a frame, so a
+  value set from C++ waited for input or a load to draw. `krome_set` and `krome_set_doc`
+  now ask. With that alone, 2 frames (the hand-over's request); with both changes, 1.
+- **S2, kept in order** (For review, 4): `krome_set_doc`'s documents are all applied before
+  the frame's `KromeSet` events, so a long string sent that way would land before a short
+  set made ahead of it. A string past `KROME_SET_TEXT` is instead a `KromeSet` of kind 3:
+  Krome keeps the whole string, the event says which (`number`) and carries its first bytes,
+  and the pump takes it as it reaches the event. `KromeSet`'s layout is unchanged; a set
+  for a screen that is not there frees its string, and shutdown frees what was never
+  pumped. Whether `krome_set_doc` takes a bare string was not needed, and not checked.
+- **A second silent cut, on screen.** The model then held the whole string, and a text
+  reading it showed 127 bytes: `krome_fill_node` copied each value into a 128-byte buffer
+  (and the filled text into 1,024). It appends each value straight from Lua into a buffer
+  that grows. An edit bound to the key already showed it whole.
+- **Not changed:** `krome_set_doc`'s header says its documents are applied in order with the
+  others, and they are applied before them; a document and a set of the same key in one
+  frame land in that order whatever the caller's.
+- **Test** (`krome set`): 300 bytes set, model and text whole; exactly 56 whole; short then
+  long and long then short in one frame, the last set wins; a set for a screen that is not
+  there leaves nothing; one set never pumped freed at shutdown; one `krome_set` under
+  decoupled pacing, one frame presented, showing it.
+- **Verified, Nov 24, 2026.** `kormake test` passes on linux-debug, linux-dev and
+  linux-ship. krome, kim and kimb pass under `address,undefined` and `thread`. arcfire's
+  and arcanum's demos hash as before, tick for tick. `tools/doccheck.sh` reports nothing
+  new.

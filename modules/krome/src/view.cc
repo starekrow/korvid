@@ -1054,7 +1054,10 @@ void krome_view_frame(KromeModule& s) {
             sc->repaint = false;
         }
         ++s.paints;
-        if (r) { krome_shapes_flush(s, r); renderer_ui_set(r, layer, s.list); ++s.submits; engine_want_frame(*s.e); }
+        // No frame asked for: this runs in the Frame cycle of the frame that draws the list
+        // (the frame loop's, a live resize's), so one asked for here showed the same pixels
+        // again (S1). A transition mid-way asks, below: that is the next frame's.
+        if (r) { krome_shapes_flush(s, r); renderer_ui_set(r, layer, s.list); ++s.submits; }
         if (!known) s.layers.push(layer);
     }
     for (u32 i = 0; i < s.layers.len;) {

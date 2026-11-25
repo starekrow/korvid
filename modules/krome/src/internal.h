@@ -266,6 +266,9 @@ struct KromeModule {
     // Lists and tables from C++ (krome_set_doc), applied by the pump in order.
     struct SetDoc { Name screen; Name key; u8* data; usize size; };
     Array<SetDoc>       set_docs;
+    // krome_set's strings past KROME_SET_TEXT (a KromeSet of kind 3 names one by its index),
+    // each freed as the pump takes its event; the array empties once none is left.
+    Array<char*>        set_texts;
     u64                 rebuilt_regions = 0, rebuilt_nodes = 0;
     u32                 next_id = 1;
     TickContext*        ctx = nullptr; // the running system's, for emits; null outside one
