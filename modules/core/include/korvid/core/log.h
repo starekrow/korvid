@@ -12,8 +12,9 @@
 //   [ INFO] rocks: wave 3: 7 rocks
 //   [ WARN] rocks: high score file: errno 2
 //
-// Info, Debug and Trace lines go to stdout, Warn and Error to stderr (or, where a process
-// has no standard streams, to the sink set by output_set_sink in format.h). Each line is
+// Every line goes to stderr, whatever its level (or, where a process has no standard
+// streams, to the sink set by output_set_sink in format.h): stdout is the program's own
+// output, which --verbose must not get into. Each line is
 // written in one piece and flushed, so lines from two threads never interleave and a line
 // is out before a crash that follows it. Nothing allocates; a message is cut at 1023
 // bytes.

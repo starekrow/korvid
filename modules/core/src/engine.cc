@@ -1462,6 +1462,7 @@ u32 engine_frame(Engine& e, f64 frame_dt) {
         e.ticks_wanted = false; // engine_want_ticks lapses with each tick: one that still wants the next asks again
         e.phases.run_tick(e, e.events, e.clock.tick_dt, tick, paused);
     }
+    print_flush_lines(); // what the frame printed is out before the next: one flush, if a line ended
     return ticks;
 }
 

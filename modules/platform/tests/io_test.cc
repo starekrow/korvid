@@ -601,6 +601,9 @@ void test_io_errors(kv::TestCtx& c) {
     char cwd[1024];
     err = 0;
     KV_CHECK(c, io_current_dir(cwd, sizeof cwd, &err) && err == 0 && cwd[0]);
+    char tmp[1024];
+    KV_CHECK(c, io_temp_dir(tmp, sizeof tmp, &err) && err == 0 && io_is_dir(tmp) && tmp[strlen(tmp) - 1] != '/');
+    KV_CHECK(c, strncmp(dir, tmp, strlen(tmp)) == 0); // io_make_temp_dir's are under it
     KV_CHECK(c, io_remove_tree(dir, &err) && err == 0);
     KV_CHECK(c, io_remove_tree(dir, &err) && err == 0);          // nothing there is gone already
 }

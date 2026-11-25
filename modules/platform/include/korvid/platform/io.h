@@ -315,6 +315,11 @@ bool io_remove_tree(const char* path, i32* err = nullptr);
 // `prefix`, for a tool's or a test's scratch work; its path (no trailing '/') in out.
 // Synchronous. False if none could be made.
 bool io_make_temp_dir(const char* prefix, char* out, u32 cap, i32* err = nullptr);
+// The OS's temporary directory itself, for what several runs or several programs must find
+// by one name (a lock, a socket's port file): its path, no trailing '/', in out.  or
+// /tmp on POSIX; the user's own temporary directory on Windows. What is put there may be
+// cleared at any time by the OS: what should last belongs in platform_user_dir's Cache.
+bool io_temp_dir(char* out, u32 cap, i32* err = nullptr);
 
 // ---- Blocking file I/O ----------------------------------------------------------------
 // For tools, startup, shutdown and tests: never for a tick, which goes through the queue.

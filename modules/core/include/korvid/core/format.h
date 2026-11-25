@@ -33,14 +33,22 @@ i32  vformat(char* out, usize cap, const char* fmt, va_list args);
 
 // ---- the standard streams --------------------------------------------------------------
 
-// To stdout, buffered as the C library buffers it; print_flush pushes it out. To stderr,
-// unbuffered. Nothing is added: a line ends where the text puts '\n'.
+// To stdout, buffered as the C library buffers it, and pushed out soon after a line
+// ends: text that ends in '\n' asks for a flush, which the engine makes at the end of the
+// frame or tick it was printed in and before a loop waits (print_flush_lines). So a line
+// printed is a line a reader sees, whether stdout is a terminal, a pipe or a file, and a
+// program killed afterwards has not lost it; a thousand lines printed in one tick are
+// still one flush. Text that does not end a line waits for one that does, or for
+// print_flush. To stderr, unbuffered. Nothing is added: a line ends where the text puts '\n'.
 void print(const char* fmt, ...) KV_PRINTF(1, 2);
 void vprint(const char* fmt, va_list args);
 void print_err(const char* fmt, ...) KV_PRINTF(1, 2);
 void vprint_err(const char* fmt, va_list args);
-// Pushes out what print has buffered for stdout. Nothing to do when a sink is set.
+// Pushes out what print has buffered for stdout, now. Nothing to do when a sink is set.
 void print_flush();
+// The same if a line has ended on stdout since the last flush, and nothing if not: one
+// atomic read. What a loop calls once a pass; engine_frame and platform_wait do.
+void print_flush_lines();
 
 // Where print, print_err and the log go, for a process with no standard streams (an
 // Android app, whose output is the system's log): when set, every write is handed to

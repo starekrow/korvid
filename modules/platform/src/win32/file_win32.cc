@@ -373,10 +373,9 @@ bool os_remove_dir(const char* path, i32* err) {
     return os_fail(err, errno_from_win32(e));
 }
 
-// Under the user's temporary directory (GetTempPath2W where Windows has it, which keeps a
-// SYSTEM process's files private), named prefix-<pid>-<n>; CreateDirectoryW failing on a
-// name that exists makes the choice race-free, as mkdtemp's is.
-bool os_make_temp_dir(const char* prefix, char* out, u32 cap, i32* err) {
+// The user's temporary directory (GetTempPath2W where Windows has it, which keeps a SYSTEM
+// process's files private), in its long form, '/' separated, none at the end.
+bool os_temp_dir(char* out, u32 cap, i32* err) {
     wchar_t tmp[MAX_PATH + 1];
     typedef DWORD(WINAPI * TempPath2)(DWORD, LPWSTR);
     static TempPath2 temp_path2 = (TempPath2)(void*)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetTempPath2W");
@@ -386,11 +385,18 @@ bool os_make_temp_dir(const char* prefix, char* out, u32 cap, i32* err) {
     wchar_t full[KV_WIDE_PATH_MAX];
     DWORD m = GetLongPathNameW(tmp, full, KV_WIDE_PATH_MAX);
     if (m == 0 || m >= (DWORD)KV_WIDE_PATH_MAX) wcscpy_s(full, tmp);
+    if (!narrow(full, out, (int)cap)) return os_fail(err, ENAMETOOLONG);
+    forward_slashes(out);
+    usize len = strlen(out);
+    while (len > 1 && out[len - 1] == '/') out[--len] = 0;
+    return true;
+}
+
+// Under the temporary directory, named prefix-<pid>-<n>; CreateDirectoryW failing on a
+// name that exists makes the choice race-free, as mkdtemp's is.
+bool os_make_temp_dir(const char* prefix, char* out, u32 cap, i32* err) {
     char base[KV_WIDE_PATH_MAX * 3];
-    if (!narrow(full, base, (int)sizeof base)) return os_fail(err, ENAMETOOLONG);
-    forward_slashes(base);
-    usize len = strlen(base);
-    while (len > 1 && base[len - 1] == '/') base[--len] = 0;
+    if (!os_temp_dir(base, (u32)sizeof base, err)) return false;
     static u32 counter = 0;
     for (u32 attempt = 0; attempt < 1000; ++attempt) {
         int k = kv::format(out, cap, "%s/%s-%lu-%u", base, prefix, (unsigned long)GetCurrentProcessId(), ++counter);

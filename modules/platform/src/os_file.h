@@ -79,5 +79,7 @@ bool os_remove_dir(const char* path, i32* err = nullptr);
 // A new, empty directory under the OS's temporary directory whose name starts with
 // prefix; its path, with '/' separators and none at the end, in out.
 bool os_make_temp_dir(const char* prefix, char* out, u32 cap, i32* err = nullptr);
+// The OS's temporary directory itself: its path, '/' separators, none at the end.
+bool os_temp_dir(char* out, u32 cap, i32* err = nullptr);
 
 } // namespace kv

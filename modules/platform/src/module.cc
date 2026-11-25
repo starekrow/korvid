@@ -139,6 +139,7 @@ PlatformWoken platform_wait(Engine& e, f64 seconds) {
     PlatformState* s = state(e);
     if (!s) { if (seconds > 0.0) time_sleep(seconds); return PlatformWoken::Time; }
     if (seconds <= 0.0) return PlatformWoken::Time; // no wait: a wake stays for the next
+    print_flush_lines(); // nothing printed sits in a buffer while the loop sleeps
     ++s->waits.waits;
     if (s->watch) wake_watch_rearm(s->watch); // what woke the last wait has been read by now
     // A wake that came before the wait began ends it at once.

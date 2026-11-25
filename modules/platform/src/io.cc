@@ -1127,6 +1127,11 @@ bool io_remove_tree(const char* path, i32* err) {
     return ok;
 }
 
+bool io_temp_dir(char* out, u32 cap, i32* err) {
+    if (!out || !cap) { if (err) *err = EINVAL; return false; }
+    return os_temp_dir(out, cap, err);
+}
+
 bool io_make_temp_dir(const char* prefix, char* out, u32 cap, i32* err) {
     if (!prefix || !out || !cap) { if (err) *err = EINVAL; return false; }
     return os_make_temp_dir(prefix, out, cap, err);

@@ -242,6 +242,16 @@ bool os_remove_dir(const char* path, i32* err) {
     return rmdir(path) == 0 || errno == ENOENT || os_fail(err, errno);
 }
 
+// $TMPDIR, or /tmp: none at the end.
+bool os_temp_dir(char* out, u32 cap, i32* err) {
+    const char* tmp = getenv("TMPDIR");
+    if (!tmp || !tmp[0]) tmp = "/tmp";
+    usize n = strlen(tmp);
+    while (n > 1 && tmp[n - 1] == '/') --n;
+    int len = format(out, cap, "%.*s", (int)n, tmp);
+    return (len > 0 && (u32)len < cap) || os_fail(err, ENAMETOOLONG);
+}
+
 bool os_make_temp_dir(const char* prefix, char* out, u32 cap, i32* err) {
     const char* tmp = getenv("TMPDIR");
     if (!tmp || !tmp[0]) tmp = "/tmp";

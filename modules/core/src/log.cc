@@ -34,9 +34,10 @@ void log_write(LogLevel level, const char* tag, const char* fmt, ...) {
     char line[1200];
     int n = snprintf(line, sizeof line, "[%s] %s: %s\n", level_tag(level), tag, buf);
     if (n >= (int)sizeof line) { n = (int)sizeof line - 1; line[n - 1] = '\n'; }
-    bool err = level >= LogLevel::Warn;
-    output_write(err, line, (usize)n);
-    fflush(err ? stderr : stdout);
+    // Every level to stderr: stdout is the program's own output (a tool's results, piped
+    // to another program), and a log line in the middle of it is a corrupted result.
+    output_write(true, line, (usize)n);
+    fflush(stderr);
 }
 
 void assert_fail(const char* expr, const char* file, int line) {
