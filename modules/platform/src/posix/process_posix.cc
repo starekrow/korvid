@@ -136,13 +136,13 @@ bool Process::spawn(const ProcessDesc& desc, i32* err) {
     const char* const shell_argv[] = {"/bin/sh", "-c", desc.shell};
     Span<const char* const> words = desc.shell ? Span<const char* const>(shell_argv, 3) : desc.argv;
     const char* what = desc.shell ? desc.shell : desc.argv.data[0]; // what a failure names
-    int out[2] = {-1, -1}, err[2] = {-1, -1}, fail[2] = {-1, -1};
+    int out[2] = {-1, -1}, err_pipe[2] = {-1, -1}, fail[2] = {-1, -1};
     // With fork, a third pipe carries the child's errno if its exec fails; posix_spawn
     // returns that itself.
-    if (!proc_pipe(out) || !proc_pipe(err) || (!KV_PROC_SPAWN && !proc_pipe(fail))) {
+    if (!proc_pipe(out) || !proc_pipe(err_pipe) || (!KV_PROC_SPAWN && !proc_pipe(fail))) {
         int e = errno;
         format(error, sizeof error, "pipe: %s", os_error_text(e));
-        proc_close(out[0]); proc_close(out[1]); proc_close(err[0]); proc_close(err[1]);
+        proc_close(out[0]); proc_close(out[1]); proc_close(err_pipe[0]); proc_close(err_pipe[1]);
         return os_fail(err, e);
     }
     char** argv = (char**)mem_alloc(sizeof(char*) * (words.len + 1));
@@ -161,7 +161,7 @@ bool Process::spawn(const ProcessDesc& desc, i32* err) {
     posix_spawnattr_setpgroup(&attr, 0);
     posix_spawn_file_actions_addopen(&acts, 0, "/dev/null", O_RDONLY, 0);
     posix_spawn_file_actions_adddup2(&acts, out[1], 1);
-    posix_spawn_file_actions_adddup2(&acts, err[1], 2);
+    posix_spawn_file_actions_adddup2(&acts, err_pipe[1], 2);
 #if defined(__APPLE__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -176,9 +176,9 @@ bool Process::spawn(const ProcessDesc& desc, i32* err) {
     posix_spawnattr_destroy(&attr);
     mem_free(argv);
     mem_free(envp);
-    proc_close(out[1]); proc_close(err[1]);
+    proc_close(out[1]); proc_close(err_pipe[1]);
     if (why != 0) {
-        proc_close(out[0]); proc_close(err[0]);
+        proc_close(out[0]); proc_close(err_pipe[0]);
         format(error, sizeof error, "%s: %s", desc.cwd && why == ENOENT && access(desc.cwd, F_OK) != 0 ? desc.cwd : what, os_error_text(why));
         return os_fail(err, why);
     }
@@ -191,7 +191,7 @@ bool Process::spawn(const ProcessDesc& desc, i32* err) {
         int null_in = open("/dev/null", O_RDONLY);
         if (null_in >= 0) dup2(null_in, 0);
         dup2(out[1], 1);
-        dup2(err[1], 2);
+        dup2(err_pipe[1], 2);
         int why = 0;
         if (desc.cwd && chdir(desc.cwd) != 0) why = errno;
         if (!why) {
@@ -206,10 +206,10 @@ bool Process::spawn(const ProcessDesc& desc, i32* err) {
     int fork_errno = errno;
     mem_free(argv);
     mem_free(envp);
-    proc_close(out[1]); proc_close(err[1]); proc_close(fail[1]);
+    proc_close(out[1]); proc_close(err_pipe[1]); proc_close(fail[1]);
     if (child < 0) {
         format(error, sizeof error, "fork: %s", os_error_text(fork_errno));
-        proc_close(out[0]); proc_close(err[0]); proc_close(fail[0]);
+        proc_close(out[0]); proc_close(err_pipe[0]); proc_close(fail[0]);
         return os_fail(err, fork_errno);
     }
     setpgid(child, child); // both sides set it, so it is set whichever runs first
@@ -222,19 +222,19 @@ bool Process::spawn(const ProcessDesc& desc, i32* err) {
     if (got == (ssize_t)sizeof why) {
         int status;
         while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
-        proc_close(out[0]); proc_close(err[0]);
+        proc_close(out[0]); proc_close(err_pipe[0]);
         format(error, sizeof error, "%s: %s", desc.cwd && why == ENOENT && access(desc.cwd, F_OK) != 0 ? desc.cwd : what, os_error_text(why));
         return os_fail(err, why);
     }
 #endif
     fcntl(out[0], F_SETFL, fcntl(out[0], F_GETFL, 0) | O_NONBLOCK);
-    fcntl(err[0], F_SETFL, fcntl(err[0], F_GETFL, 0) | O_NONBLOCK);
+    fcntl(err_pipe[0], F_SETFL, fcntl(err_pipe[0], F_GETFL, 0) | O_NONBLOCK);
     pid    = child;
     char label[160];
     format(label, sizeof label, "stdout of %s", what);
     out_fd = os_handle_make(OsKind::Pipe, out[0], label);
     format(label, sizeof label, "stderr of %s", what);
-    err_fd = os_handle_make(OsKind::Pipe, err[0], label);
+    err_fd = os_handle_make(OsKind::Pipe, err_pipe[0], label);
     format(label, sizeof label, "the exit of %s", what);
     process = os_handle_make(OsKind::Process, proc_exit_fd(child), label); // null where the OS gives none
     exited = false;

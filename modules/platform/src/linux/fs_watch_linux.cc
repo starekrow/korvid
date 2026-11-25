@@ -61,10 +61,10 @@ void drop_dir(FsNative* n, u32 index) {
 
 // A directory's entries and what each is. A link to a directory is left out: it is not
 // watched, and not reported (KR16).
-struct Listing { Array<char> text; Array<u32> at; Array<OsPathKind> kind; };
+struct DirListing { Array<char> text; Array<u32> at; Array<OsPathKind> kind; };
 void list_name(void* user, const OsDirEntry& e) {
     if (e.is_link && e.st.kind == OsPathKind::Dir) return;
-    Listing* l = (Listing*)user;
+    DirListing* l = (DirListing*)user;
     u32 len = (u32)strlen(e.name);
     l->at.push(l->text.len);
     l->kind.push(e.st.kind);
@@ -92,7 +92,7 @@ bool add_tree(FsNative* n, const FsInoRoot& root, const char* rel, FsSink* sink,
         n->by_wd.set(wd, n->dirs.len);
         n->dirs.push(FsInoDir{wd, root.id, ino_dup_str(rel)});
     }
-    Listing l{};
+    DirListing l{};
     os_dir_list(abs, false, list_name, &l, nullptr);
     for (u32 i = 0; i < l.at.len; ++i) {
         const char* name = l.text.data + l.at.data[i];
