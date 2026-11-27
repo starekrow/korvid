@@ -344,3 +344,104 @@ void test_layout(kv::TestCtx& c) {
     }
 }
 
+
+// Placement by edge and offset in a stack (Krome slice 8, KR30), at three parent sizes.
+void test_placement(kv::TestCtx& c) {
+    using namespace kv;
+    c.begin("krome placement");
+    {   // The PRD's three: stretched between two edges, kept at a corner, at a third.
+        T x;
+        u32 root = x.box(KROME_NONE, "stack");
+        x.set(root, "pad", KromeValue::num(4));
+        u32 bar = x.box(root);
+        x.set(bar, "l", KromeValue::num(10));
+        x.set(bar, "r", KromeValue::num(10));
+        x.set(bar, "h", KromeValue::num(6));
+        x.set(bar, "w", KromeValue::num(999)); // ignored with both edges tied
+        u32 corner = x.box(root);
+        x.set(corner, "r", KromeValue::num(30));
+        x.set(corner, "b", KromeValue::num(8));
+        x.set(corner, "w", KromeValue::num(20));
+        x.set(corner, "h", KromeValue::num(10));
+        u32 third = x.box(root);
+        x.set(third, "l", KromeValue::str("33.3%"));
+        x.set(third, "w", KromeValue::num(5));
+        x.set(third, "h", KromeValue::num(5));
+        u32 near_end = x.box(root);
+        x.set(near_end, "l", KromeValue::str("100%-40"));
+        x.set(near_end, "t", KromeValue::str("50%+2"));
+        x.set(near_end, "w", KromeValue::num(8));
+        x.set(near_end, "h", KromeValue::num(8));
+        const f32 sizes[3][2] = {{200, 100}, {408, 208}, {104, 64}};
+        for (const auto& sz : sizes) {
+            f32 W = sz[0], H = sz[1], iw = W - 8, ih = H - 8;
+            x.layout(W, H);
+            KV_CHECK(c, rect_is(x.r(bar), 14, 4, iw - 20, 6));
+            KV_CHECK(c, rect_is(x.r(corner), 4 + iw - 30 - 20, 4 + ih - 8 - 10, 20, 10));
+            KV_CHECK(c, rect_is(x.r(third), 4 + iw * 0.333f, 4, 5, 5));
+            KV_CHECK(c, rect_is(x.r(near_end), 4 + iw - 40, 4 + ih * 0.5f + 2, 8, 8));
+        }
+    }
+    {   // One edge on each axis with the anchor's place on the other; an offset moves it and
+        // what is under it; edges that cross leave no width.
+        T x;
+        u32 root = x.box(KROME_NONE, "stack");
+        x.flag(root, "center");
+        x.flag(root, "middle");
+        u32 a = x.box(root, "stack");
+        x.set(a, "l", KromeValue::num(10));
+        x.set(a, "w", KromeValue::num(20));
+        x.set(a, "h", KromeValue::num(10));
+        x.set(a, "x", KromeValue::num(5));
+        x.set(a, "y", KromeValue::num(-3));
+        u32 inner = x.box(a);
+        x.set(inner, "w", KromeValue::num(4));
+        x.set(inner, "h", KromeValue::num(4));
+        u32 cross = x.box(root);
+        x.set(cross, "l", KromeValue::str("60%"));
+        x.set(cross, "r", KromeValue::str("60%"));
+        x.set(cross, "h", KromeValue::num(2));
+        x.layout(200, 100);
+        KV_CHECK(c, rect_is(x.r(a), 15, 42, 20, 10));
+        KV_CHECK(c, rect_is(x.r(inner), 15, 42, 4, 4));
+        KV_CHECK(c, rect_is(x.r(cross), 120, 49, 0, 2));
+        // Untied, it goes back to its anchor; the offset stays.
+        x.set(a, "l", KromeValue::str("none"));
+        x.layout(200, 100);
+        KV_CHECK(c, rect_is(x.r(a), 95, 42, 20, 10));
+    }
+    {   // A hugging stack wants only what is not tied: here the 30 x 20 child.
+        T x;
+        u32 root = x.box(KROME_NONE);
+        u32 st = x.box(root, "stack");
+        u32 plain = x.box(st);
+        x.set(plain, "w", KromeValue::num(30));
+        x.set(plain, "h", KromeValue::num(20));
+        u32 tied = x.box(st);
+        x.set(tied, "r", KromeValue::num(0));
+        x.set(tied, "b", KromeValue::num(0));
+        x.set(tied, "w", KromeValue::num(90));
+        x.set(tied, "h", KromeValue::num(70));
+        u32 across = x.box(st);
+        x.set(across, "l", KromeValue::num(2));
+        x.set(across, "r", KromeValue::num(2));
+        x.set(across, "h", KromeValue::num(40)); // only its width is tied: its height counts
+        x.layout(200, 100);
+        KV_CHECK(c, rect_is(x.r(st), 0, 0, 30, 40));
+        KV_CHECK(c, rect_is(x.r(tied), -60, -30, 90, 70));
+        KV_CHECK(c, rect_is(x.r(across), 2, 0, 26, 40));
+    }
+    {   // The words: what an edge takes and refuses.
+        KromeEdge e;
+        KV_CHECK(c, krome_parse_edge("10", &e) && e.dist == 10 && e.frac == 0);
+        KV_CHECK(c, krome_parse_edge("25%", &e) && near(e.frac, 0.25f) && e.dist == 0);
+        KV_CHECK(c, krome_parse_edge("100%-40", &e) && near(e.frac, 1.0f) && e.dist == -40);
+        KV_CHECK(c, krome_parse_edge("50%+8.5", &e) && near(e.frac, 0.5f) && e.dist == 8.5f);
+        KV_CHECK(c, !krome_parse_edge("", &e) && !krome_parse_edge("10px", &e) && !krome_parse_edge("50%-", &e) && !krome_parse_edge("50%*2", &e));
+        T x;
+        u32 root = x.box(KROME_NONE, "stack");
+        KV_CHECK(c, x.t.set(root, "l", KromeValue::str("left")) != nullptr);
+        KV_CHECK(c, x.t.set(root, "x", KromeValue::str("5%")) != nullptr);
+        KV_CHECK(c, x.t.set(root, "l", KromeValue::num(3), KromeState::Hover) != nullptr);
+    }
+}

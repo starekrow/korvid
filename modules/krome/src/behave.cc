@@ -132,7 +132,12 @@ void krome_set_part(KromeModule& s, const KromeTarget& t, const char* part, cons
     if (!tree || !sc || t.node >= tree->nodes.len || !part || !prop) return;
     u32 n = krome_find_part(*tree, t.node, name_intern(part));
     if (n == KROME_NONE) { krome_error(s, name_str(sc->name), tree->nodes[t.node].line, nullptr, 0, "no part '%s' under the node", part); return; }
+    u8 was_tied = tree->nodes[n].tied;
     const char* bad = flag >= 0 ? tree->set_flag(n, prop, flag != 0) : tree->set(n, prop, *v, KromeState::Base);
+    if (!bad && tree->nodes[n].tied != was_tied) {
+        u32 up = tree->nodes[n].parent;
+        if (up == KROME_NONE || tree->nodes[up].dir != KromeDir::Stack) { tree->nodes[n].tied = was_tied; bad = "places a child of a stack, and this part's parent is not one"; }
+    }
     if (bad) { krome_error(s, name_str(sc->name), tree->nodes[n].line, nullptr, 0, "part %s: %s: %s", part, prop, bad); return; }
     sc->repaint = true;
     if (t.overlay) if (KromeOverlay* o = krome_overlay(*sc, t.overlay)) o->placed = false;

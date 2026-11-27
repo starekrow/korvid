@@ -24,6 +24,16 @@ left, minimums pinned before maximums; a bare `fill` fills along the parent's di
 Rects are logical pixels; painting multiplies by the window's scale and rounds each edge.
 Layout runs only when something marked the tree.
 
+**Placed by edge** (slice 8, KR30). A child of a stack can tie its edges to its parent's
+inside: `l=10` (10 from the left), `r=30`, `t`, `b`, each a distance, a fraction (`l=33.3%`)
+or both (`l=100%-40`, 40 short of the right edge), `none` to untie. With both edges of an
+axis tied it is as long as what lies between and its `w` or `h` is ignored; with one it
+keeps its size and follows that edge; with neither its anchor places it. `x=` and `y=` are
+an offset from wherever that put it, in logical pixels, for a thumb or a drawer: it moves
+the node and everything under it. All six are layout's, can be bound (`x=@drawer`) and set
+by a behaviour's `w:part`, and mean something only in a stack: anywhere else each is an
+error naming the parent's direction. A tied axis adds nothing to what a hugging stack wants.
+
 **Text wraps** (slice 3) at the width layout gives it: a hugging node is no wider than its
 room unless it cannot be narrower (its `narrowest`: a wrapping text's longest word), and
 when any text wrapped, heights are laid out again at the widths given and the tree placed
@@ -318,7 +328,7 @@ In Lua: the helpers (and `edit`, with `bind = "key"`), `model`, `emit(name, valu
 `open_overlay(tree, opts)`, `close_overlay([id])`, `theme(name)`, `changed(key)`, `kim(file, screen)`.
 
 Properties: layout `w`, `h` (a number, a percentage, `hug`, `fill`, a range), `pad`, `gap`,
-`dir`, `anchor`, `scroll` (`x`, `y` or `xy`), `tooltip`, `context`, `behave`, `taborder`,
+`dir`, `anchor`, `l`, `t`, `r`, `b` (a stack child's edges), `x`, `y` (its offset), `scroll` (`x`, `y` or `xy`), `tooltip`, `context`, `behave`, `taborder`,
 `key` (a shortcut), `step`, `range` (Lua's form of a node's `1..99`); an edit's `placeholder`,
 `change`, `blur`; `cursor`; `grip` (`move`, an edge or corner by compass point, `none`); any of them `@key` (bound to the model); look `bg`, `bg2` (a gradient to it), `angle`, `radius` (one, two
 or four), `border`, `border-color`, `shadow` (x y blur [spread]), `shadow-color`, `color`,

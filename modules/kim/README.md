@@ -48,6 +48,7 @@ the command line; goldberg compiles `.kim` in process (its built-in `kim` conver
   writes it; a node's bare range (`slider 1..99`) is `"r": [1, 99]`.
 - **A percentage and a bound value are text too.** `w=40%` is `"40%"` and `w=@left` is
   `"@left"` (no token starts with `@`); a node's `@mode=fast` is `"b": "mode", "bv": "fast"`.
+  A percentage and a distance together, an edge's `l=100%-40`, is `"100%-40"` (Krome slice 8).
 - **A bare word as a value is a string.** Whether `bg=panel2` is a theme token and
   `w=fill` a keyword is Krome's to say.
 - **`id=` is not a property.** It is the node's `"id"`.

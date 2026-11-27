@@ -735,6 +735,15 @@ void node(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const Kro
         binding(b, o->frame, id, *o->file, json_get(ud, *o->use, "b"), json_get(ud, *o->use, "bv"));
         if (const JsonValue* r = json_get(ud, *o->use, "r")) { range = r; range_doc = &ud; }
     }
+    // Edges and offsets place a child of a stack; in a row or a column the flow does.
+    if (t.nodes[id].tied && (parent == KROME_NONE || t.nodes[parent].dir != KromeDir::Stack)) {
+        static const char* const words[] = {"l", "t", "r", "b", "x", "y"};
+        const char* said = "l";
+        for (u32 i = 0; i < 6; ++i) if (t.nodes[id].tied & (1u << i)) { said = words[i]; break; }
+        if (parent == KROME_NONE) error(b, fr, f.file, line, "%s= places a child of a stack, and this is a root", said);
+        else error(b, fr, f.file, line, "%s= places a child of a stack, and this one's parent is a %s", said, t.nodes[parent].dir == KromeDir::Row ? "row" : "col");
+        t.nodes[id].tied = 0;
+    }
     // A range is a behaviour's (`slider @v 1..99`): kept on the node for it.
     if (range) {
         const JsonValue* lo = json_first(*range_doc, *range);

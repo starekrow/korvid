@@ -164,6 +164,14 @@ enum class KromeCursor : u8 { Unset, Arrow, IBeam, Hand, Move, ResizeEW, ResizeN
 // snap it). Where a program cannot place a window (platform_can_place), it is a Move.
 enum class KromeGrip : u8 { None, Move, N, NE, E, SE, S, SW, W, NW, Drag };
 
+// One of a stack child's edges tied to its parent's (`l=10`, `r=33.3%`, `l=100%-40`): a
+// fraction of the parent's inside and a distance in logical pixels, from that side.
+struct KromeEdge { f32 frac = 0.0f, dist = 0.0f; };
+
+// Which of a node's places are said: an edge (left, top, right, bottom), an offset (x, y).
+constexpr u8 KROME_TIE_L = 1u << 0, KROME_TIE_T = 1u << 1, KROME_TIE_R = 1u << 2, KROME_TIE_B = 1u << 3;
+constexpr u8 KROME_TIE_X = 1u << 4, KROME_TIE_Y = 1u << 5;
+
 struct KromeNode {
     KromeType  type = KromeType::Box;
     KromeDir   dir = KromeDir::Col;
@@ -173,6 +181,11 @@ struct KromeNode {
     KromeAxis  w, h;
     f32        pad[4] = {}; // left, top, right, bottom
     f32        gap = 0.0f;
+    // In a stack (KR30): edges tied to the parent's inside (left, top, right, bottom; `tied`
+    // says which), and an offset from wherever they or the anchor put it (`x=`, `y=`).
+    KromeEdge  edge[4];
+    vec2       offset;
+    u8         tied = 0;
     u32        parent = KROME_NONE, first = KROME_NONE, last = KROME_NONE, next = KROME_NONE;
     u32        text = KROME_NONE;  // content: an offset into KromeTree::strings, as written
     u32        shown = KROME_NONE; // the content with {name} filled in, when someone filled it
@@ -228,6 +241,10 @@ struct KromeValue {
 // says which.
 inline bool krome_scrolls_x(const KromeNode& n) { return (n.flags & KROME_SCROLL_X) || ((n.flags & KROME_SCROLL) && n.dir == KromeDir::Row); }
 inline bool krome_scrolls_y(const KromeNode& n) { return (n.flags & KROME_SCROLL_Y) || ((n.flags & KROME_SCROLL) && n.dir != KromeDir::Row); }
+
+// An edge as `l=` writes it: a distance ("10"), a fraction ("33.3%"), or both ("100%-40",
+// "50%+8"). False when it is none of them.
+bool krome_parse_edge(const char* text, KromeEdge* out);
 
 // A shortcut as `key=` writes it ("mod+s", "ctrl+shift+z", "f5"; `mod` is Command on a Mac,
 // else Ctrl): a Key and KROME_MOD_ bits. False when it is not one.

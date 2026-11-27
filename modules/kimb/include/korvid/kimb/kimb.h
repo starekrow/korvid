@@ -106,6 +106,7 @@ enum class KimbType : u8 {
     Anchor,  // top-left ... bottom-right, center
     Any,     // a declared parameter of no type, or one of type "any"
     Gain,    // one number, or three (a channel each)
+    Edge,    // a distance, a percentage, both ("100%-40"), or none: a stack child's edge
 };
 
 struct KimbKernelProp {

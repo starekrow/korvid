@@ -1,6 +1,6 @@
 # Krome Slice 8 — Placed, moving, and not a rectangle
 
-Nov 23, 2026 · @starekrow · draft
+Nov 23, 2026 · @starekrow · building (see As built)
 
 ## Goal and exit criteria
 
@@ -247,3 +247,43 @@ touch layout every screen goes through.
 6. **Timers in a hidden window.** The draft holds them, as Blackwing asked (its B25: a
    hidden window costs nothing). A script that counts on a timer for something other than
    drawing would be wrong to; the header says so.
+
+## Decided
+
+In review of the draft (Nov 26):
+
+- **One kernel.** Korvid is a game engine, and well-defined image capabilities in Krome are
+  welcome: no second, smaller thing for skins.
+- **`l`, `t`, `r`, `b`**, the short names, beside `w` and `h`.
+- **`mask-index`** as well as `mask-value`, if the PNG decoder can give a palette's indexes:
+  a mask read as XMPlay made it.
+- **The dial goes in std.** The path slider is written and tested in `kromedemo`, and left
+  for someone who needs it to move.
+- **The second decode for `mask-alpha` goes** if the asset module still has the pixels.
+- **Timers wait while their window is hidden**, as drafted; the header says so.
+
+## As built
+
+**Milestone 1, Edges and offsets** (Nov 26).
+
+- **On the node, as layout's**: `KromeNode::edge[4]` (a fraction of the parent's inside and
+  a distance, `KromeEdge`), `offset`, and `tied`, a bit for each of the six said. `none`
+  unties an edge. `krome_parse_edge` reads `"10"`, `"33.3%"`, `"100%-40"`, `"50%+8"`.
+- **In the stack's placement only**: the anchor places the child as before, then the edges
+  it ties replace that on their axis (`tie`), then the offset is added. A tied axis adds
+  nothing to what a hugging stack wants, nor to its least width, nor to its height in the
+  second pass. Edges that cross leave a width of 0.
+- **Outside a stack**, the builder says `l= places a child of a stack, and this one's
+  parent is a row` (or a col, or a root) and unties the node; `w:part` refuses the same.
+- **kim** reads a percentage followed by a signed number as one value, `"100%-40"`. kimb's
+  new type `Edge` (a number, a percentage, both, or `none`) checks `l`, `t`, `r`, `b`; `x`
+  and `y` are numbers. All six are layout's, so a state's look cannot set them.
+- **Tested.** `krome_tests`' placement test: the PRD's three (stretched, at a corner, at a
+  third) and an edge at `100%-40` and `50%+2`, at three parent sizes; one edge an axis with
+  the anchor on the other; an offset moving a child and what is under it; crossed edges;
+  untying; a hugging stack with tied children; the words and their refusals. Through a
+  running Krome (`placed_test.cc`): a `.kim` screen with a bar, a corner badge and a mark,
+  followed through a resize, a drawer's `x=@drawer` moved by `krome_set`, and the mistakes
+  in a row and a col, by line.
+- **KM1.** `kromedemo --demo` (Kim and Lua), `--player --demo` and `kromescreens --demo`:
+  45 pictures, every one byte for byte main's (largest channel difference 0).

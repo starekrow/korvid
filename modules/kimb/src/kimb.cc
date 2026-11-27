@@ -217,6 +217,7 @@ namespace {
 constinit const KimbKernelProp k_props[] = {
     {"anchor", KimbType::Anchor, true},
     {"angle", KimbType::Number, false},
+    {"b", KimbType::Edge, true},
     {"behave", KimbType::String, true},
     {"bg", KimbType::Color, false},
     {"bg2", KimbType::Color, false},
@@ -242,11 +243,13 @@ constinit const KimbKernelProp k_props[] = {
     {"hue", KimbType::Number, false},
     {"image", KimbType::String, false},
     {"key", KimbType::String, true},
+    {"l", KimbType::Edge, true},
     {"line-height", KimbType::Number, false},
     {"loops", KimbType::Number, false},
     {"opacity", KimbType::Number, false},
     {"pad", KimbType::Box4, true},
     {"part", KimbType::String, true},
+    {"r", KimbType::Edge, true},
     {"placeholder", KimbType::String, true},
     {"radius", KimbType::Box4, false},
     {"range", KimbType::Size, true},
@@ -262,11 +265,14 @@ constinit const KimbKernelProp k_props[] = {
     {"size", KimbType::Number, false},
     {"slice", KimbType::Box4, false},
     {"step", KimbType::Number, true},
+    {"t", KimbType::Edge, true},
     {"taborder", KimbType::Number, true},
     {"tint", KimbType::Color, false},
     {"transition", KimbType::Number, false},
     {"tooltip", KimbType::String, true},
     {"w", KimbType::Size, true},
+    {"x", KimbType::Number, true},
+    {"y", KimbType::Number, true},
 };
 
 const char* const k_nodes[] = {"box", "text", "image", "hit", "edit"};
@@ -317,6 +323,16 @@ bool percent_text(const char* s) {
     return n > 1 && s[n - 1] == '%' && number_text(s, s + n - 1);
 }
 
+// "33.3%", "100%-40", "50%+8".
+bool edge_text(const char* s) {
+    const char* pct = strchr(s, '%');
+    if (!pct || !number_text(s, pct)) return false;
+    const char* p = pct + 1;
+    if (!*p) return true;
+    if (*p != '+' && *p != '-') return false;
+    return p[1] != '-' && number_text(p + 1, p + strlen(p));
+}
+
 bool anchor_word(const char* s) {
     static const char* const ok[] = {"center", "top", "middle", "bottom", "left", "right", "top-left", "top-center", "top-right",
                                      "middle-left", "middle-center", "middle-right", "bottom-left", "bottom-center", "bottom-right"};
@@ -353,6 +369,7 @@ const char* kimb_type_name(KimbType t) {
     case KimbType::Anchor: return "top-left ... bottom-right, or center";
     case KimbType::Any: return "a value";
     case KimbType::Gain: return "one number, or three";
+    case KimbType::Edge: return "a distance (10), a fraction (33.3%), both (100%-40), or none";
     }
     return "?";
 }
@@ -373,6 +390,7 @@ bool kimb_literal(KimbType t, const JsonValue& v) {
         return true; // the elements are checked by the caller's document
     }
     case KimbType::Gain: return v.is_number() || (v.is_array() && (v.count() == 1 || v.count() == 3));
+    case KimbType::Edge: return v.is_number() || (s && (!strcmp(s, "none") || edge_text(s)));
     case KimbType::Dir: return s && (!strcmp(s, "row") || !strcmp(s, "col") || !strcmp(s, "stack"));
     case KimbType::Anchor: return s && anchor_word(s);
     case KimbType::Any: return true;

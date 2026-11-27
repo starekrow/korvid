@@ -311,7 +311,17 @@ struct Parser {
             usize start = at;
             JsonRef r = range_or_number(false);
             // A percentage is kept as written, "40%", as a Lua table writes it.
-            if (r != KV_JSON_NO_REF && peek() == '%') { ++at; r = b.string(text + start, (u32)(at - start)); }
+            // A percentage and a distance together, an edge's "100%-40", likewise.
+            if (r != KV_JSON_NO_REF && peek() == '%') {
+                ++at;
+                if ((peek() == '+' || peek() == '-') && at + 1 < len && (digit(text[at + 1]) || text[at + 1] == '.')) {
+                    ++at;
+                    usize s2 = 0, e2 = 0;
+                    bool frac2 = false;
+                    if (number_span(s2, e2, frac2)) at = e2;
+                }
+                r = b.string(text + start, (u32)(at - start));
+            }
             if (r == KV_JSON_NO_REF || word_char(peek())) {
                 skip_token();
                 err(c0, "not a number, a percentage or a range");

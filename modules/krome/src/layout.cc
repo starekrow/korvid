@@ -89,9 +89,12 @@ struct Layout {
             want(ch, font, size, lh);
             vec2 w = cn.want;
             if (n.dir == KromeDir::Stack) {
-                if (w.x > c.x) c.x = w.x;
-                if (w.y > c.y) c.y = w.y;
-                if (cn.narrowest > narrow_kids) narrow_kids = cn.narrowest;
+                // A child tied to an edge adds nothing that way: its place depends on the
+                // stack's size, as a percentage's does.
+                bool tx = (cn.tied & (KROME_TIE_L | KROME_TIE_R)) != 0, ty = (cn.tied & (KROME_TIE_T | KROME_TIE_B)) != 0;
+                if (!tx && w.x > c.x) c.x = w.x;
+                if (!ty && w.y > c.y) c.y = w.y;
+                if (!tx && cn.narrowest > narrow_kids) narrow_kids = cn.narrowest;
                 continue;
             }
             along += row ? w.x : w.y;
@@ -147,6 +150,7 @@ struct Layout {
             if (!visible(cn)) continue;
             heights(ch, font, size, lh);
             if (n.dir == KromeDir::Col) { along += cn.want.y; ++k; }
+            else if (n.dir == KromeDir::Stack && (cn.tied & (KROME_TIE_T | KROME_TIE_B))) continue;
             else if (cn.want.y > c) c = cn.want.y;
         }
         if (n.dir == KromeDir::Col && k) { along += n.gap * (f32)(k - 1); if (along > c) c = along; }
@@ -183,6 +187,20 @@ struct Layout {
         return a == KromeAlign::Center ? spare * 0.5f : spare;
     }
 
+    // A stack child's place on one axis from the edges it ties (axis 0 across, 1 down): both,
+    // and it is as long as what lies between; one, and it keeps its size against that edge.
+    static void tie(const KromeNode& c, u32 axis, f32 start, f32 room, f32* at, f32* size) {
+        bool lo = (c.tied >> axis) & 1u, hi = (c.tied >> (axis + 2)) & 1u;
+        if (!lo && !hi) return;
+        const KromeEdge& a = c.edge[axis];
+        const KromeEdge& b = c.edge[axis + 2];
+        f32 from = start + a.frac * room + a.dist;
+        f32 to = start + room - (b.frac * room + b.dist);
+        if (lo && hi) { *at = from; *size = to > from ? to - from : 0.0f; }
+        else if (lo) *at = from;
+        else *at = to - *size;
+    }
+
     void place(u32 i, rect2 r) {
         KromeNode& n = t.nodes[i];
         n.rect = r;
@@ -199,7 +217,10 @@ struct Layout {
                 f32 w = cross_size(c, true, n.dir, in.w), h = cross_size(c, false, n.dir, in.h);
                 KromeAlign ax = c.anchor_x >= 0 ? (KromeAlign)c.anchor_x : n.align_x;
                 KromeAlign ay = c.anchor_y >= 0 ? (KromeAlign)c.anchor_y : n.align_y;
-                place(ch, rect2{in.x + aligned(ax, in.w, w), in.y + aligned(ay, in.h, h), w, h});
+                f32 x = in.x + aligned(ax, in.w, w), y = in.y + aligned(ay, in.h, h);
+                tie(c, 0, in.x, in.w, &x, &w);
+                tie(c, 1, in.y, in.h, &y, &h);
+                place(ch, rect2{x + c.offset.x, y + c.offset.y, w, h});
             }
             n.scroll = vec2{0, 0};
             return;

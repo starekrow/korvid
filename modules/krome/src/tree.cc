@@ -284,6 +284,24 @@ void overlay(KromeLook& to, const KromeLook& from) {
 
 } // namespace
 
+bool krome_parse_edge(const char* s, KromeEdge* out) {
+    if (!s || !*s) return false;
+    *out = KromeEdge{};
+    char* end = nullptr;
+    f64 a = strtod(s, &end);
+    if (end == s || !(a > -1e9 && a < 1e9)) return false;
+    if (*end == 0) { out->dist = (f32)a; return true; }
+    if (*end != '%') return false;
+    out->frac = (f32)(a * 0.01);
+    const char* p = end + 1;
+    if (*p == 0) return true;
+    if (*p != '+' && *p != '-') return false;
+    f64 d = strtod(p, &end);
+    if (end == p + 1 || *end != 0 || !(d > -1e9 && d < 1e9)) return false;
+    out->dist = (f32)d;
+    return true;
+}
+
 bool krome_parse_shortcut(const char* text, u32* key, u32* mods) {
     *key = 0;
     *mods = 0;
@@ -320,6 +338,27 @@ const char* KromeTree::set(u32 node, const char* prop, const KromeValue& v, Krom
         // Layout's properties.
         if (!strcmp(prop, "w")) { dirty = true; return size_value(n.w, v) ? nullptr : "w takes a number, a percentage, hug, fill or a range"; }
         if (!strcmp(prop, "h")) { dirty = true; return size_value(n.h, v) ? nullptr : "h takes a number, a percentage, hug, fill or a range"; }
+        // A stack child's edges (KR30): l, t, r, b; "none" unties one.
+        static const char* const edges[] = {"l", "t", "r", "b"};
+        for (u32 e = 0; e < 4; ++e) {
+            if (strcmp(prop, edges[e]) != 0) continue;
+            KromeEdge edge;
+            u8 bit = (u8)(1u << e);
+            if (v.kind == KromeValue::Number && v.n > -1e9f && v.n < 1e9f) edge.dist = v.n;
+            else if (v.kind == KromeValue::String && !strcmp(v.s, "none")) { n.tied &= (u8)~bit; dirty = true; return nullptr; }
+            else if (v.kind != KromeValue::String || !krome_parse_edge(v.s, &edge)) return "an edge takes a distance (10), a fraction (33.3%), both (100%-40), or none";
+            n.edge[e] = edge;
+            n.tied |= bit;
+            dirty = true;
+            return nullptr;
+        }
+        if (!strcmp(prop, "x") || !strcmp(prop, "y")) {
+            if (v.kind != KromeValue::Number || !(v.n > -1e9f && v.n < 1e9f)) return "an offset takes logical pixels";
+            (prop[0] == 'x' ? n.offset.x : n.offset.y) = v.n;
+            n.tied |= prop[0] == 'x' ? KROME_TIE_X : KROME_TIE_Y;
+            dirty = true;
+            return nullptr;
+        }
         if (!strcmp(prop, "scroll")) {
             if (v.kind != KromeValue::String) return "scroll takes x, y or xy";
             u32 f = !strcmp(v.s, "x") ? KROME_SCROLL_X : !strcmp(v.s, "y") ? KROME_SCROLL_Y : !strcmp(v.s, "xy") ? (KROME_SCROLL_X | KROME_SCROLL_Y) : 0;

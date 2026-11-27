@@ -4,6 +4,7 @@
 
 void test_tree(kv::TestCtx&);
 void test_layout(kv::TestCtx&);
+void test_placement(kv::TestCtx&);
 void test_lua(kv::TestCtx&);
 void test_view(kv::TestCtx&);
 void test_shapes(kv::TestCtx&);
@@ -21,11 +22,13 @@ void test_rebuild(kv::TestCtx&);
 void test_reload(kv::TestCtx&);
 void test_grips(kv::TestCtx&);
 void test_pictures(kv::TestCtx&);
+void test_placed(kv::TestCtx&);
 
 int main() {
     kv::TestCtx c;
     test_tree(c);
     test_layout(c);
+    test_placement(c);
     test_lua(c);
     test_view(c);
     test_shapes(c);
@@ -43,6 +46,7 @@ int main() {
     test_reload(c);
     test_grips(c);
     test_pictures(c);
+    test_placed(c);
     kv::names_shutdown();
     kv::mem_shutdown();
     return kv::test_report(c, "krome_tests");
