@@ -80,11 +80,12 @@ keeps it current):
 | Wayland | composited always | the surface's input region, which the engine sets itself: SDL's window shape gives Wayland none (it keeps the shape for its own renderer's alpha) |
 | X11, with a compositor | an ARGB visual, which the engine asks SDL for by id: SDL gives one to a software or GL window, not to a Vulkan one | the Shape extension's input shape, through SDL's window shape |
 | X11, without | none: the shape is also the window's bounding shape, set by the engine (SDL sets the input shape alone), one bit a pixel, hard edged | the same shape |
-| Win32 | to be found: the flip-model swapchain on a window ignores alpha; a layered window, or a composition swapchain, is what gives it | to be found with it |
+| Win32 | composited always (the DWM). D3D12: a composition swapchain, premultiplied, shown through DirectComposition, on a window with no redirection bitmap. Software: a layered window | the window's region; a layered window also passes a click where its alpha is 0 |
 | macOS | a layer that is not opaque | AppKit passes clicks where a clear window is clear |
 | Android, iOS | not offered | |
 
-Win32 is the row with real work in it and is the reason this is not one milestone.
+Win32 was the row with real work in it and the reason this is not one milestone (milestone 3,
+below, found it).
 
 ## Grips and bounds (KR41)
 
@@ -291,8 +292,41 @@ which, by row of the platform table.
   do anything, and is not tried.
 
 
+**Milestone 3, Win32 for the one window (KR39, KR41): built Nov 26, 2026.** macOS goes
+through SDL, written at milestones 1 and 2; no Mac is to hand, so it is not tried. On Win32:
+
+- **The window.** A transparent window is a popup with `WS_THICKFRAME` (which is what lets an
+  edge's hit resize it) and no frame at all: `WM_NCCALCSIZE` gives the frame's room to the
+  client area. `transparent()` is true wherever it was asked for: the DWM composites every
+  window. A software one is layered (`WS_EX_LAYERED`), its frame a DIB section given with
+  `UpdateLayeredWindow`, premultiplied; a frame drawn at a size the window has since left
+  is not shown, since showing it would undo a drag. A renderer's has no redirection bitmap
+  (`WS_EX_NOREDIRECTIONBITMAP`).
+- **The shape** is the window's region, one rect a run of a row, built on the engine's
+  thread and set on the window's (`SetWindowRgn` would wait on it otherwise), and again
+  after each resize. **Grips** answer `WM_NCHITTEST` and **bounds** `WM_GETMINMAXINFO`, from
+  copies the window's thread reads under the lock; a bound given while the window is past
+  it brings it inside. Framebuffer pixels are client pixels here, so nothing is scaled.
+- **D3D12** (review item 5's answer): a transparent window's swapchain is made for
+  composition (premultiplied, stretch scaling, no tearing) and is the content of one
+  DirectComposition visual, the root of a target for the window. It reaches only
+  `d3d_swapchain.cc`. Vulkan is not bound on Windows and is not changed there. The CPU
+  renderer writes opaque alpha, so a layered window shows black where it is clear, as on
+  Linux, and says so.
+- **Measured** on Windows 11 at 150% scale, with `WindowFromPoint` and the screen's pixels
+  (`BitBlt` with `CAPTUREBLT`): `window --round` (layered) shows the desktop at a corner and
+  takes no click there, and shows the disc (`#f29e2e`) and takes the click inside; `rocks
+  --transparent` (D3D12) shows the desktop's own colour at a corner, with no shape, so the
+  whole rect still takes clicks, as specified. `window --grips`, driven by synthesized mouse
+  input: the band moved it by exactly (200, 100); the handle resized it, stopped at exactly
+  720 and 160 pixels a side; gaps of 20 to 33 ms only while resizing, the example
+  redrawing its picture and shape at each size. Ordinary and `--borderless` windows keep
+  their styles. Not tried: whether the region cuts a D3D12 window's picture (no program
+  here gives a D3D12 window a shape yet), and a person's own drag.
+
 **Verified for milestones 1 and 2** (Nov 25): `kormake test` on linux-debug, linux-dev and
 linux-ship; `platform_hid` and `krome` under `--sanitize address,undefined` and `thread`
 (`frameloop` has no tests of its own); `tools/determinism-check.sh` (rocks in every
 configuration, arcfire's two recordings) unchanged; `tools/doccheck.sh` reports nothing
-new. Windows and macOS are not built here.
+new. Windows and macOS are not built here. Milestone 3 (Nov 26): `kormake test ./modules
+windows-dev`, 36 test programs, every check passed.
