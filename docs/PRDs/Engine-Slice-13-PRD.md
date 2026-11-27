@@ -451,6 +451,50 @@ through SDL, written at milestones 1 and 2; no Mac is to hand, so it is not trie
   the playlist opens moves into it, and it presents once more (seen once, with the cursor left
   where the snap probe dropped the leader); run it with the mouse off both windows.
 
+**Milestones 4 to 7 on Linux: built and run Nov 26, 2026.** The SDL halves written on
+Windows, on SDL 3.4.2, GNOME's Wayland and its Xwayland, an AMD 780M:
+
+- **What the build refused.** One thing, and not slice 13's: `job.cc`'s `Batch` was
+  initialized by a list that stopped before its two pads, which g++ refuses
+  (`-Wmissing-field-initializers`) and cl does not. The pads have initializers now.
+- **Two windows** (milestone 4): `window --two-script --run-seconds 4` passed on Wayland and
+  on X11, the second window hidden, shown and still 480 x 320, focus moving by id. The
+  script does not end the run itself: without `--run-seconds` the window stays.
+- **Surfaces, the loop and Krome** (milestones 5 and 6): `kromedemo --two-check` passed on
+  Vulkan (debug, validation on: 0 errors, 0 warnings) and on the CPU renderer, each on
+  Wayland and on X11. Hovering the main window it presented 38 or 39 times and the
+  playlist 0; hovering the playlist it presented 38 and the main window 0, left alone for
+  856 (Vulkan) to 2,009 (CPU) frames. Track 40 at y 278 before and after the hide, presented
+  once; notes `ab`, query `cd`. `kromedemo --demo` passed on both renderers.
+- **Placing** (milestone 7), on a rootful Xwayland (no window manager, scale 1), the pointer
+  driven through XTest and each window's place read with `xwininfo`. On Wayland
+  `window --snap` says the platform does not let a program place a window, and nothing
+  snaps. On X11 the first run found two faults, both the example's:
+  - *The follower fell behind*: led by (150, 80) it went (104, 56). It moved by its own
+    `position` plus the leader's travel, and on X11 a move asked is not in `position` until
+    the server has answered, so travel added before then was lost. It keeps its offset from
+    the leader now and is put at the leader's place plus that. `position`'s comment and
+    `platform_hid`'s page say what it is.
+  - *A drop one step short*: a leader dragged 200 px landed at 194, one 6 px step of the
+    probe's. The drag stopped moving the window at the last move before the release; the
+    release's own place is used now, and the drop is logged where it was asked to be.
+  With both: the follower dropped 4 px right of and 6 px below the leader's bottom-left
+  landed at exactly (310, 510) under a leader at (310, 310) 200 tall; the leader dragged by
+  (150, 80) took it to exactly (460, 590); pulled 120 px away it stayed when the leader
+  moved 200 px; the leader dropped 4 px from the display's left edge landed at 0. Three
+  runs, each passed. Not tried: a person's own
+  drag, X11 under a window manager (GNOME's Xwayland takes no XTest), a scaled display.
+- **A race the thread sanitizer found**, in core and not slice 13's: `jobs_stats_reset`
+  wrote the counters whole while a worker, going to sleep after the last batch, counted its
+  wait. Each counter is stored on its own now.
+- **Verified** (Nov 26): `kormake test ./modules` and `./examples` on linux-debug, linux-dev
+  and linux-ship (36 and 3 test programs, every check passed); `platform_hid`, `krome`,
+  `render`, `core` and `platform` under `--sanitize address,undefined` and `thread`;
+  `tools/determinism-check.sh` unchanged; `tools/render-gate.sh linux vulkan` and
+  `linux cpu`, every check passed; `tools/doccheck.sh` reports the one error it did,
+  `asset_render`'s. The Windows build is not run again after the two changes to `job.cc`
+  and the example's.
+
 **Verified for milestones 1 and 2** (Nov 25): `kormake test` on linux-debug, linux-dev and
 linux-ship; `platform_hid` and `krome` under `--sanitize address,undefined` and `thread`
 (`frameloop` has no tests of its own); `tools/determinism-check.sh` (rocks in every
@@ -458,6 +502,6 @@ configuration, arcfire's two recordings) unchanged; `tools/doccheck.sh` reports 
 new. Windows and macOS are not built here. Milestone 3 (Nov 26): `kormake test ./modules
 windows-dev`, 36 test programs, every check passed. Milestone 4 (Nov 26): the same, passed.
 `tools/doccheck.sh` reports one error, `asset_render`'s, which was there before slice 13's
-milestone 3. Milestones 3 to 7 were built and run on Windows only: their SDL halves
-(Linux, macOS), Metal's and the phones' are written and not built, and want `kormake test` on
-linux-debug, linux-dev and linux-ship, the sanitizers and a macOS build before the slice closes.
+milestone 3. Milestones 3 to 7 were built and run on Windows first, and milestones 4 to 7 on Linux after
+(above). macOS's SDL half, Metal's and the phones' are written and not built, and want a
+macOS build before the slice closes.
