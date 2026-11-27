@@ -111,7 +111,8 @@ for what every entity has.
 append into the running unit's writer (declared in `emits`), consuming is a declared read
 that runs after the emitters in its phase and gets every event since its last run, in
 unit order. Handlers are systems on one type with a phase; a type may ask for next-tick
-delivery. An event with a schema whose handle no longer resolves is dropped from a batch
+delivery. An event with a schema whose handle no longer resolves when its consumer's level
+begins is dropped from that batch
 and counted. Scheduled events wait in a timer wheel keyed by tick; state triggers watch a
 component field across ticks and emit `StateEdge`.
 
@@ -450,7 +451,8 @@ ktable. Core has no `ModuleDesc` of its own; the engine is the host.
 - **Pools and arenas have one owner thread**, asserted in debug. The general allocator
   is the only shared one; a worker's bare `mem_alloc` is attributed to the module whose
   system is running.
-- **Handles in events are checked per batch**, not at emit: an event naming an entity
+- **Handles in events are checked per batch**, not at emit, and before the consumer's level
+  runs, not as the consumer starts: an event naming an entity
   destroyed since is dropped from that consumer's batch and `dropped_stale` counts it. In
   the emitting phase nothing has died yet (destroys are commands).
 - **Order is per event type.** Every consumer sees one type's events in the same order,

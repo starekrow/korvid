@@ -103,7 +103,7 @@ A system that reads a stream outside a handler reads its batch through the conte
 - `EvNextTick` types: a consumer in the same tick never sees one; they land in the next
   tick's start segment.
 - The stale-handle drop: an event naming a handle that no longer resolves is dropped
-  when a batch is made, for each consumer as its batch is made, counted, and warned
+  when a batch is made, for each consumer, counted, and warned
   about once a type in dev builds unless the type says `EvStaleOk`.
 - Timers fire at the tick start, in ticket order, into the start segment.
 - Triggers emit `StateEdge` at the end of the tick, into the next tick's start segment.
@@ -266,3 +266,22 @@ spread on `balanced`.
   A default could ("after the emitter, unless that is a cycle"), but a rule that moves
   code between phases by itself is the kind of thing this branch set out to remove.
 - Windows and macOS have not run it.
+
+## Later: the stale check moved to the level's start
+
+Nov 26, 2026, branch `perf/concurrency-numbers`. "For each consumer as its batch is made"
+above meant as the consumer started, on whatever thread it started on. Whether an entity
+is alive is state no unit declares, so nothing ordered that read against a unit of the
+same level holding the ktable's write and destroying rows directly. `tests/stale_order_test.cc`
+(20,000 entities, an event each, a destroyer and a counting handler in one level, 20
+ticks): with no workers a level runs in rank order, the destroyer first, and the handler
+was handed 0 of 400,000 events; with workers main-thread units run first, and it was
+handed all of them; with `any_thread` it was handed 121,339 to 234,285, a different number
+every run, and the read raced the destroy. The 1-against-16 hash comparison is the check
+that should have caught the first of these, and no game had the pattern.
+
+Batches are now made for every unit of a level before any of them runs (`prepare_unit`,
+`phase.cc`), on the calling thread, into scratch held for the level: every consumer sees
+who was alive when its level began. All three cases above are handed 400,000 and hash the
+same. A handler beside a destroyer is now always handed the events, where on one thread it
+was not; rocks' hashes and arcfire's two recordings did not move.

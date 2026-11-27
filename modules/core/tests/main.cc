@@ -13,6 +13,7 @@ void test_random(kv::TestCtx&);
 void test_component(kv::TestCtx&);
 void test_ktable(kv::TestCtx&);
 void test_prev_copy(kv::TestCtx&);
+void test_stale_order(kv::TestCtx&);
 void test_context(kv::TestCtx&);
 void test_schedule(kv::TestCtx&);
 void test_reset(kv::TestCtx&);
@@ -59,6 +60,7 @@ int main() {
     test_component(c);
     test_ktable(c);
     test_prev_copy(c);
+    test_stale_order(c);
     test_parts(c); // after test_component: that one names handle kind 7 and wants it never registered
     test_hash(c);
     test_event_hook(c);

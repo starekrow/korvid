@@ -75,23 +75,37 @@ u32 PhaseList::system_count() const {
 
 namespace {
 
-// A unit runs with its own writer and command buffer; attribution follows it onto
-// whatever thread it is on. Its batches are what its streams took since it last ran (or,
-// read early, up to its phase's start); a handler with nothing in its own is not called.
-void run_unit(TickContext ctx, EventBus& events, ScheduledSystem& s) {
+// A unit's batches for this run: what its streams took since it last ran (or, read early,
+// up to its phase's start), less the events naming an entity that has died. Made for
+// every unit of a level before any of them runs, on the caller, by run_tick and run_cycle.
+//
+// Whether an entity is alive is state the unit never declared, so it cannot be read while
+// the level runs: another unit of the level may hold the write on that ktable and be
+// destroying it. Read then, a handler's batch depended on who got there first, which with
+// workers was a race and without them was rank order: one thread and eight gave different
+// games (tests/stale_order_test.cc). Here every unit of the level sees who was alive when
+// the level began, on any thread count. A batch that dropped the dead is in the caller's
+// scratch, under the MemScope the caller holds for the level.
+void prepare_unit(EventBus& events, ScheduledSystem& s) {
     for (ScheduledSystem::Cursor& c : s.cursors) {
         const EventStream& st = events.streams[c.type];
         c.from = c.at;
         c.to   = c.early ? st.phase_start : st.end();
         if (c.to < c.from) c.to = c.from; // a fresh sim moved the stream on
         c.at   = c.to;
+        c.data = events.batch(c.type, c.from, c.to, &c.count);
     }
-    MemScope scope; // a batch that dropped the dead lives in scratch for the call
+}
+
+// A unit runs with its own writer and command buffer; attribution follows it onto
+// whatever thread it is on. Its batches are the ones prepare_unit made; a handler with
+// nothing in its own is not called.
+void run_unit(TickContext ctx, EventBus& events, ScheduledSystem& s) {
     const void* data = nullptr;
     u32 count = 0;
     if (s.handler) {
         for (const ScheduledSystem::Cursor& c : s.cursors)
-            if (c.type == *s.handler->event) data = events.batch(c.type, c.from, c.to, &count);
+            if (c.type == *s.handler->event) { data = c.data; count = c.count; }
         if (!count) return;
     }
     const ScheduledSystem* was = ctx_running(&s);
@@ -260,6 +274,8 @@ void PhaseList::run_tick(Engine& engine, EventBus& events, f64 dt, u64 tick, boo
             while (j < phase.len && phase[j].level == phase[i].level) ++j;
             u32 n = j - i;
             merge_for_level(*this, events, p, i, j);
+            MemScope level_scope; // the level's batches (prepare_unit)
+            for (u32 k = i; k < j; ++k) if (runs(phase[k])) prepare_unit(events, phase[k]);
             if (n == 1 || jobs_worker_count() == 0 || engine.hash_systems || paused) {
                 for (u32 k = i; k < j; ++k) {
                     if (!runs(phase[k])) continue;
@@ -367,6 +383,8 @@ void PhaseList::run_cycle(Engine& engine, EventBus& events, Phase phase, f64 dt)
         u32 j = i + 1;
         while (j < units.len && units[j].level == units[i].level) ++j;
         merge_for_level(*this, events, p, i, j);
+        MemScope level_scope; // the level's batches (prepare_unit)
+        for (u32 k = i; k < j; ++k) prepare_unit(events, units[k]);
         if (j - i == 1 || jobs_worker_count() == 0) {
             for (u32 k = i; k < j; ++k) { share(k); run_unit(ctx, events, units[k]); }
         } else {
@@ -576,7 +594,7 @@ const void* ctx_received(TickContext& ctx, u32 type_id, u32* count) {
     *count = 0;
     if (ctx.system)
         for (const ScheduledSystem::Cursor& c : ctx.system->cursors)
-            if (c.type == type_id) return ctx.events->batch(type_id, c.from, c.to, count);
+            if (c.type == type_id) { *count = c.count; return c.data; } // made before the level ran (prepare_unit)
     const char* name = type_id && type_id < ctx.engine->streams.len ? ctx.engine->resources[ctx.engine->streams[type_id] - 1].name : "?";
     KV_ERROR("engine", "system '%s' reads the '%s' it received without declaring it in `reads`", system_name(ctx), name);
     KV_VERIFY(!"undeclared received events: see the log");

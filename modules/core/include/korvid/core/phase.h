@@ -718,8 +718,9 @@ struct ScheduledSystem {
     u32                timer_tickets = 0;
     mutable u32        in_parallel   = 0; // inside a parallel_for: chunks may not draw from ctx.rng()
     Array<KTable>      early;    // the snapshot ktables it reads early, as the phase found them
-    // A stream it consumes: where its last batch ended, and this run's.
-    struct Cursor { u32 type; bool early; u64 at, from, to; };
+    // A stream it consumes: where its last batch ended, and this run's: its range, and the
+    // events themselves less those naming the dead, made before the unit's level ran.
+    struct Cursor { u32 type; bool early; u64 at, from, to; const void* data = nullptr; u32 count = 0; };
     Array<Cursor>      cursors;
 
     const char* name() const { return full_name ? full_name : desc ? desc->name : handler->name; }

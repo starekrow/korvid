@@ -167,8 +167,11 @@ constinit const EventTypeDesc k_events[] = {
 ```
 
 An event with a schema is checked at delivery: if a handle field no longer resolves,
-the event is dropped and counted, so a handler never sees an entity that died at the
-same boundary. `KV_EVENT(E)` without a schema is for events that carry no entity.
+the event is dropped and counted, so a handler never sees an entity that died at an
+earlier boundary. The check is made once for a level, before any of its units runs, so
+what a handler is handed is the same on any thread count: an entity a unit beside it
+destroys directly is still named in its batch, and gone by the time it looks.
+`KV_EVENT(E)` without a schema is for events that carry no entity.
 
 ### Systems
 
@@ -483,7 +486,8 @@ ran, in unit order however the levels fell, every event once. With `^` the batch
 the phase start and needs no order, which is how a loop goes round (once a phase). A
 `next_tick` type waits for the next tick's start. The engine's writer (`e.events.emit`)
 is for what happens outside the schedule; its events land at the next boundary. An event
-naming a handle that no longer resolves is dropped from each batch it would be in. Code
+naming a handle that no longer resolves is dropped from each batch it would be in, as of
+the start of the level the consumer runs in. Code
 outside the schedule reads the tick's events with `e.events.read<E>()`; from inside a
 unit that is refused (dev builds). The order is a type's own: two types are two
 streams, and nothing records which of their events came first. Facts whose order matters

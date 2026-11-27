@@ -174,7 +174,9 @@ struct EventBus {
     // The engine's writer; at a tick's start the held next-tick events go first.
     void merge_outside(bool tick_start);
     // Numbers [from, to) of one type, less any naming the dead: in place, or copied into
-    // the caller's scratch when something was dropped. `count` is what is left.
+    // the caller's scratch when something was dropped. `count` is what is left. Reads who is
+    // alive now, which no unit declares: the tick runner calls it for a whole level before the
+    // level runs (prepare_unit, phase.cc), never from a unit.
     const void* batch(u32 type_id, u64 from, u64 to, u32* count);
     // End of tick: drop what every consumer has passed (`keep_from` by type: the lowest
     // cursor, or the stream's end for a type nobody reads). read() starts over.
