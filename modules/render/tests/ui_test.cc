@@ -35,6 +35,7 @@ void test_ui_lists(kv::TestCtx& c) {
     b.nearest = true;
     b.uv = rect2{0.25f, 0.5f, 0.125f, 0.25f};
     b.tile = vec2{5, 5};
+    b.gain[0] = 2.0f; b.hue = 90.0f;
     list.box(b);
     UiGlyph g;
     g.rect = rect2{12, 22, 8, 10};
@@ -44,7 +45,7 @@ void test_ui_lists(kv::TestCtx& c) {
     g.clip = 99; // no such clip: none
     g.nearest = true;
     list.glyph(g);
-    KV_CHECK(c, list.count() == 2 && list.words.len == 26 + 9 && list.offsets[1] == 26);
+    KV_CHECK(c, list.count() == 2 && list.words.len == 31 + 9 && list.offsets[1] == 31);
 
     RenderWorld w;
     KV_CHECK(c, rw_init(w, mem_general()));
@@ -56,7 +57,7 @@ void test_ui_lists(kv::TestCtx& c) {
     u32 clips_at = word(l, 8);
     KV_CHECK(c, word(l, 0) == 2 && word(l, 4) == 2 && clips_at % 16 == 0 && clips_at >= 16 + 8);
     u32 box = word(l, 16), glyph = word(l, 20);
-    KV_CHECK(c, box == clips_at + 32 && glyph == box + 104);
+    KV_CHECK(c, box == clips_at + 32 && glyph == box + 124);
     KV_CHECK(c, fword(l, clips_at + 16) == 10.0f && fword(l, clips_at + 28) == 200.0f);
     u32 head = word(l, box);
     KV_CHECK(c, (head & 3) == 0 && ((head >> 2) & 0xFFFF) == 1 && (head & (1u << 18)) && !(head & (1u << 19)));
@@ -65,6 +66,27 @@ void test_ui_lists(kv::TestCtx& c) {
     KV_CHECK(c, fword(l, box + 72) == 6.0f && word(l, box + 20) >> 24 == 64);
     // Nearest sampling, and the uv rect as floats, its corners.
     KV_CHECK(c, !(head & (1u << 21)) && fword(l, box + 96) == 0.0f); // untextured: no tile, whatever it says
+    // Nor a computed look: the identity's words, and no bit 22.
+    KV_CHECK(c, !(head & (1u << 22)) && fword(l, box + 104) == 1.0f && fword(l, box + 116) == 0.0f && fword(l, box + 120) == 1.0f);
+    {
+        // Textured, it has one: gain, hue in radians, saturation.
+        UiList t;
+        t.init(mem_general());
+        UiBox tb;
+        tb.textured = true;
+        tb.gain[0] = 1.5f; tb.gain[1] = 1.0f; tb.gain[2] = 0.5f; tb.hue = 180.0f; tb.saturation = 0.25f;
+        t.box(tb);
+        UiBox plain;
+        plain.textured = true;
+        t.box(plain);
+        f32 h;
+        memcpy(&h, &t.words[29], 4);
+        f32 g0, g2, sat;
+        memcpy(&g0, &t.words[26], 4); memcpy(&g2, &t.words[28], 4); memcpy(&sat, &t.words[30], 4);
+        KV_CHECK(c, (t.words[0] & (1u << 22)) && g0 == 1.5f && g2 == 0.5f && h > 3.1415f && h < 3.1417f && sat == 0.25f);
+        KV_CHECK(c, !(t.words[t.offsets[1]] & (1u << 22)));
+        t.free();
+    }
     KV_CHECK(c, (head & (1u << 20)) && fword(l, box + 80) == 0.25f && fword(l, box + 84) == 0.5f && fword(l, box + 88) == 0.375f && fword(l, box + 92) == 0.75f);
     KV_CHECK(c, word(l, glyph) == (1u | 1u << 20) && word(l, glyph + 4) == 7 && fword(l, glyph + 12) == 12.0f);
     KV_CHECK(c, word(l, glyph + 28) == (32768u | 16384u << 16) && word(l, glyph + 32) == (40959u | 24576u << 16));

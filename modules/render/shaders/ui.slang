@@ -6,11 +6,11 @@
 //   glyph:  head, slot, color, rect x y w h, uv0, uv1                         (9 words)
 //   box:    head, slot, fill, fill2, border color, shadow color, rect x y w h,
 //           radii tl tr br bl, border, angle, shadow x y, blur, spread, uv0 x y, uv1 x y,
-//           tile x y  (26 words)
+//           tile x y, gain r g b, hue (radians), saturation  (31 words)
 //
 // head: bits 0-1 the kind (0 box, 1 glyph), 2-17 the clip, 18 a gradient, 19 textured,
 // 20 sampled nearest (a glyph's too), 21 tiled (the uv rect repeated every `tile` pixels from the rect's
-// top left). Colors are RGBA8 sRGB with straight alpha; a glyph's uvs two unorm16s,
+// top left), 22 adjusted (the texel's hue, saturation and gain, before the fill multiplies it). Colors are RGBA8 sRGB with straight alpha; a glyph's uvs two unorm16s,
 // a box's floats. Pixels have their origin at
 // the window's top left, y down; the window's size is the push block's screen_cull.zw.
 // The output is premultiplied: the pipeline blends one, one minus source alpha.
@@ -30,7 +30,7 @@ static const float2 kQuad[6] = {
 };
 
 static const uint kKindBox = 0u, kKindGlyph = 1u;
-static const uint kBoxGradient = 1u << 18, kBoxTextured = 1u << 19, kBoxNearest = 1u << 20, kBoxTile = 1u << 21;
+static const uint kBoxGradient = 1u << 18, kBoxTextured = 1u << 19, kBoxNearest = 1u << 20, kBoxTile = 1u << 21, kBoxAdjust = 1u << 22;
 
 struct UiVaryings {
     float4 pos : SV_Position;
@@ -54,6 +54,19 @@ float4 ui_color(uint w) {
 }
 
 float2 ui_uv(uint w) { return float2(float(w & 0xFFFFu), float(w >> 16)) / 65535.0; }
+
+// A texel's colour computed (Krome's gain, hue, saturation), linear: the hue turned about
+// the grey axis (the W3C's hueRotate), the saturation (0 grey, 1 as drawn), each channel
+// times its gain; held to [0, 1].
+float3 ui_adjust(float3 c, float3 gain, float hue, float sat) {
+    float k = cos(hue), s = sin(hue);
+    float3 r = float3(dot(c, float3(0.213 + k * 0.787 - s * 0.213, 0.715 - k * 0.715 - s * 0.715, 0.072 - k * 0.072 + s * 0.928)),
+                      dot(c, float3(0.213 - k * 0.213 + s * 0.143, 0.715 + k * 0.285 + s * 0.140, 0.072 - k * 0.072 - s * 0.283)),
+                      dot(c, float3(0.213 - k * 0.213 - s * 0.787, 0.715 - k * 0.715 + s * 0.715, 0.072 + k * 0.928 + s * 0.072)));
+    float lum = dot(r, float3(0.213, 0.715, 0.072));
+    r = lum + (r - lum) * sat;
+    return saturate(r * gain);
+}
 
 // The signed distance from a rounded rectangle centered at the origin with half size b and
 // a radius per corner (tl, tr, br, bl; y down), negative inside.
@@ -164,6 +177,7 @@ float4 fs_ui(UiVaryings i) : SV_Target {
         float2 uv = clamp(lerp(uv0, uv1, at), lo, hi);
         uint sampler = (head & kBoxNearest) != 0u ? 0u : 1u;
         float4 t = gTextures[NonUniformResourceIndex(slot)].Sample(gSamplers[sampler], uv);
+        if ((head & kBoxAdjust) != 0u) t.rgb = ui_adjust(t.rgb, float3(ui_float2(i.item + 104u), ui_float(i.item + 112u)), ui_float(i.item + 116u), ui_float(i.item + 120u));
         fill = float4(fill.rgb * t.rgb, fill.a) * t.a;
     }
     float4 edge = ui_color(ui_word(i.item + 16u));

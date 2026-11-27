@@ -390,7 +390,7 @@ struct KromeModule {
     KromeTarget         hover_behave; // the node with a behaviour the pointer is over
     // Transitions (`transition=0.15`): for each node that has one, the colors it eases from
     // and to, and since when, on the Frame cycle's clock.
-    struct Colors { color bg, bg2, border, shadow, text; f32 opacity; };
+    struct Colors { color bg, bg2, border, shadow, text; f32 opacity; f32 gain[3], hue, saturation; }; // and a computed look's numbers
     struct Anim { u32 screen, overlay, node; Name id; Colors from, to; f64 start; f32 dur; };
     Array<Anim>         anims;
     // A strip playing (fps > 0) or come to rest, by node, kept like a transition: begun on the

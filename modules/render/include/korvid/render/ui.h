@@ -48,6 +48,12 @@ struct UiBox {
     // Above 0: the uv rect is drawn this many pixels across and down, repeated from the rect's
     // top left, the last row and column cut (a tiled background, one box however many tiles).
     vec2  tile;
+    // The texel computed before the fill multiplies it (Krome's gain, hue, saturation): the
+    // hue turned by degrees, the saturation set (0 grey, 1 as drawn), each channel times its
+    // gain, held at 1; in linear light. A box at 1, 0, 1 takes none of it.
+    f32   gain[3] = {1, 1, 1};
+    f32   hue = 0.0f;
+    f32   saturation = 1.0f;
     u32   clip = 0;             // UiList::clip's index; 0 is no clip
 };
 

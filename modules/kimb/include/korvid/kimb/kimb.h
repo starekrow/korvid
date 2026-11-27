@@ -105,6 +105,7 @@ enum class KimbType : u8 {
     Dir,     // row, col, stack
     Anchor,  // top-left ... bottom-right, center
     Any,     // a declared parameter of no type, or one of type "any"
+    Gain,    // one number, or three (a channel each)
 };
 
 struct KimbKernelProp {

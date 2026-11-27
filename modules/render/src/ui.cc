@@ -10,7 +10,7 @@ namespace kv {
 namespace {
 
 constexpr u32 k_kind_box = 0, k_kind_glyph = 1;
-constexpr u32 k_box_gradient = 1u << 18, k_box_textured = 1u << 19, k_box_nearest = 1u << 20, k_box_tile = 1u << 21;
+constexpr u32 k_box_gradient = 1u << 18, k_box_textured = 1u << 19, k_box_nearest = 1u << 20, k_box_tile = 1u << 21, k_box_adjust = 1u << 22;
 
 u32 bits_of(f32 f) { u32 u; memcpy(&u, &f, sizeof u); return u; }
 
@@ -68,7 +68,9 @@ u32 UiList::clip(rect2 r) {
 void UiList::box(const UiBox& b) {
     offsets.push(words.len);
     bool tiled = b.textured && b.tile.x > 0.0f && b.tile.y > 0.0f;
-    u32 flags = (b.gradient ? k_box_gradient : 0) | (b.textured ? k_box_textured : 0) | (b.nearest ? k_box_nearest : 0) | (tiled ? k_box_tile : 0);
+    bool adjust = b.textured && (b.gain[0] != 1.0f || b.gain[1] != 1.0f || b.gain[2] != 1.0f || b.hue != 0.0f || b.saturation != 1.0f);
+    u32 flags = (b.gradient ? k_box_gradient : 0) | (b.textured ? k_box_textured : 0) | (b.nearest ? k_box_nearest : 0) | (tiled ? k_box_tile : 0) |
+                (adjust ? k_box_adjust : 0);
     words.push(k_kind_box | clip_of(*this, b.clip) << 2 | flags);
     words.push(b.texture);
     words.push(rgba8(b.fill));
@@ -93,6 +95,9 @@ void UiList::box(const UiBox& b) {
     words.push(bits_of(b.uv.y + b.uv.h));
     words.push(bits_of(tiled ? b.tile.x : 0.0f));
     words.push(bits_of(tiled ? b.tile.y : 0.0f));
+    for (u32 i = 0; i < 3; ++i) words.push(bits_of(adjust ? b.gain[i] : 1.0f));
+    words.push(bits_of(adjust ? b.hue * (KV_PI / 180.0f) : 0.0f));
+    words.push(bits_of(adjust ? b.saturation : 1.0f));
 }
 
 void UiList::glyph(const UiGlyph& g) {

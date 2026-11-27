@@ -235,9 +235,11 @@ constinit const KimbKernelProp k_props[] = {
     {"frame-at", KimbType::Number, false},
     {"frames", KimbType::Number, false},
     {"font", KimbType::String, false},
+    {"gain", KimbType::Gain, false},
     {"gap", KimbType::Number, true},
     {"grip", KimbType::String, true},
     {"h", KimbType::Size, true},
+    {"hue", KimbType::Number, false},
     {"image", KimbType::String, false},
     {"key", KimbType::String, true},
     {"line-height", KimbType::Number, false},
@@ -249,6 +251,7 @@ constinit const KimbKernelProp k_props[] = {
     {"radius", KimbType::Box4, false},
     {"range", KimbType::Size, true},
     {"region", KimbType::Box4, false},
+    {"saturation", KimbType::Number, false},
     {"scroll", KimbType::String, true},
     {"scrollbar-color", KimbType::Color, false},
     {"scrollbar-size", KimbType::Number, false},
@@ -349,6 +352,7 @@ const char* kimb_type_name(KimbType t) {
     case KimbType::Dir: return "row, col or stack";
     case KimbType::Anchor: return "top-left ... bottom-right, or center";
     case KimbType::Any: return "a value";
+    case KimbType::Gain: return "one number, or three";
     }
     return "?";
 }
@@ -368,6 +372,7 @@ bool kimb_literal(KimbType t, const JsonValue& v) {
         if (t == KimbType::Box4 ? (n != 1 && n != 2 && n != 4) : (n != 3 && n != 4)) return false;
         return true; // the elements are checked by the caller's document
     }
+    case KimbType::Gain: return v.is_number() || (v.is_array() && (v.count() == 1 || v.count() == 3));
     case KimbType::Dir: return s && (!strcmp(s, "row") || !strcmp(s, "col") || !strcmp(s, "stack"));
     case KimbType::Anchor: return s && anchor_word(s);
     case KimbType::Any: return true;
@@ -442,12 +447,12 @@ struct Checker {
             }
         }
         if (kimb_literal(t, v)) {
-            if ((t == KimbType::Box4 || t == KimbType::Shadow) && v.is_array())
+            if ((t == KimbType::Box4 || t == KimbType::Shadow || t == KimbType::Gain) && v.is_array())
                 for (const JsonValue* x = json_first(f.doc, v); x; x = json_next(f.doc, *x))
                     if (!x->is_number()) { err(line, "%s%s takes %s", what, name, kimb_type_name(t)); return; }
             return;
         }
-        if (word && (t == KimbType::Color || t == KimbType::Number || t == KimbType::Box4 || t == KimbType::Shadow || !theme_count) &&
+        if (word && (t == KimbType::Color || t == KimbType::Number || t == KimbType::Box4 || t == KimbType::Shadow || t == KimbType::Gain || !theme_count) &&
             word[0] != '#' && !strstr(word, ".."))
             err(line, "%s%s: '%s' is not %s, nor a token of %s", what, name, word, kimb_type_name(t), theme_count ? "every theme" : "a theme (there are none)");
         else

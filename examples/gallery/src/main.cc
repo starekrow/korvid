@@ -567,6 +567,16 @@ void scene_ui(Gallery& g, UiList& l) {
     tiled.textured = true; tiled.nearest = true; tiled.texture = renderer_texture_slot(g.r, g.sheet);
     tiled.uv = rect2{2.0f / 12.0f, 0, 4.0f / 12.0f, 1}; tiled.tile = vec2{12, 12};
     l.box(tiled);
+    // A look computed from the pixels (Krome slice 7): the sheet's middle cell greyed, its hue
+    // turned 120 degrees, at half its gain, and at 1.6 (held at 1).
+    const f32 adjust[][3] = {{1, 0, 0}, {1, 120, 1}, {0.5f, 0, 1}, {1.6f, 0, 1}};
+    for (u32 i = 0; i < 4; ++i) {
+        UiBox ab = ui_box(384.0f + 28.0f * (f32)i, 486, 24, 24, white);
+        ab.textured = true; ab.nearest = true; ab.texture = renderer_texture_slot(g.r, g.sheet);
+        ab.uv = rect2{4.0f / 12.0f, 0, 4.0f / 12.0f, 1};
+        ab.gain[0] = ab.gain[1] = ab.gain[2] = adjust[i][0]; ab.hue = adjust[i][1]; ab.saturation = adjust[i][2];
+        l.box(ab);
+    }
     UiBox badge = ui_box(800, 280, 120, 120, white);
     badge.textured = true; badge.texture = renderer_texture_slot(g.r, g.badge); badge.uv = rect2{0, 0, 1, 1};
     l.box(badge);

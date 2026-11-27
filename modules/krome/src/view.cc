@@ -385,14 +385,18 @@ KromeState state_of(const Paint& p, u32 node) {
 
 // ---- transitions ----------------------------------------------------------------------------------------
 
-KromeModule::Colors colors_of(const KromeLook& l) { return KromeModule::Colors{l.bg, l.bg2, l.border_color, l.shadow_color, l.text_color, l.opacity}; }
+KromeModule::Colors colors_of(const KromeLook& l) {
+    return KromeModule::Colors{l.bg, l.bg2, l.border_color, l.shadow_color, l.text_color, l.opacity, {l.gain[0], l.gain[1], l.gain[2]}, l.hue, l.saturation};
+}
 
 bool same(const KromeModule::Colors& a, const KromeModule::Colors& b) { return !memcmp(&a, &b, sizeof a); }
 
 color mix(color a, color b, f32 k) { return color{a.r + (b.r - a.r) * k, a.g + (b.g - a.g) * k, a.b + (b.b - a.b) * k, a.a + (b.a - a.a) * k}; }
 
 KromeModule::Colors mix(const KromeModule::Colors& a, const KromeModule::Colors& b, f32 k) {
-    return KromeModule::Colors{mix(a.bg, b.bg, k), mix(a.bg2, b.bg2, k), mix(a.border, b.border, k), mix(a.shadow, b.shadow, k), mix(a.text, b.text, k), a.opacity + (b.opacity - a.opacity) * k};
+    auto m = [k](f32 x, f32 y) { return x + (y - x) * k; };
+    return KromeModule::Colors{mix(a.bg, b.bg, k), mix(a.bg2, b.bg2, k), mix(a.border, b.border, k), mix(a.shadow, b.shadow, k), mix(a.text, b.text, k), m(a.opacity, b.opacity),
+                               {m(a.gain[0], b.gain[0]), m(a.gain[1], b.gain[1]), m(a.gain[2], b.gain[2])}, m(a.hue, b.hue), m(a.saturation, b.saturation)};
 }
 
 // Where a transition is at a time: eased in and out.
@@ -430,6 +434,9 @@ void ease(Paint& p, u32 node, const KromeNode& n, KromeLook& l) {
     l.shadow_color = c.shadow;
     l.text_color = c.text;
     l.opacity = c.opacity;
+    memcpy(l.gain, c.gain, sizeof l.gain);
+    l.hue = c.hue;
+    l.saturation = c.saturation;
     s.animating = true;
 }
 
@@ -528,6 +535,8 @@ color times(color a, color b) { return color{a.r * b.r, a.g * b.g, a.b * b.b, a.
 // A shape image: rasterized at the box's pixels (shapes.cc). One colour: drawn white, the box
 // tinted by the text colour and the tint. Coloured: rasterized in the text colour; while its
 // colour eases, the rasterizations of the two ends cross-faded.
+void computed(UiBox& b, const KromeLook& l);
+
 void paint_shape(Paint& p, u32 node, const KromeNode& n, const KromeLook& l, rect2 r, KromeImage& ki, const ShapeAsset& shape, u32 clip) {
     UiBox b;
     b.rect = r;
@@ -536,7 +545,7 @@ void paint_shape(Paint& p, u32 node, const KromeNode& n, const KromeLook& l, rec
     if (shape.one_colour) {
         if (!krome_shape_box(p.s, p.r, shape, ki.asset, w, h, color{1, 1, 1, 1}, b)) return;
         b.fill = faded(times(l.text_color, l.tint), l.opacity);
-        p.list.box(b);
+        computed(b, l); p.list.box(b);
         return;
     }
     // Coloured: an easing colour is two rasterizations, cross-faded.
@@ -546,13 +555,20 @@ void paint_shape(Paint& p, u32 node, const KromeNode& n, const KromeLook& l, rec
         if (k <= 0.0f || k >= 1.0f || (a.from.text.r == a.to.text.r && a.from.text.g == a.to.text.g && a.from.text.b == a.to.text.b && a.from.text.a == a.to.text.a)) break;
         k = k * k * (3.0f - 2.0f * k);
         UiBox from = b;
-        if (krome_shape_box(p.s, p.r, shape, ki.asset, w, h, a.from.text, from)) { from.fill = faded(l.tint, l.opacity * (1.0f - k)); p.list.box(from); }
-        if (krome_shape_box(p.s, p.r, shape, ki.asset, w, h, a.to.text, b)) { b.fill = faded(l.tint, l.opacity * k); p.list.box(b); }
+        if (krome_shape_box(p.s, p.r, shape, ki.asset, w, h, a.from.text, from)) { from.fill = faded(l.tint, l.opacity * (1.0f - k)); computed(from, l); p.list.box(from); }
+        if (krome_shape_box(p.s, p.r, shape, ki.asset, w, h, a.to.text, b)) { b.fill = faded(l.tint, l.opacity * k); computed(b, l); p.list.box(b); }
         return;
     }
     if (!krome_shape_box(p.s, p.r, shape, ki.asset, w, h, l.text_color, b)) return;
     b.fill = faded(l.tint, l.opacity);
-    p.list.box(b);
+    computed(b, l); p.list.box(b);
+}
+
+// A look computed from the image's pixels (gain, hue, saturation) onto a box that draws it.
+void computed(UiBox& b, const KromeLook& l) {
+    memcpy(b.gain, l.gain, sizeof b.gain);
+    b.hue = l.hue;
+    b.saturation = l.saturation;
 }
 
 // The frame a strip node shows now. Still: the one its look names. Playing (fps > 0): where
@@ -641,6 +657,7 @@ void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u3
             b.uv = pieces.uv[0];
             b.tile = pieces.tile;
             b.nearest = l.pixel;
+            computed(b, l);
             if (!fill) b.fill = faded(l.tint, l.opacity);
         }
         b.clip = clip;
@@ -654,6 +671,7 @@ void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u3
                 pb.textured = true;
                 pb.texture = p.r ? renderer_texture_slot(p.r, img->texture) : 0;
                 pb.nearest = l.pixel;
+                computed(pb, l);
                 pb.fill = faded(l.tint, l.opacity);
                 pb.clip = pc;
                 p.list.box(pb);

@@ -76,6 +76,12 @@ struct KromeLook {
     bool  frame_at = false;
     f32   fps = 0.0f;
     u32   loops = 0;
+    // A look computed from the image's pixels (KR34), applied to its texel before the tint:
+    // the hue turned by degrees, the saturation (0 grey, 1 as drawn), then each channel times
+    // its gain, held at 1. Eased by `transition` with the colours.
+    f32   gain[3] = {1, 1, 1};
+    f32   hue = 0.0f;
+    f32   saturation = 1.0f;
     color tint{1, 1, 1, 1};
     f32   line_height = 0.0f;              // a text's lines, times its size; 0: the font's own
     color caret_color{0, 0, 0, 0};         // an edit's caret; unset: its text's color
@@ -116,6 +122,9 @@ constexpr u32 KROME_LOOK_FRAMES   = 1u << 24;
 constexpr u32 KROME_LOOK_FRAME    = 1u << 25; // frame= or frame-at=, whichever was said last
 constexpr u32 KROME_LOOK_FPS      = 1u << 26;
 constexpr u32 KROME_LOOK_LOOPS    = 1u << 27;
+constexpr u32 KROME_LOOK_GAIN     = 1u << 28;
+constexpr u32 KROME_LOOK_HUE      = 1u << 29;
+constexpr u32 KROME_LOOK_SATURATION = 1u << 30;
 constexpr u32 KROME_LOOK_INHERITED = KROME_LOOK_COLOR | KROME_LOOK_FONT | KROME_LOOK_SIZE | KROME_LOOK_LINE_HEIGHT;
 
 // Node flags.

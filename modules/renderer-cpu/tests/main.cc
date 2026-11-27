@@ -194,6 +194,36 @@ void test_region(TestCtx& c) {
     if (strcmp(row, "bbrrbbrrbbr")) KV_ERROR("test", "the tiled row: %s", row);
     const u8* past = r->headless.data + (3 * 64 + 14) * 4; // the rect ends: the clear
     KV_CHECK(c, past[0] == 0 && past[2] == 0);
+    // A look computed from the pixels (KR34): the red cell greyed, turned toward green, at
+    // half its gain, and at twice (held at 1).
+    ui.clear();
+    struct Adj { f32 gain, hue, sat; };
+    const Adj adj[] = {{1, 0, 0}, {1, 120, 1}, {0.5f, 0, 1}, {2, 0, 1}};
+    for (u32 i = 0; i < 4; ++i) {
+        UiBox ab;
+        ab.rect = rect2{(f32)(i * 8), 8, 6, 6};
+        ab.fill = color{1, 1, 1, 1};
+        ab.textured = true;
+        ab.texture = rb_cpu::renderer_texture_slot(r, t);
+        ab.uv = rect2{4.0f / 12.0f, 0, 4.0f / 12.0f, 1};
+        ab.gain[0] = ab.gain[1] = ab.gain[2] = adj[i].gain;
+        ab.hue = adj[i].hue;
+        ab.saturation = adj[i].sat;
+        ui.box(ab);
+    }
+    rb_cpu::renderer_ui_set(r, 0, ui);
+    KV_CHECK(c, rb_cpu::renderer_render(r, v));
+    auto at = [&](u32 i) { return r->headless.data + (10 * 64 + i * 8 + 3) * 4; }; // B, G, R
+    const u8* grey = at(0);
+    KV_CHECK(c, grey[0] == grey[1] && grey[1] == grey[2] && grey[2] > 100 && grey[2] < 140); // 0.213 linear
+    const u8* turned = at(1);
+    KV_CHECK(c, turned[1] > turned[2] && turned[1] > turned[0]);
+    const u8* half = at(2);
+    KV_CHECK(c, half[2] >= 186 && half[2] <= 189 && half[1] == 0 && half[0] == 0); // 0.5 linear is 188
+    const u8* twice = at(3);
+    KV_CHECK(c, twice[2] == 255 && twice[1] == 0 && twice[0] == 0);
+    if (!(grey[2] > 100 && grey[2] < 140) || !(half[2] >= 186 && half[2] <= 189))
+        KV_ERROR("test", "grey %u %u %u, turned %u %u %u, half %u, twice %u", grey[2], grey[1], grey[0], turned[2], turned[1], turned[0], half[2], twice[2]);
     ui.free();
     rb_cpu::renderer_destroy(r);
     engine_shutdown(e);

@@ -357,3 +357,35 @@ In review of the draft (Nov 26):
 - **Seen on the way:** goldberg's `watch` test failed once (26 checks) in a full parallel
   `kormake test dev` and passed alone and in the next full run: its timing under load, not
   looked at further here.
+
+**Milestone 5, Computed looks** (Nov 26).
+
+- **The item's five words**: gain r, g, b, hue (radians) and saturation; a box is 31 words,
+  and head bit 22 says a textured box has a computed look. A box at gain 1, hue 0 and
+  saturation 1 sets no bit and takes the path it took (its words are the identity's, read
+  by nothing). `ui_adjust` turns the hue about the grey axis (the W3C's hueRotate matrix),
+  sets the saturation about Rec. 709's luma weights, multiplies by the gain and holds the
+  result to [0, 1], in linear light, on the texel before the fill multiplies it. The CPU
+  renderer makes the hue's matrix once an item with the engine's `cos` and `sin`; the GPU
+  each pixel with its own. Vulkan's and the CPU's `ui` pictures agree within 16 levels on 33
+  pixels.
+- **kimb has a type for gain**, one number or three (`KimbType::Gain`): Box4 takes one, two or
+  four.
+- **Eased.** A transition's `Colors` carry the five numbers too, so `hover { gain=1.2 }` with
+  `transition` brightens over its time, and a theme switch eases a hue.
+- **On every textured box Krome paints**: the image's own box, its fit's pieces, and a shape's
+  box (a shape's colours are its own, so `hue` turns them too). Glyphs take none.
+- **Shown.** The gallery's `ui` scene: the sheet's cell greyed, turned 120 degrees, halved and
+  at 1.6. kromedemo's Skin tab: a button at its natural size brightened on hover by
+  `gain=1.35` (eased over 0.15 s), and the frames and knob on `hue=skin-hue`, which
+  gallery.kim's own `theme dark` and `theme light` give (0 and 190): `--demo` pictures the
+  tab in the light theme.
+- **Tested.** `render_tests`: the words, and none for an untextured box or one at the
+  identity. `renderer_cpu_tests`: a red texel greyed (all three channels equal, 0.213 linear),
+  turned toward green, halved (188 in sRGB) and doubled (held at 255). `krome_tests`: the
+  properties and their refusals, a hover's gain over the base, the transition's ends, a
+  theme's token followed through a switch.
+- **Seen again:** goldberg's `programs` test timed out on its watcher once in a full parallel
+  `kormake test debug` and then crashed (it goes on to use a socket that never connected);
+  it passed alone twice and in the next full run. With milestone 4's `watch` failure, that is
+  goldberg's own tests' five-second waits under load, not this slice's.

@@ -189,6 +189,27 @@ bool look_prop(KromeLook& l, const char* prop, const KromeValue& v, const char**
         l.set |= KROME_LOOK_LOOPS;
         return true;
     }
+    if (!strcmp(prop, "gain")) {
+        // One number for every channel, or one each: red, green, blue.
+        if (!numbers(v, f, 3, &n) || (n != 1 && n != 3)) { *why = "gain takes one number, or three"; return true; }
+        if (n == 1) f[1] = f[2] = f[0];
+        for (u32 i = 0; i < 3; ++i) if (!(f[i] >= 0.0f && f[i] <= 16.0f)) { *why = "gain takes numbers from 0 to 16"; return true; }
+        memcpy(l.gain, f, sizeof l.gain);
+        l.set |= KROME_LOOK_GAIN;
+        return true;
+    }
+    if (!strcmp(prop, "hue")) {
+        if (v.kind != KromeValue::Number || !(v.n > -1e6f && v.n < 1e6f)) { *why = "hue takes degrees"; return true; }
+        l.hue = v.n;
+        l.set |= KROME_LOOK_HUE;
+        return true;
+    }
+    if (!strcmp(prop, "saturation")) {
+        if (v.kind != KromeValue::Number || !(v.n >= 0.0f && v.n <= 16.0f)) { *why = "saturation takes a number from 0 (grey) to 16"; return true; }
+        l.saturation = v.n;
+        l.set |= KROME_LOOK_SATURATION;
+        return true;
+    }
     if (!strcmp(prop, "fit")) {
         static const char* const names[] = {"stretch", "natural", "tile", "slice"};
         for (u8 i = 0; i < 4; ++i)
@@ -247,6 +268,9 @@ void overlay(KromeLook& to, const KromeLook& from) {
     if (s & KROME_LOOK_FRAME) { to.frame = from.frame; to.frame_at = from.frame_at; }
     if (s & KROME_LOOK_FPS) to.fps = from.fps;
     if (s & KROME_LOOK_LOOPS) to.loops = from.loops;
+    if (s & KROME_LOOK_GAIN) memcpy(to.gain, from.gain, sizeof to.gain);
+    if (s & KROME_LOOK_HUE) to.hue = from.hue;
+    if (s & KROME_LOOK_SATURATION) to.saturation = from.saturation;
     if (s & KROME_LOOK_TINT) to.tint = from.tint;
     if (s & KROME_LOOK_LINE_HEIGHT) to.line_height = from.line_height;
     if (s & KROME_LOOK_CARET_COLOR) to.caret_color = from.caret_color;

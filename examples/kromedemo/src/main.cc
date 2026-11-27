@@ -184,6 +184,10 @@ constinit const Step k_steps[] = {
     {Act::Key, "enter", 0, ""},              // the dialog's OK
     {Act::Check, "renamed", 0, "renamed to Ash"},
     {Act::Theme, "light", 0, nullptr},
+    {Act::Click, "tab_skin", 0, nullptr},     // the skin's hue is the theme's
+    {Act::Shot, "gallery_skin_light", 0, nullptr},
+    {Act::Click, "lit", 0, nullptr},
+    {Act::Check, "last", 0, "lit"},
     {Act::Click, "tab_icons", 0, nullptr},
     {Act::Shot, "gallery_icons_light", 0, nullptr},
     {Act::Click, "tab_tree", 0, nullptr},

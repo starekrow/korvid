@@ -325,6 +325,16 @@ bool prepare_ui(Renderer* r, const UiView& v, const u8* region, const u8* item, 
             u.nearest = (head & (1u << 20)) != 0;
             u.tiled = (head & (1u << 21)) != 0;
             if (u.tiled) { u.tile[0] = float_at(item + 96); u.tile[1] = float_at(item + 100); }
+            u.adjust = (head & (1u << 22)) != 0;
+            if (u.adjust) {
+                for (u32 k = 0; k < 3; ++k) u.gain[k] = float_at(item + 104 + 4 * k);
+                f32 h = float_at(item + 116), c = kv::cos(h), sn = kv::sin(h);
+                const f32 m[9] = {0.213f + c * 0.787f - sn * 0.213f, 0.715f - c * 0.715f - sn * 0.715f, 0.072f - c * 0.072f + sn * 0.928f,
+                                  0.213f - c * 0.213f + sn * 0.143f, 0.715f + c * 0.285f + sn * 0.140f, 0.072f - c * 0.072f - sn * 0.283f,
+                                  0.213f - c * 0.213f - sn * 0.787f, 0.715f - c * 0.715f + sn * 0.715f, 0.072f + c * 0.928f + sn * 0.072f};
+                memcpy(u.hue_m, m, sizeof m);
+                u.sat = float_at(item + 120);
+            }
             // fs_ui's hold: half a texel inside the uv rect.
             f32 hw = 0.5f / (f32)(u.tex.width ? u.tex.width : 1), hh = 0.5f / (f32)(u.tex.height ? u.tex.height : 1);
             for (u32 k = 0; k < 2; ++k) {

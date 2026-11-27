@@ -324,7 +324,7 @@ Properties: layout `w`, `h` (a number, a percentage, `hug`, `fill`, a range), `p
 or four), `border`, `border-color`, `shadow` (x y blur [spread]), `shadow-color`, `color`,
 `opacity`, `font`, `size`, `line-height`, `image`, `region` (x, y, w, h), `fit` (`stretch`,
 `natural`, `tile`, `slice`), `slice` (one border or four), `frames`, `frame`, `frame-at`,
-`fps`, `loops`, `tint`, `caret-color`, `selection-color`,
+`fps`, `loops`, `gain` (one or three), `hue` (degrees), `saturation`, `tint`, `caret-color`, `selection-color`,
 `scrollbar-color`, `scrollbar-track`, `scrollbar-size`, `transition` (seconds: the node's
 colors and opacity ease to what its look resolves to whenever that changes, by state,
 selection, theme or a bound value, on the Frame cycle's clock, turning around from where they
@@ -389,6 +389,14 @@ multiplies it: a white font takes the theme's colours, a coloured one is drawn u
 cell=9,13 chars="0123456789:" missing=" " advance=8 }`, and a node names it `font=digits`
 (a font of the scope wins over a path spelled the same; a theme's token is resolved first).
 Without `missing` a character the font lacks draws nothing and takes no room.
+
+**A look computed from the pixels.** `hue=30` turns an image's hue by degrees, `saturation=0.5`
+sets its saturation (0 grey, 1 as drawn, above 1 more), and `gain=1.2` (or one a channel,
+`gain=1.2,1.1,1.0`) multiplies each channel, held at 1: applied to the texel, in that order
+and in linear light, before the tint. They are a look's, so `hover { gain=1.2 }` brightens a
+button with no second image, `transition` eases them with the colours, and a theme's token
+can be one (`theme ember { skin-hue=40 }`, `hue=skin-hue`), so `krome_theme` recolours every
+image that names it. They apply to the node's whole rect (a mask is slice 8's).
 
 **Icons** (`krome/icons/<name>.svg`): Material Symbols, Outlined, weight 400, 20 px (Apache
 2.0, `icons/LICENSE`; the list and the pinned commit in `icons/README.md`): `check`,

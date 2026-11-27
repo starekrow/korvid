@@ -454,6 +454,64 @@ void test_bitmap_fonts(TestCtx& c) {
     io_remove_tree(dir);
 }
 
+// A look computed from the pixels (KR34): its properties; a hover's gain eased by a
+// transition; a theme's token for the hue, and the theme switched.
+void test_computed(TestCtx& c) {
+    c.begin("krome pictures: computed looks");
+    KromeTree t;
+    t.init(mem_general());
+    u32 img = t.add(KromeType::Image);
+    KV_CHECK(c, t.set(img, "gain", KromeValue::nums(Nums<2>{{1, 2}}.v, 2)) != nullptr && t.set(img, "gain", KromeValue::num(-1)) != nullptr);
+    KV_CHECK(c, t.set(img, "saturation", KromeValue::num(-0.5f)) != nullptr && t.set(img, "hue", KromeValue::str("red")) != nullptr);
+    KV_CHECK(c, t.set(img, "gain", KromeValue::nums(Nums<3>{{1.2f, 1.1f, 1.0f}}.v, 3)) == nullptr);
+    KV_CHECK(c, t.set(img, "gain", KromeValue::num(1.5f), KromeState::Hover) == nullptr);
+    KV_CHECK(c, t.set(img, "hue", KromeValue::num(30)) == nullptr && t.set(img, "saturation", KromeValue::num(0.5f)) == nullptr);
+    KromeLook base = t.resolve_look(img, KromeState::Base, nullptr), hover = t.resolve_look(img, KromeState::Hover, nullptr);
+    KV_CHECK(c, base.gain[0] == 1.2f && base.gain[1] == 1.1f && base.gain[2] == 1.0f && base.hue == 30.0f && base.saturation == 0.5f);
+    KV_CHECK(c, hover.gain[0] == 1.5f && hover.gain[2] == 1.5f && hover.hue == 30.0f);
+    KromeLook none{};
+    KV_CHECK(c, none.gain[0] == 1.0f && none.hue == 0.0f && none.saturation == 1.0f); // as drawn
+    t.free();
+
+    const char* text =
+        "theme dusk { skin-hue=40 }\n" // first by name: the screen starts in it
+        "theme noon { skin-hue=200 }\n"
+        "screen main { box dir=row {\n"
+        "  image \"t/sheet.png\" id=lit w=20 h=20 hue=skin-hue transition=1 -> lit {\n"
+        "    hover { gain=1.2 }\n"
+        "  }\n"
+        "} }\n";
+    Array<u8> k{};
+    KimErrors errs;
+    KV_CHECK(c, kim_compile(text, strlen(text), "t/c.kim", k, errs) && errs.count == 0);
+    const ModuleDesc* const list[] = {&platform_module, &platform_hid_module, &asset_module, &krome_module};
+    Engine e;
+    KV_CHECK(c, engine_init(e, list));
+    KromeModule& s = *krome_state(e);
+    krome_viewport(e, 400, 300, 1.0f);
+    krome_provide(e, "t/c.kimb", k.data, k.len);
+    Name scn = krome_open(e, "t/c.kimb", "main");
+    for (u32 i = 0; i < 200 && !(krome_ready(e, scn) && krome_settled(e)); ++i) frames(e, 1);
+    KromeScreen& sc = *krome_screen(s, scn);
+    u32 lit = krome_find(sc.tree, name_intern("lit"));
+    KV_CHECK(c, lit != KROME_NONE && sc.tree.resolve_look(lit, KromeState::Base, nullptr).hue == 40.0f);
+    // Hovered: its gain eases from 1 to 1.2 over a second, not at once.
+    krome_pointer(s, 10, 10, false, 0, false);
+    frames(e, 2);
+    KromeModule::Anim* a = nullptr;
+    for (KromeModule::Anim& x : s.anims) if (x.node == lit) a = &x;
+    KV_CHECK(c, a && a->from.gain[0] == 1.0f && a->to.gain[0] == 1.2f && a->to.hue == 40.0f && s.animating);
+    frames(e, 70);
+    KV_CHECK(c, !s.animating);
+    // The theme switched: every image naming the token takes its value there.
+    krome_theme(e, "noon");
+    frames(e, 3);
+    lit = krome_find(sc.tree, name_intern("lit"));
+    KV_CHECK(c, lit != KROME_NONE && sc.tree.resolve_look(lit, KromeState::Base, nullptr).hue == 200.0f);
+    k.free();
+    engine_shutdown(e);
+}
+
 } // namespace
 
 void test_pictures(kv::TestCtx& c) {
@@ -463,4 +521,5 @@ void test_pictures(kv::TestCtx& c) {
     test_frames(c);
     test_frames_playing(c);
     test_bitmap_fonts(c);
+    test_computed(c);
 }

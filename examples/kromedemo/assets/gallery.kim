@@ -9,6 +9,10 @@ script "kromedemo/gallery.lua"
 // has no '.', and no `missing`: a title with one lays out without it.
 font caps { image="kromedemo/pixfont.png" cell=6,8 chars="0123456789:- ABCDEFGHIJKLMNOPQRSTUVWXYZ" }
 
+// The skin's hue by theme (Krome slice 7): its frames and knob turned for the light one.
+theme dark { skin-hue=0 }
+theme light { skin-hue=190 }
+
 style nav-item {
     pad=10,4 radius=4 color=muted cursor=hand border=1 border-color=clear
     hover { color=ink }
@@ -165,15 +169,18 @@ screen gallery {
                     box dir=stack w=fill h=fill pixel {
                         image "kromedemo/skin.png" region=60,24,8,8 fit=tile w=fill h=fill
                         col pad=16 gap=16 {
-                            image "kromedemo/skin.png" id=frame_small region=60,0,24,24 slice=8 w=200 h=100
+                            image "kromedemo/skin.png" id=frame_small region=60,0,24,24 slice=8 w=200 h=100 hue=skin-hue
                             row gap=16 {
-                                image "kromedemo/skin.png" id=frame_large region=60,0,24,24 slice=8 w=400 h=200
-                                image "kromedemo/skin.png" region=0,0,20,20 fit=natural w=60 h=200 center middle
+                                image "kromedemo/skin.png" id=frame_large region=60,0,24,24 slice=8 w=400 h=200 hue=skin-hue
+                                // Brighter under the pointer, by its own pixels: no second image.
+                                image "kromedemo/skin.png" id=lit region=0,0,20,20 fit=natural w=60 h=200 center middle transition=0.15 -> skin {
+                                    hover { gain=1.35 }
+                                }
                             }
                             // Strips: a knob of 64 frames following the slider, and a spinner
                             // of 12 that Spin plays twice at 10 a second, then rests and says so.
                             row gap=16 middle {
-                                image "kromedemo/knob.png" id=knob frames=64 frame-at=@dial w=48 h=48
+                                image "kromedemo/knob.png" id=knob frames=64 frame-at=@dial w=48 h=48 hue=skin-hue
                                 slider id=dial @dial 0..1 step=0.02 w=160
                                 image "kromedemo/spinner.png" id=spinner frames=12 across fps=@spin_fps loops=2 w=32 h=32 -> spun
                                 button "Spin" id=spin -> spin

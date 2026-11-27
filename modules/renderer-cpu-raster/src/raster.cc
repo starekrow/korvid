@@ -395,9 +395,17 @@ inline void box_color(const CpuUi& u, const CpuLuts& lut, f32 x, f32 y, f32 out[
         u32 t[4];
         sample(u.tex, u.nearest ? 0 : 1, lut, su, sv, t);
         f32 ta = (f32)t[3] / 65535.0f;
-        fill[0] = fill[0] * ((f32)t[0] / 65535.0f) * ta;
-        fill[1] = fill[1] * ((f32)t[1] / 65535.0f) * ta;
-        fill[2] = fill[2] * ((f32)t[2] / 65535.0f) * ta;
+        f32 tc[3] = {(f32)t[0] / 65535.0f, (f32)t[1] / 65535.0f, (f32)t[2] / 65535.0f};
+        if (u.adjust) {
+            // ui_adjust: the hue's turn, the saturation, the gain, held to [0, 1].
+            f32 r[3];
+            for (u32 k = 0; k < 3; ++k) r[k] = tc[0] * u.hue_m[k * 3] + tc[1] * u.hue_m[k * 3 + 1] + tc[2] * u.hue_m[k * 3 + 2];
+            f32 lum = r[0] * 0.213f + r[1] * 0.715f + r[2] * 0.072f;
+            for (u32 k = 0; k < 3; ++k) tc[k] = sat((lum + (r[k] - lum) * u.sat) * u.gain[k]);
+        }
+        fill[0] = fill[0] * tc[0] * ta;
+        fill[1] = fill[1] * tc[1] * ta;
+        fill[2] = fill[2] * tc[2] * ta;
         fill[3] = fill[3] * ta;
     }
     for (u32 k = 0; k < 4; ++k) out[k] = fill[k] * inner + u.edge[k] * (outer - inner);
