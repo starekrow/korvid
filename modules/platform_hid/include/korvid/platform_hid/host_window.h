@@ -172,7 +172,8 @@ struct HostWindow {
     // The window's input shape: `alpha`, one byte a pixel, `w` x `h` with rows `w` bytes
     // apart, scaled to the window. Where it is under 128 the window takes no input, and a
     // click there goes to what is behind; where there is no compositor it is cut out of
-    // the picture too, one bit a pixel. Copied: give it again when the picture changes; a
+    // the picture too, one bit a pixel, as it is in a layered (software) window on Win32,
+    // where it is the window's region. Copied: give it again when the picture changes; a
     // resize keeps it, scaled to the new size. Null for the whole rect. Drawn alpha and
     // the shape are two things: a soft edge is drawn at half alpha and is in or out here.
     // False (with a line logged, once) where the window is not a transparent one, or the

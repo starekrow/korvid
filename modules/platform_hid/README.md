@@ -147,14 +147,14 @@ hold any resize, in pixels, 0 for none, and follow a change of scale. Krome give
 from a screen's `grip=` nodes and its root's size range
 ([krome](../krome/README.md#behaviour-worth-knowing)).
 
-**What each platform does**, as found on SDL 3.4.2:
+**What each platform does**, as found on SDL 3.4.2 and Windows 11:
 
 | platform | alpha | input through the clear parts | grips, bounds |
 |---|---|---|---|
 | Wayland (GNOME) | always composited; Vulkan presents premultiplied | the surface's input region, set by the engine: SDL's window shape gives Wayland none | SDL's hit test (`xdg_toplevel` move and resize); `set_min_size`, `set_max_size` |
 | X11, with a compositor | an ARGB visual, which the engine asks SDL for (SDL gives a Vulkan window none of its own); Vulkan presents premultiplied | the Shape extension's input shape, through SDL | SDL's hit test (`_NET_WM_MOVERESIZE`); the WM's size hints |
 | X11, without | none: the window is opaque, and the shape is also its bounding shape, cut one bit a pixel and hard edged | the same shape | the same, where a window manager runs |
-| Win32 | not written yet (slice 13, milestone 3): a transparent window opens as an ordinary one, and `shape` says so once | none | not written yet |
+| Win32 | always composited (the DWM): a popup with no frame. D3D12 presents premultiplied through DirectComposition (the window has no redirection bitmap); a software window is layered, its frame given with `UpdateLayeredWindow`. A Vulkan window (not bound on Windows by default) is opaque, and its shape cuts it out | the window's region (`SetWindowRgn`). A layered window's picture is cut by it too, one bit a pixel, so a soft edge is drawn inside it, and a click passes where its alpha is 0; whether the region cuts a D3D12 window's picture is not tried | `WM_NCHITTEST` from a copy the window's thread keeps; `WM_GETMINMAXINFO` |
 | macOS | through SDL; not tried | through SDL; not tried | through SDL; not tried |
 | Android, iOS | not offered | | |
 
@@ -165,7 +165,11 @@ from the protocol (`WAYLAND_DEBUG=1`) and seen on GNOME: the clear corners, a cl
 them, a move by a grip and a resize held to its bounds. On GNOME's Xwayland a move and a
 resize by a grip were seen too, the resize stopped at both bounds; with no compositor,
 grips need a window manager, and are not tried. On X11 the engine reaches Xlib and Xext, and on Wayland
-libwayland-client, through SDL's own libraries, opened by name: it links none.
+libwayland-client, through SDL's own libraries, opened by name: it links none. The Win32 row was
+measured on Windows 11 at 150% scale: `WindowFromPoint` and the screen's pixels at a clear
+corner (the desktop) and inside (the program), for `window --round` (layered) and `rocks
+--transparent` (D3D12); `window --grips` moved by its band and resized by its handle with
+synthesized mouse input, stopped at exactly 160 and 720 pixels a side.
 
 ## Quick reference
 
@@ -173,7 +177,7 @@ Header `korvid/platform_hid/host_window.h`:
 
 | name | kind | what |
 |---|---|---|
-| `WindowDesc` | record | `title`, `width`, `height`, `vsync` (a preference the renderer reads), `surface` (`Software`, `Vulkan`), `borderless`, `transparent` |
+| `WindowDesc` | record | `title`, `width`, `height`, `vsync` (a preference the renderer reads), `surface` (`Software`, `Vulkan`, `Metal`, `D3D12`), `borderless`, `transparent` |
 | `HostWindow` | record | `open(desc)`, `close()`, `is_open()`, `width()`, `height()`, `vsync()`, `focused()`, `visible()`, `hidden_why()`, `minimize(on)`, `pump(bus, input)`, `wait(seconds)`, `wake()`, `input_delay()`, `present_blank()`, `native_handle()`; `transparent()`, `shape(alpha, w, h)`, `grips(list, count)`, `grip_at(x, y)`, `bounds(min_w, min_h, max_w, max_h)` |
 | `WindowGrip`, `WindowGripRect`, `KV_WINDOW_GRIPS` | enum, record, constant | `Move`, `N` ... `NW` by compass point, `None` (the program's); a rect in framebuffer pixels and its grip; 64 kept |
 
@@ -234,7 +238,8 @@ What the module registers with the engine:
   fine, and a borderless window resized by its own grips is too; `host_window.h` has the
   diagnosis.
 - **A shape asks for a transparent window.** `shape` on a window opened without
-  `WindowDesc::transparent` warns once and keeps the rectangle: SDL shapes only those.
+  `WindowDesc::transparent` warns once and keeps the rectangle: SDL shapes only those, and
+  on Win32 only a transparent window is a popup whose region is its client area.
 - **The module starts headless.** Startup brings up SDL's event subsystem only; video
   and gamepads come up with the first window, or with `platform_video_up(e)` for code
   that needs a video driver before one (the Vulkan renderer loads its loader through

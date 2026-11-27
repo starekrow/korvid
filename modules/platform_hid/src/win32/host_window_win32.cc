@@ -14,6 +14,14 @@
 // result string arrives as typed characters. The IME context, the cursor and the window
 // belong to the window's thread, so the engine's thread asks for them with a message; the
 // clipboard is opened from the engine's thread itself.
+//
+// A transparent window (slice 13, KR39) is a popup with no frame. Its picture's alpha is
+// composited by the DWM, which is always on: a D3D12 window has no redirection bitmap
+// (WS_EX_NOREDIRECTIONBITMAP) and the renderer presents through DirectComposition; a
+// software window is a layered one, its frame given with UpdateLayeredWindow. Its shape is
+// the window's region (SetWindowRgn): outside it a click reaches what is behind, and
+// nothing is drawn. Grips answer WM_NCHITTEST and bounds WM_GETMINMAXINFO, on the window's
+// thread, from copies kept under the lock.
 #include "korvid/platform_hid/host_window.h"
 #include "korvid/core/time.h"
 #include "korvid/core/utf8.h"
@@ -58,6 +66,8 @@ constexpr UINT WM_KV_DESTROY  = WM_APP + 1; // close() asks the window thread to
 constexpr UINT WM_KV_CURSOR   = WM_APP + 2; // cursor(): the shape changed, show it now
 constexpr UINT WM_KV_IME_AREA = WM_APP + 3; // text_area(): place the input method's windows
 constexpr UINT WM_KV_IME_ON   = WM_APP + 4; // text_input(): wParam 1 gives the window its IME, 0 takes it away
+constexpr UINT WM_KV_SHAPE    = WM_APP + 5; // shape(): lParam an HRGN (null: none), the window's from then
+constexpr UINT WM_KV_BOUNDS   = WM_APP + 6; // bounds(): hold the size it has now to them
 
 struct Win32Window {
     HWND          hwnd = nullptr;
@@ -66,6 +76,12 @@ struct Win32Window {
     u8*           soft = nullptr;
     u32           soft_w = 0, soft_h = 0;
     usize         soft_bytes = 0;
+    // A layered window's (transparent and software): its pixels are a DIB section's, B, G,
+    // R, A premultiplied, selected into soft_dc for UpdateLayeredWindow; soft is its bits.
+    HBITMAP       soft_dib = nullptr;
+    HDC           soft_dc  = nullptr;
+    bool          layered  = false;
+    bool          transparent = false; // a popup with no frame, its alpha composited
     OsThread      thread;
     OsMutex       mu;               // guards queue, texts, ready, failed and the area
     OsCond        cv;               // open() waits on it for the window to exist
@@ -85,6 +101,11 @@ struct Win32Window {
     i32           area_caret = 0;        // the caret's x within it
     bool          area_set = false;
     bool          composing = false;     // the window thread's: a composition was posted and not ended
+    // The grips and bounds as the window's thread answers the OS with them (under mu): the
+    // HostWindow's copies, given again by hid_window_grips and _bounds.
+    WindowGripRect grips[KV_WINDOW_GRIPS] = {};
+    u32           grip_count = 0;
+    u32           bounds[4] = {};
     // The loop's wait (KR26). `queued` (manual reset) is set as the window thread appends to
     // the queue and reset as pump swaps it out, both under mu, so a wait ends early exactly
     // when something came since the last pump. `woken` (auto reset) is wake()'s. Made at the
@@ -238,6 +259,44 @@ u32 scancode_of(WPARAM wp, LPARAM lp) {
     return sc;
 }
 
+// ---- grips and bounds ------------------------------------------------------------------------------
+
+// What the window's copy of the grips says is under a client pixel: the last that holds it.
+WindowGrip grip_at_point(f32 x, f32 y) {
+    WindowGrip g = WindowGrip::None;
+    os_mutex_lock(&g_win.mu);
+    for (u32 i = g_win.grip_count; i-- > 0;) {
+        const rect2& r = g_win.grips[i].rect;
+        if (x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h) { g = g_win.grips[i].grip; break; }
+    }
+    os_mutex_unlock(&g_win.mu);
+    return g;
+}
+
+LRESULT hit_of(WindowGrip g) {
+    switch (g) {
+    case WindowGrip::Move: return HTCAPTION;
+    case WindowGrip::N:    return HTTOP;
+    case WindowGrip::NE:   return HTTOPRIGHT;
+    case WindowGrip::E:    return HTRIGHT;
+    case WindowGrip::SE:   return HTBOTTOMRIGHT;
+    case WindowGrip::S:    return HTBOTTOM;
+    case WindowGrip::SW:   return HTBOTTOMLEFT;
+    case WindowGrip::W:    return HTLEFT;
+    case WindowGrip::NW:   return HTTOPLEFT;
+    case WindowGrip::None: break;
+    }
+    return HTCLIENT;
+}
+
+// How much bigger the window is than its client area: its frame, none for a popup.
+SIZE frame_extra(HWND h) {
+    RECT w, c;
+    GetWindowRect(h, &w);
+    GetClientRect(h, &c);
+    return SIZE{(w.right - w.left) - c.right, (w.bottom - w.top) - c.bottom};
+}
+
 LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_CLOSE: { WinMsg m{}; m.type = WinMsgType::Close; post(m); return 0; } // the engine decides
@@ -351,6 +410,57 @@ LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
 
+    // What a point is for (KR41): the last grip that holds it, when there is a list. A
+    // grip's press is the OS's (a WM_NCLBUTTONDOWN), so the engine sees no button for it.
+    case WM_NCHITTEST: {
+        os_mutex_lock(&g_win.mu);
+        u32 n = g_win.grip_count;
+        os_mutex_unlock(&g_win.mu);
+        if (!n) break;
+        POINT p{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+        ScreenToClient(h, &p);
+        RECT c;
+        GetClientRect(h, &c);
+        if (!PtInRect(&c, p)) break; // a frame's own edges, where there is one
+        return hit_of(grip_at_point((f32)p.x + 0.5f, (f32)p.y + 0.5f));
+    }
+    case WM_NCCALCSIZE:
+        if (g_win.transparent) return 0; // the client area is the whole window, at creation too: no frame drawn
+        break;
+    case WM_GETMINMAXINFO: {
+        os_mutex_lock(&g_win.mu);
+        u32 b[4] = {g_win.bounds[0], g_win.bounds[1], g_win.bounds[2], g_win.bounds[3]};
+        os_mutex_unlock(&g_win.mu);
+        if (!(b[0] | b[1] | b[2] | b[3])) break;
+        SIZE f = frame_extra(h);
+        MINMAXINFO* mm = (MINMAXINFO*)lp;
+        if (b[0]) mm->ptMinTrackSize.x = (LONG)b[0] + f.cx;
+        if (b[1]) mm->ptMinTrackSize.y = (LONG)b[1] + f.cy;
+        if (b[2]) mm->ptMaxTrackSize.x = (LONG)b[2] + f.cx;
+        if (b[3]) mm->ptMaxTrackSize.y = (LONG)b[3] + f.cy;
+        return 0;
+    }
+    case WM_KV_SHAPE:
+        // The system owns the region from here, and frees the one it replaces.
+        if (!SetWindowRgn(h, (HRGN)lp, TRUE) && lp) DeleteObject((HRGN)lp);
+        return 0;
+    case WM_KV_BOUNDS: {
+        // A size outside the new bounds is brought inside them: the OS holds a resize to
+        // them, and SetWindowPos asks WM_GETMINMAXINFO too.
+        os_mutex_lock(&g_win.mu);
+        u32 b[4] = {g_win.bounds[0], g_win.bounds[1], g_win.bounds[2], g_win.bounds[3]};
+        os_mutex_unlock(&g_win.mu);
+        RECT c;
+        GetClientRect(h, &c);
+        LONG w = c.right, ht = c.bottom;
+        auto hold = [](LONG v, u32 lo, u32 hi) { if (lo && v < (LONG)lo) v = (LONG)lo; if (hi && v > (LONG)hi) v = (LONG)hi; return v; };
+        LONG nw = hold(w, b[0], b[2]), nh = hold(ht, b[1], b[3]);
+        if (nw == w && nh == ht) return 0;
+        SIZE f = frame_extra(h);
+        SetWindowPos(h, nullptr, 0, 0, nw + f.cx, nh + f.cy, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        return 0;
+    }
+
     // A renderer's window (Vulkan or D3D12) is the renderer's to paint; erasing it would
     // flash the background.
     case WM_ERASEBKGND:
@@ -364,7 +474,7 @@ LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 // The window's size for a client area of the desc's logical size at a DPI.
 SIZE outer_size(DWORD style, UINT dpi) {
     RECT r = {0, 0, MulDiv((int)g_win.desc.width, (int)dpi, 96), MulDiv((int)g_win.desc.height, (int)dpi, 96)};
-    AdjustWindowRectExForDpi(&r, style, FALSE, 0, dpi);
+    if (!g_win.transparent) AdjustWindowRectExForDpi(&r, style, FALSE, 0, dpi); // a transparent window's frame is its client area
     return SIZE{r.right - r.left, r.bottom - r.top};
 }
 
@@ -385,10 +495,20 @@ void window_main(void*) {
         wc.lpszClassName = L"korvid";
         registered = RegisterClassExW(&wc) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
     }
-    DWORD style = w.desc.borderless ? (WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX) : WS_OVERLAPPEDWINDOW;
+    // A transparent window is a popup with no frame at all: what is not drawn is the
+    // desktop's, and grips are what move and resize it. WS_THICKFRAME is what lets an edge's
+    // hit resize it; WM_NCCALCSIZE then gives the frame's room to the client area. WS_SYSMENU
+    // and WS_MINIMIZEBOX keep the taskbar's menu and its minimize.
+    DWORD style = w.desc.transparent ? (WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX)
+                : w.desc.borderless  ? (WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX) : WS_OVERLAPPEDWINDOW;
+    // A D3D12 transparent window has no redirection bitmap: DirectComposition gives the DWM
+    // its picture, with alpha. A software one is layered: UpdateLayeredWindow does. A Vulkan
+    // one keeps its bitmap, which some drivers present through, and is opaque.
+    DWORD ex = !w.desc.transparent ? 0 : w.layered ? WS_EX_LAYERED
+             : w.desc.surface == WindowSurface::D3D12 ? WS_EX_NOREDIRECTIONBITMAP : 0;
     UINT dpi = GetDpiForSystem();
     SIZE size = outer_size(style, dpi);
-    HWND h = registered ? CreateWindowExW(0, L"korvid", w.title, style, CW_USEDEFAULT, CW_USEDEFAULT, size.cx, size.cy,
+    HWND h = registered ? CreateWindowExW(ex, L"korvid", w.title, style, CW_USEDEFAULT, CW_USEDEFAULT, size.cx, size.cy,
                                           nullptr, nullptr, inst, nullptr)
                         : nullptr;
     DWORD err = h ? 0 : GetLastError();
@@ -470,6 +590,10 @@ bool HostWindow::open(const WindowDesc& desc) {
     w.cursor = 0;
     w.area_set = false;
     w.composing = false;
+    w.transparent = desc.transparent;
+    w.layered = desc.transparent && desc.surface == WindowSurface::Software;
+    w.grip_count = 0;
+    for (u32& b : w.bounds) b = 0;
     if (!w.queued) w.queued = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!w.woken) w.woken = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     if (!w.queued || !w.woken) {
@@ -502,7 +626,12 @@ bool HostWindow::open(const WindowDesc& desc) {
     width_   = w.width;
     height_  = w.height;
     focused_ = false; // the first pump reports it
-    KV_INFO("window", "opened '%s' %ux%u px at %u dpi", title, width_, height_, atomic_load(&w.dpi, MO_ACQUIRE));
+    // The DWM composites every window; what is drawn with alpha is a layered window's and
+    // DirectComposition's. Vulkan on Windows presents opaque: its shape cuts it out.
+    transparent_ = desc.transparent && desc.surface != WindowSurface::Vulkan;
+    KV_INFO("window", "opened '%s' %ux%u px at %u dpi%s", title, width_, height_, atomic_load(&w.dpi, MO_ACQUIRE),
+            !desc.transparent ? "" : w.layered ? ", transparent (layered)" : transparent_ ? ", transparent (no redirection bitmap)"
+                                                : ", opaque: Vulkan presents no alpha here; a shape cuts it out");
     return true;
 }
 
@@ -618,9 +747,17 @@ void HostWindow::close() {
     w.taken.free();
     w.texts.free();
     w.texts_taken.free();
+    if (w.soft_dib) {
+        DeleteObject(w.soft_dib); // its bits were soft
+        w.soft = nullptr;
+    }
+    if (w.soft_dc) DeleteDC(w.soft_dc);
+    w.soft_dib = nullptr;
+    w.soft_dc = nullptr;
     if (w.soft) free_in(mem_general(), w.soft, w.soft_bytes);
     w.soft = nullptr;
     w.soft_bytes = 0;
+    w.grip_count = 0;
     w.hwnd = nullptr;
     native_ = nullptr;
     width_ = height_ = 0;
@@ -642,6 +779,32 @@ bool HostWindow::software_frame(SoftwareFrame* out) {
     u32 w = (u32)(rc.right - rc.left), hh = (u32)(rc.bottom - rc.top);
     if (!w || !hh) return false;
     usize bytes = (usize)w * hh * 4;
+    if (g_win.layered) {
+        // A DIB section the size of the window, made again when the size changes: what
+        // UpdateLayeredWindow reads.
+        if (!g_win.soft_dib || w != g_win.soft_w || hh != g_win.soft_h) {
+            if (!g_win.soft_dc) g_win.soft_dc = CreateCompatibleDC(nullptr);
+            BITMAPINFO bi = {};
+            bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+            bi.bmiHeader.biWidth = (LONG)w;
+            bi.bmiHeader.biHeight = -(LONG)hh; // top-down
+            bi.bmiHeader.biPlanes = 1;
+            bi.bmiHeader.biBitCount = 32;
+            bi.bmiHeader.biCompression = BI_RGB;
+            void* bits = nullptr;
+            HBITMAP dib = g_win.soft_dc ? CreateDIBSection(g_win.soft_dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0) : nullptr;
+            if (!dib) return false;
+            SelectObject(g_win.soft_dc, dib);
+            if (g_win.soft_dib) DeleteObject(g_win.soft_dib);
+            g_win.soft_dib = dib;
+            g_win.soft = (u8*)bits;
+        }
+        g_win.soft_w = w;
+        g_win.soft_h = hh;
+        software_ = g_win.soft;
+        *out = SoftwareFrame{g_win.soft, w, hh, w * 4, false, false, true};
+        return true;
+    }
     if (bytes > g_win.soft_bytes) {
         if (g_win.soft) free_in(mem_general(), g_win.soft, g_win.soft_bytes);
         g_win.soft = (u8*)alloc_in(mem_general(), bytes, 16);
@@ -662,6 +825,22 @@ void HostWindow::present_software() {
     HWND h = (HWND)native_;
     if (!h || !software_) return;
     software_ = nullptr;
+    if (g_win.layered) {
+        // Its premultiplied alpha composited by the DWM; a pixel of alpha 0 also passes the
+        // mouse through. The size given is the window's: a frame drawn at a size the window
+        // has since left (a drag under way) is not shown, since showing it would undo the drag.
+        RECT c;
+        if (!GetClientRect(h, &c) || (u32)c.right != g_win.soft_w || (u32)c.bottom != g_win.soft_h) return;
+        BLENDFUNCTION bf = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+        POINT at = {0, 0};
+        SIZE size = {(LONG)g_win.soft_w, (LONG)g_win.soft_h};
+        if (!UpdateLayeredWindow(h, nullptr, nullptr, &size, g_win.soft_dc, &at, 0, &bf, ULW_ALPHA)) {
+            static bool told = false;
+            if (!told) KV_WARN("window", "UpdateLayeredWindow failed (error %lu)", (unsigned long)GetLastError());
+            told = true;
+        }
+        return;
+    }
     BITMAPINFO bi = {};
     bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     bi.bmiHeader.biWidth = (LONG)g_win.soft_w;
@@ -709,6 +888,7 @@ void HostWindow::pump(EventBus& bus, Input& input) {
             if ((m.a != width_ || m.b != height_) && m.a && m.b) {
                 width_  = m.a;
                 height_ = m.b;
+                if (shape_.len) hid_window_shape(*this); // the mask scaled to the new size
                 bus.emit(WindowResized{m.a, m.b});
             }
             break;
@@ -805,16 +985,79 @@ int platform_app_main(int argc, char** argv, int (*run)(int argc, char** argv, v
     return run(argc, argv, ctx);
 }
 
-// TODO(slice 13, milestone 3): the shape (a window region, or a layered window), the grips
-// (WM_NCHITTEST, from the window's thread, so the list it reads is copied under the lock)
-// and the bounds (WM_GETMINMAXINFO). Until then a Win32 window keeps its rect and its frame.
-bool hid_window_shape(HostWindow&) {
-    static bool told = false;
-    if (!told) KV_INFO("window", "a shaped window is not written for Win32 yet: the window stays a rectangle");
-    told = true;
-    return false;
+// The shape as the window's region: the mask scaled to the client area, nearest neighbour,
+// cut at a half, one rect a run of a row. A popup's window and client areas are the same,
+// so the region's coordinates are the client's. The region clips what the DWM shows too,
+// one bit a pixel: a soft edge is drawn inside it and cut at it.
+bool hid_window_shape(HostWindow& hw) {
+    if (!hw.native_) return false;
+    if (!g_win.transparent) {
+        static bool told = false;
+        if (!told) KV_WARN("window", "a shape on a window not opened transparent (WindowDesc::transparent): it stays a rectangle");
+        told = true;
+        return false;
+    }
+    HRGN rgn = nullptr;
+    if (hw.shape_.len) {
+        u32 ww = hw.width_, wh = hw.height_;
+        if (!ww || !wh) return false;
+        Array<RECT> runs;
+        for (u32 y = 0; y < wh; ++y) {
+            const u8* src = hw.shape_.data + (usize)((u64)y * hw.shape_h_ / wh) * hw.shape_w_;
+            u32 x = 0;
+            while (x < ww) {
+                while (x < ww && src[(u64)x * hw.shape_w_ / ww] < 128) ++x;
+                u32 from = x;
+                while (x < ww && src[(u64)x * hw.shape_w_ / ww] >= 128) ++x;
+                if (x > from) runs.push(RECT{(LONG)from, (LONG)y, (LONG)x, (LONG)y + 1});
+            }
+        }
+        usize bytes = sizeof(RGNDATAHEADER) + (usize)runs.len * sizeof(RECT);
+        RGNDATA* rd = (RGNDATA*)alloc_in(mem_general(), bytes, alignof(RGNDATA));
+        if (!rd) { runs.free(); return false; }
+        rd->rdh.dwSize   = sizeof(RGNDATAHEADER);
+        rd->rdh.iType    = RDH_RECTANGLES;
+        rd->rdh.nCount   = runs.len;
+        rd->rdh.nRgnSize = (DWORD)(runs.len * sizeof(RECT));
+        rd->rdh.rcBound  = RECT{0, 0, (LONG)ww, (LONG)wh};
+        if (runs.len) memcpy(rd->Buffer, runs.data, (usize)runs.len * sizeof(RECT));
+        rgn = ExtCreateRegion(nullptr, (DWORD)bytes, rd);
+        free_in(mem_general(), rd, bytes);
+        u32 n = runs.len;
+        runs.free();
+        if (!rgn) {
+            static bool told = false;
+            if (!told) KV_WARN("window", "ExtCreateRegion failed for %u rects (error %lu)", n, (unsigned long)GetLastError());
+            told = true;
+            return false;
+        }
+    }
+    // SetWindowRgn is the window thread's to call: from here it would wait on that thread.
+    if (!PostMessageW(g_win.hwnd, WM_KV_SHAPE, 0, (LPARAM)rgn)) {
+        if (rgn) DeleteObject(rgn);
+        return false;
+    }
+    return true;
 }
-bool hid_window_grips(HostWindow&) { return false; }
-void hid_window_bounds(HostWindow&) {}
+
+// Grips are client pixels here, which are framebuffer pixels: copied as given.
+bool hid_window_grips(HostWindow& hw) {
+    if (!hw.native_) return false;
+    os_mutex_lock(&g_win.mu);
+    if (hw.grip_count_) memcpy(g_win.grips, hw.grips_, (usize)hw.grip_count_ * sizeof hw.grips_[0]);
+    g_win.grip_count = hw.grip_count_;
+    os_mutex_unlock(&g_win.mu);
+    return true;
+}
+
+// The bounds are client pixels too; WM_GETMINMAXINFO adds the frame, where there is one.
+void hid_window_bounds(HostWindow& hw) {
+    if (!hw.native_) return;
+    os_mutex_lock(&g_win.mu);
+    for (u32 i = 0; i < 4; ++i) g_win.bounds[i] = hw.bounds_[i];
+    os_mutex_unlock(&g_win.mu);
+    hw.bounds_scale_ = hw.pixel_scale();
+    PostMessageW(g_win.hwnd, WM_KV_BOUNDS, 0, 0);
+}
 
 } // namespace kv
