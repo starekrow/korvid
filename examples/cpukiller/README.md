@@ -1,6 +1,7 @@
 # cpukiller
 
-A stress tool for the job pool, the memory system and the engine's tick rate. No window
+A stress tool for the job pool, the memory system and the engine's tick rate, with one
+problem (two fighters, one tick) solved four ways to see what each way costs. No window
 by default. It measures what the pool costs to dispatch, how contention scales with chunk
 size, whether nested batches make progress, how the allocator behaves under cross-thread
 load, and how many ticks per second a few hundred thousand entities get on one thread
@@ -66,6 +67,16 @@ to trust the row. Latency rows have their p99 and worst in the notes instead.
    must be equal. Each tick is timed, for the tail. The breakdown comes from the
    profiler's collector, read every frame: the top zones of each run and the workers' time
    split into busy and waiting (dev builds; ship has no profiler).
+
+7. **The brawl.** One problem four ways (`src/brawl.h`): every fighter hits another every
+   tick, one hit in eight on one of sixteen fighters everybody wants, and a fighter at
+   zero dies, credits its killer, drops loot and is replaced. Three versions over bare
+   arrays on the engine's pool (no synchronization; an atomic subtraction; a lock for the
+   victim) and the engine's (chunks emit a `Hit`, one handler applies them). Each is held
+   to books kept apart from the code under test: the damage the attackers say they dealt
+   against the health actually missing, the deaths they counted against the fighters
+   actually replaced, and the hash of the state after the last tick, which must be the
+   same from run to run and on one thread as on many. `--fighters N` sets the size.
 
 `--sweep` runs the cases that scale (two grains of contention, two of the allocator, the
 engine, and the bare arrays) at 1, 2, 4... threads up to `--threads`, and prints speedup
@@ -133,11 +144,43 @@ the previous copy on the main thread.
 - **The workers wait 32% of their time** in the engine scenario (dev), from 41%.
 - **Every hash equal**, at every thread count, in every run.
 
+### The brawl
+
+100,000 fighters, 200 ticks, 5 runs on 16 threads, ship:
+
+| | a tick, 1 thread | 16 threads | a swing | damage lost | extra deaths | endings in 5 runs | as 1 thread |
+|---|---|---|---|---|---|---|---|
+| bare, unsynchronized | 424 µs | 97 µs | 1.0 ns | 137,241 of 77.8 M | 2,035 of 714,493 | 5 | no |
+| bare, atomic | 483 µs | 155 µs | 1.5 ns | 0 | 0 | 5 | no |
+| bare, a lock a victim | 854 µs | 224 µs | 2.2 ns | 0 | 0 | 5 | no |
+| engine: events, one handler | 3,826 µs | 3,101 µs | 31 ns | 0 | 0 | 1 | yes |
+
+- **The unsynchronized one is wrong.** It loses damage and counts deaths that did not
+  happen, differently every run.
+- **Atomic and locked keep the books** and agree with the engine on the deaths (712,675),
+  and no two of their runs end the same: which swing took a victim through zero, and so
+  who has the kill, is whichever thread got there. Nothing in them is a bug, and the fight
+  cannot be replayed.
+- **The engine's is the only one that ends one way**, on one thread as on sixteen.
+- **It costs twenty times the atomic one, and threads do not help it.** 31 ns a swing
+  against 1.5, and 1.2x from sixteen threads. A dev trace of its tick on one thread
+  (6.2 ms there): the chunks that emit 2.8 ms, merging the chunks' events 0.7, the phase
+  boundaries 0.8, the handler 0.8, and 1.0 checking every event's handles for the dead
+  before the handler sees them. Everything but the first is on one thread. In ship on
+  sixteen threads, by turning stages off: the handler 12.5 ns a swing, the handle check
+  11.4, emitting and copying 7.5. At 10,000 swings a tick it is
+  0.25 ms; at the 100,000 here, a fifth of a 60 Hz frame.
+- **What the engine would not catch** (from reading `phase.h`; not run here). A chunk has
+  the whole column as a span, and the only guard found on a chunk is the one on
+  `ctx.rng()`: writing `hp[victim]` from a chunk would be the first version above inside
+  the engine, with nothing to check that a chunk keeps to its own rows.
+
 ## Where things are
 
 | file | what |
 |---|---|
 | `src/main.cc` | the scenarios, the report, the window mode, `main` |
+| `src/brawl.cc`, `src/brawl.h` | the brawl: three versions over bare arrays and the engine's, as a module of its own |
 | `src/floor.cc`, `src/floor.h` | the references: the spinning pool and the engine scenario over bare arrays |
 | `src/stress.cc` | the engine scenario as a module: the ktable, the systems, the handler, `cpukiller_core_modules()` |
 | `include/korvid/cpukiller/module.h` | the record, `cpukiller_set_bodies`, the headless module list |

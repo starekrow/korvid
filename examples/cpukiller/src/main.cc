@@ -4,11 +4,12 @@
 // hash as the referee. Numbers go to stdout as a table; every scenario also checks that
 // the memory accounting comes back to where it started.
 //
-//   cpukiller [--threads N] [--bodies N] [--ticks N] [--reps N] [--spin US] [--only SCENARIO]
+//   cpukiller [--threads N] [--bodies N] [--ticks N] [--fighters N] [--reps N] [--spin US] [--only SCENARIO]
 //             [--quick] [--sweep] [--md] [--window] [--profile FILE]
 //
 // --spin sets the pool's idle spin in microseconds (jobs_set_idle_spin; 0 for none), to see
-// what it buys. --only runs one scenario: dispatch, wake, contention, nested, memory, engine.
+// what it buys. --only runs one scenario: dispatch, wake, contention, nested, memory, engine,
+// brawl.
 //
 // A number here is a median of repeats, never one run: each case is run --reps times with
 // its variants alternated (serial, pool, reference; serial, pool, reference), so a clock
@@ -35,6 +36,7 @@
 // ticks are driven through the frame loop with a render after every batch of ticks:
 // memory can behave differently with a GPU's fingers in it.
 #include "korvid/cpukiller/module.h"
+#include "brawl.h"
 #include "floor.h"
 #include "korvid/core/format.h"
 #include "korvid/core/atomic.h"
@@ -60,6 +62,7 @@ namespace {
 u32  g_threads = 0;
 u32  g_bodies  = 200000;
 u32  g_ticks   = 300;
+u32  g_fighters = 100000;
 u32  g_reps    = 0;   // 0: each scenario's own default
 bool g_quick   = false;
 bool g_window  = false;
@@ -649,6 +652,112 @@ void scenario_engine() {
         print("  the profiler dropped %llu records: the breakdown is short by them\n", (unsigned long long)(one.dropped + many.dropped));
 }
 
+// ---- 7. the brawl: one problem, four ways (brawl.h) -----------------------------------
+struct BrawlRun { Dist tick; BrawlBooks books; };
+
+BrawlRun run_bare_brawl(BareBrawl how, bool parallel, u32 ticks) {
+    static Samples s;
+    s.n = 0;
+    BrawlRun r{};
+    BareArena* a = bare_arena_create(g_fighters);
+    if (!a) { KV_ERROR("cpukiller", "no memory for the brawl"); return r; }
+    for (u32 t = 0; t < ticks; ++t) {
+        f64 t0 = time_now();
+        bare_arena_tick(a, how, parallel);
+        s.add(ms_since(t0));
+    }
+    r.books = bare_arena_books(a);
+    r.tick = dist_of(s);
+    bare_arena_destroy(a);
+    return r;
+}
+
+BrawlRun run_engine_brawl(u32 threads, u32 ticks) {
+    static Samples s;
+    s.n = 0;
+    BrawlRun r{};
+    Engine e;
+    e.threads = threads;
+    e.clock.max_ticks_per_frame = 1;
+    brawl_set_fighters(g_fighters);
+    LogLevel was = log_level();
+    log_set_level(LogLevel::Warn);
+    if (!engine_init(e, brawl_modules())) { log_set_level(was); KV_ERROR("cpukiller", "engine_init failed for the brawl"); return r; }
+    KV_MARK_V("engine run", threads);
+    for (u32 done = 0; done < ticks;) {
+        u64 before = e.clock.tick_total;
+        f64 t0 = time_now();
+        engine_frame(e, 1.0 / 60.0);
+        f64 ms = ms_since(t0);
+        u32 ran = (u32)(e.clock.tick_total - before);
+        if (ran) s.add(ms / ran);
+        done += ran;
+        prof_collect(); // nothing reads it here; it keeps the rings from filling
+    }
+    r.books = brawl_books(e);
+    r.tick = dist_of(s);
+    engine_shutdown(e);
+    log_set_level(was);
+    return r;
+}
+
+void scenario_brawl() {
+    KV_ZONE("brawl");
+    constexpr u32 kVersions = 4, kCols = 8, kCell = 64, kMaxRuns = 16;
+    const char* names[kVersions] = {"bare, unsynchronized", "bare, atomic", "bare, a lock a victim", "engine: events, one handler"};
+    u32 ticks = g_quick ? 60 : 200;
+    u32 runs = reps(5);
+    if (runs > kMaxRuns) runs = kMaxRuns;
+    static char cells[kVersions][kCols][kCell];
+    for (u32 v = 0; v < kVersions; ++v) {
+        KV_MARK_V("brawl version", v);
+        bool engine = v == 3;
+        if (!engine) jobs_init(g_threads - 1);
+        BrawlRun one = engine ? run_engine_brawl(1, ticks) : run_bare_brawl((BareBrawl)v, false, ticks);
+        // The same fight, `runs` times over on every thread: the worst the books came to,
+        // and how many different endings it had.
+        static Samples medians;
+        medians.n = 0;
+        u64 hashes[kMaxRuns];
+        u32 distinct = 0;
+        i64 lost = 0, extra = 0;
+        u64 dealt = 0, deaths = 0;
+        bool as_one = true;
+        for (u32 r = 0; r < runs; ++r) {
+            BrawlRun many = engine ? run_engine_brawl(g_threads, ticks) : run_bare_brawl((BareBrawl)v, true, ticks);
+            medians.add(many.tick.p50);
+            i64 l = many.books.damage_lost < 0 ? -many.books.damage_lost : many.books.damage_lost;
+            i64 x = many.books.extra_deaths < 0 ? -many.books.extra_deaths : many.books.extra_deaths;
+            if (l >= lost) { lost = l; dealt = many.books.dealt; }
+            if (x >= extra) { extra = x; deaths = many.books.deaths; }
+            as_one = as_one && many.books.hash == one.books.hash;
+            bool seen = false;
+            for (u32 k = 0; k < distinct; ++k) seen = seen || hashes[k] == many.books.hash;
+            if (!seen) hashes[distinct++] = many.books.hash;
+        }
+        if (!engine) jobs_shutdown();
+        f64 many_ms = dist_of(medians).p50;
+        if (one.books.damage_lost || one.books.extra_deaths)
+            KV_ERROR("cpukiller", "brawl, %s, one thread: %lld damage lost, %lld extra deaths", names[v], (long long)one.books.damage_lost, (long long)one.books.extra_deaths);
+        format(cells[v][0], kCell, "%s", names[v]);
+        format(cells[v][1], kCell, "%.0f us", one.tick.p50 * 1e3);
+        format(cells[v][2], kCell, "%.0f us", many_ms * 1e3);
+        format(cells[v][3], kCell, "%.1f ns", g_fighters ? many_ms * 1e6 / g_fighters : 0.0);
+        format(cells[v][4], kCell, "%lld of %llu", (long long)lost, (unsigned long long)dealt);
+        format(cells[v][5], kCell, "%lld of %llu", (long long)extra, (unsigned long long)deaths);
+        format(cells[v][6], kCell, "%u in %u runs", distinct, runs);
+        format(cells[v][7], kCell, "%s", as_one ? "yes" : "NO");
+    }
+    char threads_head[32];
+    format(threads_head, sizeof threads_head, "%u threads", g_threads);
+    const char* heads[kCols] = {"brawl", "1 thread", threads_head, "a swing", "damage lost", "extra deaths", "endings", "as 1 thread"};
+    const u32 widths[kCols] = {28, 10, 11, 8, 20, 16, 13, 0};
+    print("\nbrawl: %u fighters, each swinging every tick, %u ticks a run. A tick's time; a swing's share of it on %u threads;\n"
+          "and of the %u-thread runs, the worst by the books, how many endings they had, and whether they ended as one thread did.\n",
+          g_fighters, ticks, g_threads, g_threads);
+    print_table(heads, kCols, cells[0][0], kCell, kVersions, widths);
+}
+
 // ---- the sweep: what scales, at every thread count -------------------------------------
 void scenario_sweep() {
     constexpr u32 kMaxSteps = 8, kCases = 8, kCell = 48;
@@ -716,6 +825,7 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) g_threads = (u32)atoi(argv[++i]);
         else if (strcmp(argv[i], "--bodies") == 0 && i + 1 < argc) g_bodies = (u32)atoi(argv[++i]);
         else if (strcmp(argv[i], "--ticks") == 0 && i + 1 < argc) g_ticks = (u32)atoi(argv[++i]);
+        else if (strcmp(argv[i], "--fighters") == 0 && i + 1 < argc) g_fighters = (u32)atoi(argv[++i]);
         else if (strcmp(argv[i], "--reps") == 0 && i + 1 < argc) g_reps = (u32)atoi(argv[++i]);
         else if (strcmp(argv[i], "--only") == 0 && i + 1 < argc) g_only = argv[++i];
         else if (strcmp(argv[i], "--spin") == 0 && i + 1 < argc) jobs_set_idle_spin(atof(argv[++i]) * 1e-6);
@@ -724,7 +834,7 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--md") == 0) g_md = true;
         else if (strcmp(argv[i], "--window") == 0) g_window = true;
         else if (strcmp(argv[i], "--profile") == 0 && i + 1 < argc) g_trace = argv[++i];
-        else { print_err("usage: %s [--threads N] [--bodies N] [--ticks N] [--reps N] [--spin US] [--only SCENARIO] [--quick] [--sweep] [--md] [--window] [--profile FILE]\n", argv[0]); return 2; }
+        else { print_err("usage: %s [--threads N] [--bodies N] [--ticks N] [--fighters N] [--reps N] [--spin US] [--only SCENARIO] [--quick] [--sweep] [--md] [--window] [--profile FILE]\n", argv[0]); return 2; }
     }
     if (g_threads < 1) g_threads = 1;
     if (g_sweep && g_window) { print_err("%s: --sweep runs without the window\n", argv[0]); return 2; }
@@ -752,7 +862,8 @@ int main(int argc, char** argv) {
             jobs_shutdown();
         }
         if (wanted("engine")) scenario_engine();
-        print_rows();
+        if (g_row_count) print_rows();
+        if (!g_window && wanted("brawl")) scenario_brawl();
     }
     prof_collect();
     prof_shutdown();
