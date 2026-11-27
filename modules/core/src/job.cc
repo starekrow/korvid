@@ -53,9 +53,9 @@ struct Batch {
     OsCond      cv{};            // the caller's, made only if it has to sleep
     // The one word every thread writes, on a cache line of its own (padded by hand: cl
     // warns of alignas on a member).
-    u8          pad0[64];
+    u8          pad0[64] = {};
     u32         claim = 0;       // atomic: the next chunk to take
-    u8          pad1[60];
+    u8          pad1[60] = {};
 };
 
 struct JobPool {
@@ -242,7 +242,13 @@ JobStats jobs_stats() {
     return s;
 }
 
-void jobs_stats_reset() { g_stats = JobStats{}; }
+// Each counter stored on its own: a worker that found nothing after the last batch counts its
+// wait as it goes to sleep, which is after jobs_run has returned to the caller.
+void jobs_stats_reset() {
+    u64* const all[] = {&g_stats.batches, &g_stats.inline_batches, &g_stats.tasks, &g_stats.tasks_by_caller,
+                        &g_stats.helper_waits, &g_stats.worker_waits};
+    for (u64* c : all) kv::atomic_store(c, u64{0}, kv::MO_RELAXED);
+}
 
 void jobs_run(u32 count, u32 grain, JobFn fn, void* user, const char* name) {
     u32 chunks = jobs_chunks(count, grain);

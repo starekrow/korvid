@@ -81,8 +81,9 @@ struct JobStats {
 };
 // The counters since the last reset, each read on its own.
 JobStats jobs_stats();
-// Zeroes the counters. A plain write, so call it between batches (examples/cpukiller
-// does, before each case it measures).
+// Zeroes the counters, each on its own. Call it between batches (examples/cpukiller does,
+// before each case it measures): a batch in flight counts into whichever side of the reset
+// it lands on, and a worker's wait after the last batch may land after it.
 void     jobs_stats_reset();
 
 } // namespace kv
