@@ -40,7 +40,7 @@ struct Gallery {
     HostWindow* window = nullptr;
     Renderer*   r = nullptr;
     const char* out = ".";
-    Handle checker, disc, glyph;         // textures
+    Handle checker, disc, glyph, sheet;  // textures
     Handle gear[3], badge;               // shapes, rasterized by patherizer (the ui scene)
     Handle opaque_checker, linear_checker, alpha_disc, add_disc, alpha_glyph, tinted_disc, rings; // materials
     Array<SpriteDelta> deltas;
@@ -150,6 +150,16 @@ void make_textures(Gallery& g) {
             p[0] = a ? 230 : 40; p[1] = a ? 200 : 90; p[2] = a ? 60 : 200; p[3] = 255;
         }
     g.checker = make_texture(g, "gallery.checker", 8, 8, checker);
+    // A sheet of three 4x4 cells across: blue, a red and yellow checker, blue. The ui scene
+    // draws the middle one alone, as Krome draws a region, and none of the blue may show.
+    u8 sheet[12 * 4 * 4];
+    for (u32 y = 0; y < 4; ++y)
+        for (u32 x = 0; x < 12; ++x) {
+            u8* p = sheet + (y * 12 + x) * 4;
+            bool mid = x >= 4 && x < 8, a = ((x + y) & 1) == 0;
+            p[0] = mid ? 230 : 30; p[1] = mid ? (a ? 210 : 40) : 60; p[2] = mid ? 40 : 230; p[3] = 255;
+        }
+    g.sheet = make_texture(g, "gallery.sheet", 12, 4, sheet);
     // A 64x64 disc: white, alpha falling off toward the rim, for blending and linear filtering.
     static u8 disc[64 * 64 * 4];
     for (u32 y = 0; y < 64; ++y)
@@ -443,7 +453,7 @@ void scene_shaders(Gallery& g) {
 }
 
 // The UI primitive (korvid/render/ui.h): boxes with every corner, border, gradient and
-// shadow it has, an image in a box, glyphs, and clips nested in clips, over a sprite
+// shadow it has, an image in a box, a region of a sheet, glyphs, and clips nested in clips, over a sprite
 // background, with a sprite on the layer above the list drawn over it.
 UiBox ui_box(f32 x, f32 y, f32 w, f32 h, color fill, f32 radius = 0.0f) {
     UiBox b;
@@ -541,6 +551,15 @@ void scene_ui(Gallery& g, UiList& l) {
             l.box(ic);
         }
         gx += sz + 24.0f;
+    }
+    // A region of a sheet (Krome slice 7): the middle cell at 6x and 11x nearest, then at 6x,
+    // 11x and 2.75x linear, each sample held half a texel inside it.
+    const f32 cells[][2] = {{384, 24}, {416, 44}, {468, 24}, {500, 44}, {552, 11}};
+    for (u32 i = 0; i < 5; ++i) {
+        UiBox cell = ui_box(cells[i][0], 380, cells[i][1], cells[i][1], white);
+        cell.textured = true; cell.nearest = i < 2; cell.texture = renderer_texture_slot(g.r, g.sheet);
+        cell.uv = rect2{4.0f / 12.0f, 0, 4.0f / 12.0f, 1};
+        l.box(cell);
     }
     UiBox badge = ui_box(800, 280, 120, 120, white);
     badge.textured = true; badge.texture = renderer_texture_slot(g.r, g.badge); badge.uv = rect2{0, 0, 1, 1};

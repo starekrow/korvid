@@ -239,6 +239,7 @@ constinit const KimbKernelProp k_props[] = {
     {"placeholder", KimbType::String, true},
     {"radius", KimbType::Box4, false},
     {"range", KimbType::Size, true},
+    {"region", KimbType::Box4, false},
     {"scroll", KimbType::String, true},
     {"scrollbar-color", KimbType::Color, false},
     {"scrollbar-size", KimbType::Number, false},
@@ -257,7 +258,7 @@ constinit const KimbKernelProp k_props[] = {
 
 const char* const k_nodes[] = {"box", "text", "image", "hit", "edit"};
 const char* const k_flags[] = {"fill", "clip", "scroll", "disabled", "selected", "hidden", "left", "center", "right", "top", "middle", "bottom",
-                               "subpixel", "nowrap", "multiline", "readonly", "focusable", "nofocus", "secret", "tabs"};
+                               "subpixel", "nowrap", "multiline", "readonly", "focusable", "nofocus", "secret", "tabs", "pixel"};
 const char* const k_states[] = {"hover", "pressed", "focused", "disabled", "selected"};
 
 bool in(const char* w, const char* const* list, u32 n) {
@@ -465,6 +466,17 @@ struct Checker {
             if (v->str() && !kimb_find_style(s, v->str(), nullptr)) err(line, "no style '%s'", v->str());
     }
 
+    // A node's looks by state (`hover { region=... }` among its children), as a style's are.
+    void node_looks(u32 line, const JsonValue* looks) {
+        if (!looks) return;
+        for (const JsonValue* l = json_first(f.doc, *looks); l; l = json_next(f.doc, *l)) {
+            if (!kimb_state(l->key)) { err(line, "'%s' is not a state (hover, pressed, focused, disabled, selected)", l->key); continue; }
+            char what[48];
+            format(what, sizeof what, "%s.", l->key);
+            kernel_props(line, what, l, true);
+        }
+    }
+
     static bool has_slot(const JsonDoc& doc, const JsonValue& n) {
         if (!strcmp(json_string(json_get(doc, n, "w"), ""), "slot")) return true;
         if (const JsonValue* c = json_get(doc, n, "c"))
@@ -507,13 +519,14 @@ struct Checker {
         }
         styles(line, json_get(f.doc, n, "s"));
         flags(line, json_get(f.doc, n, "f"));
+        node_looks(line, json_get(f.doc, n, "looks"));
         const JsonValue* p = json_get(f.doc, n, "p");
         const JsonValue* t = json_get(f.doc, n, "t");
         const JsonValue* a = json_get(f.doc, n, "a");
         if (kimb_kernel_node(w)) {
             kernel_props(line, "", p, false);
             bool takes_text = !strcmp(w, "text") || !strcmp(w, "edit");
-            if (t && !takes_text) err(line, "a %s takes no content: put a text in it", w);
+            if (t && !takes_text && strcmp(w, "image")) err(line, "a %s takes no content: put a text in it", w); // an image's is its path
             if (a) err(line, "a %s takes one content string", w);
             if (json_get(f.doc, n, "r") && !(p && json_get(f.doc, *p, "behave"))) err(line, "a %s takes no range: only one with a behaviour does", w);
             if (kids && (takes_text || !strcmp(w, "image"))) err(line, "a %s takes no children", w);

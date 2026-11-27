@@ -1,6 +1,6 @@
 # Krome Slice 7 — Pictures
 
-Nov 23, 2026 · @starekrow · draft
+Nov 23, 2026 · @starekrow · building (see As built)
 
 ## Goal and exit criteria
 
@@ -208,24 +208,51 @@ and `asset_tests` under `--sanitize address,undefined`; render-gate on each back
 machine at milestones 1, 2 and 5, which change what the shader does. Metal and D3D12 are
 written and not verified unless a machine is to hand: the status says which.
 
-## For review
+## Decided
 
-1. **Is this Krome's?** `sprite_ui` already draws nine-slices, strips and frames for a
-   game. The master PRD's open question, "does `ui` ever move onto Krome's layout or
-   documents", gets a push from this slice either way: after it Krome can draw what
-   `sprite_ui` draws.
-2. **The names.** `region`, `frames`, `frame`, `frame-at`, `fps`, `loops`, `fit`, `slice`,
-   `gain`, `hue`, `saturation`, `pixel`, `across`: thirteen words into a vocabulary of
-   about sixty. Blackwing's note names none; these are the draft's.
-3. **`pixel` inherited.** A flag that inherits is new: the others are a node's own. The
-   alternative is a look's property (`sampling=nearest`), which inherits the way `color`
-   does and costs a word in every look.
-4. **Tiling in the shader.** One box and a wrap in the shader, against boxes made on the
-   CPU. The wrap is one more branch for every UI pixel on every backend; the boxes are
-   nothing new to the renderer and many items for a small tile.
-5. **A bitmap font's file.** A text file of its own (`.kbf`), against a block in `.kim`
-   (`font digits { image=... cell=9,13 chars="..." }`), which keeps a skin in one file but
-   puts fonts into Krome's documents and out of reach of a game's `Text`.
-6. **KR34 without masks.** Until slice 8, `gain` on hover brightens a control's rect, not
-   its shape. For skins with square controls that is all of it; for XMPlay's it is not
-   yet right. The two could be ordered the other way.
+In review of the draft (Nov 26):
+
+- **Krome draws pictures as well as `sprite_ui` does.** The two meet a game's developer in
+  different places, and that is fine: neither moves onto the other here.
+- **The names stay as drafted.** They are looked at again after slice 8, once `.kim` files
+  have been written with them.
+- **`pixel` inherits.** A flag that inherits is probably unavoidable; it is the first.
+- **`tile` wraps in the shader**: one box, and one more branch for a textured pixel. A UI a
+  little slower everywhere, rather than one knob (a small tile over a large rect) turning
+  into thousands of items.
+- **A bitmap font is both.** A `.kbf` of its own, which the asset module reads as a strike
+  (and `sprite_text` can load one day, beside a `.ttf`), and a block in `.kim`, so a skin
+  can keep its fonts inline.
+- **KR34 before masks.** Slice 8 brings them shortly after.
+
+## As built
+
+**Milestone 1, Regions** (Nov 26).
+
+- **The UI primitive.** `UiBox::nearest` (head bit 20) picks the nearest sampler. A box's
+  uv is four floats now, not two unorm16 pairs: a cell of a 4,096-texel sheet needs better
+  than a sixteenth of a texel, and the pairs clamped a uv past 1 (the gallery's image in a
+  box asked for 2 x 1.5 repeats and drew one). The item is 24 words. The shader asks the
+  texture its size (`GetDimensions`) and holds the sample half a texel inside the uv rect;
+  the CPU renderer does the same from its decode. A whole image's edge is now clamped where
+  it wrapped, which changes a few edge pixels of every image Krome draws.
+- **Krome.** `region` is a look's (`KROME_LOOK_REGION`), so states move it; layout measures
+  it before the file is in; paint turns it into the uv; past the file's edge it is said once
+  (`krome_error`, both sizes) and the image draws nothing. `pixel` is `KROME_PIXEL`,
+  resolved into the look (`KromeLook::pixel`) from the node or any ancestor.
+- **Found on the way.** The PRD's own example could not be written: an image took no string,
+  and `.kim` had state blocks only in styles. An image's string is its path now, and a
+  state's word with a block among a node's children is that state's look (`"looks"` on the
+  node, which the builder already took from Lua). `kimb_check` checks them as a style's.
+- **Shown.** The gallery's `ui` scene draws a sheet's middle cell nearest and linear at 6x,
+  11x and 2.75x; Vulkan's and the CPU's references are remade, and agree with each other
+  within the tolerance. kromedemo's gallery has two buttons cut from `skin.png` at 2x and one
+  at 1x, with hover and pressed regions; `--demo` presses one.
+- **Tested.** `renderer_cpu_tests` draws a red cell between two blue ones at 1.5x to 2.75x,
+  linear and nearest, and finds no blue (without the hold it does). `krome_tests`' pictures
+  test: the region's parse and its refusals, its measure, a state's region, the source rect
+  and its edge, `pixel` inherited, and the PRD's sheet in `.kim` built and laid out at
+  scales 1 and 1.5. Window scales 1.5 and 2 are not run as kromedemo pictures: no window here
+  can be asked for a scale, so the tests stand for them.
+- **Not verified:** Metal and D3D12 (`GetDimensions` on their bindless arrays is untried);
+  their `ui` references are stale.

@@ -315,7 +315,7 @@ bool krome_startup(Engine& e, ModuleInstance& self) {
     s->set_docs.alloc = &self.general;
     s->set_texts.alloc = &self.general;
     s->fonts.alloc = &self.general;
-    s->images.alloc = &self.general;
+    s->images.alloc = s->image_errors.alloc = &self.general;
     s->layers.alloc = &self.general;
     s->list.init(&self.general);
     if (!krome_lua_open(*s)) return false;

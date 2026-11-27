@@ -40,7 +40,10 @@ struct UiBox {
     f32   shadow_spread = 0.0f;
     color shadow_color{0, 0, 0, 0};
     bool  textured = false;     // the fill is multiplied by the texture
+    bool  nearest = false;      // sampled nearest, not linear (a pixel-art skin drawn larger)
     u32   texture = 0;          // a bindless slot (renderer_texture_slot)
+    // The part of the texture drawn over the rect, 0 to 1. Every sample is held half a texel
+    // inside it, so a region of a sheet never reads its neighbour.
     rect2 uv{0, 0, 1, 1};
     u32   clip = 0;             // UiList::clip's index; 0 is no clip
 };

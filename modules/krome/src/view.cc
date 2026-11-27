@@ -115,6 +115,17 @@ vec2 measure_image(void* user, Name path) {
     return vec2{0, 0};
 }
 
+} // namespace
+
+bool krome_image_source(const KromeLook& l, f32 w, f32 h, rect2* out) {
+    *out = rect2{0, 0, w, h};
+    if (!(l.set & KROME_LOOK_REGION)) return true;
+    *out = rect2{l.region[0], l.region[1], l.region[2], l.region[3]};
+    return l.region[0] + l.region[2] <= w && l.region[1] + l.region[3] <= h;
+}
+
+namespace {
+
 // ---- rects -------------------------------------------------------------------------------------------
 
 bool inside(rect2 r, f32 x, f32 y) { return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h; }
@@ -412,6 +423,17 @@ void paint_shape(Paint& p, u32 node, const KromeNode& n, const KromeLook& l, rec
     p.list.box(b);
 }
 
+// A region that reaches outside its file: said once, naming both sizes; the image draws nothing.
+void region_outside(Paint& p, u32, const KromeNode& n, const KromeLook& l, const TextureAsset* img) {
+    u64 key = l.image.hash;
+    for (u32 k = 0; k < 4; ++k) key = key * 1000003u ^ (u64)(u32)l.region[k];
+    for (u64 k : p.s.image_errors) if (k == key) return;
+    p.s.image_errors.push(key);
+    const char* file = p.sc.file ? p.sc.file->file : name_str(p.sc.name);
+    krome_error(p.s, file, n.line, nullptr, 0, "region=%g,%g,%g,%g reaches outside %s, which is %u x %u",
+                (f64)l.region[0], (f64)l.region[1], (f64)l.region[2], (f64)l.region[3], name_str(l.image), img->width, img->height);
+}
+
 void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u32 clip) {
     const KromeNode& n = p.tree.nodes[node];
     if (n.flags & KROME_HIDDEN) return;
@@ -443,12 +465,21 @@ void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u3
             b.shadow_color = faded(l.shadow_color, l.opacity);
         }
         if (img) {
-            b.textured = true;
-            b.texture = p.r ? renderer_texture_slot(p.r, img->texture) : 0;
-            if (!fill) b.fill = faded(l.tint, l.opacity);
+            rect2 src;
+            f32 tw = (f32)img->width, th = (f32)img->height;
+            if (krome_image_source(l, tw, th, &src) && tw > 0.0f && th > 0.0f) {
+                b.textured = true;
+                b.texture = p.r ? renderer_texture_slot(p.r, img->texture) : 0;
+                b.uv = rect2{src.x / tw, src.y / th, src.w / tw, src.h / th};
+                b.nearest = l.pixel;
+                if (!fill) b.fill = faded(l.tint, l.opacity);
+            } else {
+                region_outside(p, node, n, l, img);
+                if (!fill && !edge && !shade) b.fill = color{0, 0, 0, 0};
+            }
         }
         b.clip = clip;
-        p.list.box(b);
+        if (b.textured || fill || edge || shade) p.list.box(b);
     }
     // A shape over the node's own box (its background, border and shadow).
     if (shp && r.w >= 1.0f && r.h >= 1.0f) paint_shape(p, node, n, l, r, *ki, *shp, clip);
@@ -1489,6 +1520,7 @@ void krome_free_view(KromeModule& s) {
     krome_shapes_free(s, s.e ? renderer_get(*s.e) : nullptr);
     s.fonts.free();
     s.images.free();
+    s.image_errors.free();
     s.layers.free();
     s.list.free();
     s.grips.free();

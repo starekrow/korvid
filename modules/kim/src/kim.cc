@@ -19,6 +19,12 @@ struct Prop {
     u32         order; // as written, so the last of a repeated key wins
 };
 
+struct Look {
+    const char* state;
+    u32         line;
+    Array<Prop> props;
+};
+
 struct Node {
     const char*        word = nullptr;
     u32                line = 0;
@@ -39,18 +45,13 @@ struct Node {
     Array<const char*> styles{};
     Array<JsonRef>     strings{};
     Array<Node*>       kids{};
+    Array<Look>        looks{}; // `hover { region=60,0,20,20 }` among its children: a state's look
 };
 
 struct Named { // a screen, definition, style or theme
     const char* name;
     u32         line;
     void*       what;
-};
-
-struct Look {
-    const char* state;
-    u32         line;
-    Array<Prop> props;
 };
 
 struct Style {
@@ -375,6 +376,7 @@ struct Parser {
             if (broken) return;
             if (end()) { err_at(open_line, "this block is never closed"); broken = true; return; }
             if (peek() == '}') { ++at; return; }
+            if (node_look(n)) continue;
             Node* k = node();
             if (k) n->kids.push(k);
             if (broken) return;
@@ -382,12 +384,39 @@ struct Parser {
         }
     }
 
+    // A state's look among a node's children (`hover { bg=accent }`), as a style has: true
+    // when there was one, read up to and past its closing brace.
+    bool node_look(Node* n) {
+        static const char* const states[] = {"hover", "pressed", "focused", "disabled", "selected"};
+        usize was = at;
+        const char* w = word();
+        bool state = false;
+        for (const char* st : states) if (w && !strcmp(w, st)) state = true;
+        if (state) blanks();
+        if (!state || peek() != '{') { at = was; return false; }
+        u32 sl = line;
+        Look look{w, sl, {}};
+        owned(look.props);
+        ++at; // the brace
+        for (;;) {
+            space();
+            if (end()) { err_at(sl, "this block is never closed"); broken = true; return true; }
+            if (peek() == '}') { ++at; break; }
+            const char* inner = pairs(look.props, nullptr, nullptr);
+            if (inner) { err(col(), "a look holds name=value, not a block"); skip_block(); }
+        }
+        for (Look& o : n->looks)
+            if (!strcmp(o.state, w)) { for (const Prop& p : look.props) o.props.push(p); return true; }
+        n->looks.push(look);
+        return true;
+    }
+
     Node* new_node(const char* w, u32 l) {
         Node* n = make<Node>();
         if (!n) { broken = true; return nullptr; }
         n->word = w;
         n->line = l;
-        owned(n->flags); owned(n->props); owned(n->styles); owned(n->strings); owned(n->kids);
+        owned(n->flags); owned(n->props); owned(n->styles); owned(n->strings); owned(n->kids); owned(n->looks);
         return n;
     }
 
@@ -768,6 +797,24 @@ struct Parser {
         return o;
     }
 
+    // Looks by state name; a style's each have a line in the sidecar, a node's take the node's.
+    JsonRef looks_map(Array<Look>& looks, bool marked) {
+        Array<u32> li = array_in<u32>(alloc);
+        for (u32 k = 0; k < looks.len; ++k) {
+            u32 j = 0;
+            while (j < li.len && strcmp(looks[li[j]].state, looks[k].state) < 0) ++j;
+            li.push(k);
+            memmove(&li.data[j + 1], &li.data[j], (li.len - 1 - j) * sizeof(u32));
+            li.data[j] = k;
+        }
+        JsonRef lo = b.object();
+        for (u32 k : li) {
+            if (marked) mark(looks[k].line);
+            b.set(lo, looks[k].state, prop_map(looks[k].props));
+        }
+        return lo;
+    }
+
     JsonRef emit_node(Node* n) {
         JsonRef o = b.object();
         mark(n->line);
@@ -793,6 +840,7 @@ struct Parser {
         if (n->from != KV_JSON_NO_REF) b.set(o, "from", n->from);
         if (n->on) b.set(o, "on", b.string(n->on));
         if (n->on_value) b.set(o, "ov", b.string(n->on_value));
+        if (n->looks.len) b.set(o, "looks", looks_map(n->looks, false));
         if (n->kids.len) {
             JsonRef c = b.array();
             for (Node* k : n->kids) b.push(c, emit_node(k));
@@ -871,23 +919,7 @@ struct Parser {
                 if (st->bases.len) b.set(so, "s", words(st->bases));
                 if (st->flags.len) b.set(so, "f", words(st->flags));
                 if (st->props.len) b.set(so, "p", prop_map(st->props));
-                if (st->looks.len) {
-                    // Looks by state name.
-                    Array<u32> li = array_in<u32>(alloc);
-                    for (u32 k = 0; k < st->looks.len; ++k) {
-                        u32 j = 0;
-                        while (j < li.len && strcmp(st->looks[li[j]].state, st->looks[k].state) < 0) ++j;
-                        li.push(k);
-                        memmove(&li.data[j + 1], &li.data[j], (li.len - 1 - j) * sizeof(u32));
-                        li.data[j] = k;
-                    }
-                    JsonRef lo = b.object();
-                    for (u32 k : li) {
-                        mark(st->looks[k].line);
-                        b.set(lo, st->looks[k].state, prop_map(st->looks[k].props));
-                    }
-                    b.set(so, "looks", lo);
-                }
+                if (st->looks.len) b.set(so, "looks", looks_map(st->looks, true));
                 b.set(o, styles[i].name, so);
             }
             b.set(root, "styles", o);

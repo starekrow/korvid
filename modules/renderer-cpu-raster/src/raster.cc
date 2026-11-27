@@ -384,8 +384,10 @@ inline void box_color(const CpuUi& u, const CpuLuts& lut, f32 x, f32 y, f32 out[
     }
     if (u.textured) {
         f32 ax = (x - u.rx) / max_f(u.rw, 1e-6f), ay = (y - u.ry) / max_f(u.rh, 1e-6f);
+        f32 su = min_f(max_f(u.uv0[0] + u.uvd[0] * ax, u.uvlo[0]), u.uvhi[0]);
+        f32 sv = min_f(max_f(u.uv0[1] + u.uvd[1] * ay, u.uvlo[1]), u.uvhi[1]);
         u32 t[4];
-        sample(u.tex, 1, lut, u.uv0[0] + u.uvd[0] * ax, u.uv0[1] + u.uvd[1] * ay, t);
+        sample(u.tex, u.nearest ? 0 : 1, lut, su, sv, t);
         f32 ta = (f32)t[3] / 65535.0f;
         fill[0] = fill[0] * ((f32)t[0] / 65535.0f) * ta;
         fill[1] = fill[1] * ((f32)t[1] / 65535.0f) * ta;

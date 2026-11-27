@@ -695,9 +695,15 @@ void node(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const Kro
     t.nodes[id].line = line;
     styles(b, fr, id, f, line, json_get(f.doc, n, "s"));
     flags(b, fr, id, f, line, json_get(f.doc, n, "f"));
+    // An image's string is its path (`image "skin/buttons.png" region=...`): what image= says, under it.
+    const JsonValue* tv = json_get(f.doc, n, "t");
+    if (type == KromeType::Image && tv && tv->str()) {
+        t.set(id, "image", KromeValue::str(expand(b, fr, tv->str())));
+        tv = nullptr;
+    }
     props(b, fr, id, f, line, json_get(f.doc, n, "p"), KromeState::Base);
     looks(b, fr, id, f, line, json_get(f.doc, n, "looks"));
-    if (const JsonValue* tv = json_get(f.doc, n, "t")) {
+    if (tv) {
         if (const char* raw = tv->str()) {
             const char* text = expand(b, fr, raw);
             t.set_text(id, text);

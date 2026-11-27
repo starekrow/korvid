@@ -322,7 +322,7 @@ Properties: layout `w`, `h` (a number, a percentage, `hug`, `fill`, a range), `p
 `key` (a shortcut), `step`, `range` (Lua's form of a node's `1..99`); an edit's `placeholder`,
 `change`, `blur`; `cursor`; `grip` (`move`, an edge or corner by compass point, `none`); any of them `@key` (bound to the model); look `bg`, `bg2` (a gradient to it), `angle`, `radius` (one, two
 or four), `border`, `border-color`, `shadow` (x y blur [spread]), `shadow-color`, `color`,
-`opacity`, `font`, `size`, `line-height`, `image`, `tint`, `caret-color`, `selection-color`,
+`opacity`, `font`, `size`, `line-height`, `image`, `region` (x, y, w, h), `tint`, `caret-color`, `selection-color`,
 `scrollbar-color`, `scrollbar-track`, `scrollbar-size`, `transition` (seconds: the node's
 colors and opacity ease to what its look resolves to whenever that changes, by state,
 selection, theme or a bound value, on the Frame cycle's clock, turning around from where they
@@ -340,7 +340,18 @@ used longest ago is cleared). A shape of more than 256 x 256 pixels is rasterize
 worker of the platform's I/O queue: its node draws nothing until it lands, or, when the same
 shape is already drawn at another size or colour (a window being resized), that picture
 stretched; `krome_stats` counts the jobs. A path bound to the model (`image=@n.arrow`) may be `""`: no image. An image that
-fails to load draws nothing and does not hold a screen unsettled.
+fails to load draws nothing and does not hold a screen unsettled. An image's string is its
+path: `image "skin/buttons.png"` is `image image="skin/buttons.png"`.
+
+**Pictures** (slice 7). `region=x,y,w,h`, in the file's pixels, draws that part of a texture:
+a sheet's cell. It is a look's, so a state moves it (`hover { region=60,0,20,20 }`, written in
+`.kim` among the node's children, or in a style), and a node with one measures as the
+region, before its file is in. Every sample is held half a texel inside it, so linear
+sampling never reads the cell beside it. A region past the file's edge is an error naming
+both sizes, once, when the texture lands, and the image draws nothing. One texture serves
+every node cut from it. Shapes take no region. The flag `pixel` samples a node's images,
+and those of everything under it, nearest: a skin's pixels stay square at any scale. It is
+the one flag that inherits; a skin sets it at its root.
 
 **Icons** (`krome/icons/<name>.svg`): Material Symbols, Outlined, weight 400, 20 px (Apache
 2.0, `icons/LICENSE`; the list and the pinned commit in `icons/README.md`): `check`,
@@ -351,7 +362,8 @@ and the dropdown's arrow with them; a tree's model names its arrows (kromedemo's
 kromescreens do). They are drawn on a 20 px grid: 20 is their size, and smaller is scaled.
 
 Flags: `fill`, `clip`, `scroll`, `disabled`, `selected`, `hidden`, the alignments,
-`subpixel`, `nowrap`, `multiline`, `readonly`, `focusable`, `nofocus`, `secret`, `tabs`. The
+`subpixel`, `nowrap`, `multiline`, `readonly`, `focusable`, `nofocus`, `secret`, `tabs`,
+`pixel` (inherited). The
 vocabulary is fixed (`modules/kimb`); `prop name type` in a prelude types a definition's
 parameter.
 

@@ -150,6 +150,8 @@ constinit const Step k_steps[] = {
     {Act::Key, "tab", 0, ""},                // on to the name, by the keyboard
     {Act::Type, "Rowan", 0, nullptr},
     {Act::Check, "name", 0, "Rowan"},
+    {Act::Click, "skin_stop", 0, nullptr},   // a region of the skin's sheet takes a press as any node does
+    {Act::Check, "last", 0, "skin_stop"},
     {Act::Click, "textures", 0, nullptr},  // closes the textures folder
     {Act::Click, "tab_table", 0, nullptr},
     {Act::Shot, "gallery_table", 0, nullptr},

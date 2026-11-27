@@ -316,11 +316,20 @@ bool prepare_ui(Renderer* r, const UiView& v, const u8* region, const u8* item, 
         }
         if (u.textured) {
             f32 uv1[2];
-            ui_uv(word_at(item + 80), u.uv0);
-            ui_uv(word_at(item + 84), uv1);
+            u.uv0[0] = float_at(item + 80); u.uv0[1] = float_at(item + 84);
+            uv1[0] = float_at(item + 88); uv1[1] = float_at(item + 92);
             u.uvd[0] = uv1[0] - u.uv0[0];
             u.uvd[1] = uv1[1] - u.uv0[1];
             u.tex = texture_of(r, word_at(item + 4));
+            u.nearest = (head & (1u << 20)) != 0;
+            // fs_ui's hold: half a texel inside the uv rect.
+            f32 hw = 0.5f / (f32)(u.tex.width ? u.tex.width : 1), hh = 0.5f / (f32)(u.tex.height ? u.tex.height : 1);
+            for (u32 k = 0; k < 2; ++k) {
+                f32 a = u.uv0[k], b = uv1[k], h = k ? hh : hw;
+                f32 least = (a < b ? a : b) + h, most = (a < b ? b : a) - h;
+                u.uvlo[k] = least;
+                u.uvhi[k] = most > least ? most : least;
+            }
         }
         u.shadow = u.shade[3] > 0.0f;
         f32 grow = 1.0f;

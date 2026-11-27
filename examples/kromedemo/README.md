@@ -13,7 +13,8 @@ The second page is the widget gallery (`assets/gallery.kim`, its model and handl
 `assets/gallery.lua`): every widget `krome/std` has (slider, progress, radio, checkbox,
 dropdown, input and password, buttons with a shortcut and a tooltip, a menu bar, tabs over a
 tree, a 10,000-row table with sortable, resizable columns and a context menu, a splitter
-between scroll views, a modal dialog). The header's navigation (in both forms, and the
+between scroll views, a modal dialog), and a skin's buttons cut from one sheet
+(`assets/skin.png`), their hover and pressed looks regions beside them, drawn `pixel`. The header's navigation (in both forms, and the
 gallery) fires `nav`; the game opens the page it names in place of the one shown.
 
     build/linux-dev/bin/kromedemo                    # the form

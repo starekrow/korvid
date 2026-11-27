@@ -117,6 +117,65 @@ void test_tile_cache(TestCtx& c) {
     engine_shutdown(e);
 }
 
+// A region of a sheet (Krome slice 7, KR28): the red middle cell of a blue, red, blue strip
+// drawn at 1.5x, 2x and 2.75x, linear and nearest. Held half a texel inside its uv rect, no
+// pixel of it reads the blue beside it.
+void test_region(TestCtx& c) {
+    c.begin("renderer-cpu a region of a sheet");
+    const ModuleDesc* const list[] = {&platform_module, &renderer_cpu_module};
+    Engine e;
+    KV_CHECK(c, engine_init(e, list));
+    RendererDesc d;
+    d.backend = RendererBackend::Cpu;
+    d.width = 64;
+    d.height = 16;
+    rb_cpu::Renderer* r = rb_cpu::renderer_create(e, d);
+    KV_CHECK(c, r != nullptr);
+    if (!r) { engine_shutdown(e); return; }
+    u8 sheet[12 * 4 * 4];
+    for (u32 y = 0; y < 4; ++y)
+        for (u32 x = 0; x < 12; ++x) {
+            u8* p = sheet + (y * 12 + x) * 4;
+            bool mid = x >= 4 && x < 8;
+            p[0] = mid ? 255 : 0; p[1] = 0; p[2] = mid ? 0 : 255; p[3] = 255;
+        }
+    TextureDesc td;
+    td.name = "test.sheet";
+    Handle t = rb_cpu::renderer_texture_create(r, td);
+    KV_CHECK(c, rb_cpu::renderer_texture_upload(r, t, 12, 4, sheet, sizeof sheet));
+    RenderView v;
+    v.clear_color = color{0, 0, 0, 1};
+    KV_CHECK(c, rb_cpu::renderer_render(r, v)); // the upload lands
+    UiList ui;
+    ui.init(mem_general());
+    struct Draw { f32 x, size; bool nearest; };
+    const Draw draws[] = {{0, 6, false}, {8, 8, false}, {18, 11, false}, {32, 6, true}, {40, 11, true}};
+    for (const Draw& dr : draws) {
+        UiBox b;
+        b.rect = rect2{dr.x, 2, dr.size, dr.size};
+        b.fill = color{1, 1, 1, 1};
+        b.textured = true;
+        b.nearest = dr.nearest;
+        b.texture = rb_cpu::renderer_texture_slot(r, t);
+        b.uv = rect2{4.0f / 12.0f, 0, 4.0f / 12.0f, 1};
+        ui.box(b);
+    }
+    rb_cpu::renderer_ui_set(r, 0, ui);
+    KV_CHECK(c, rb_cpu::renderer_render(r, v));
+    u32 red = 0, blue = 0;
+    for (const Draw& dr : draws)
+        for (u32 y = 2; y < 2 + (u32)dr.size; ++y)
+            for (u32 x = (u32)dr.x; x < (u32)(dr.x + dr.size); ++x) {
+                const u8* px = r->headless.data + (y * 64 + x) * 4; // B, G, R, A
+                red += px[2] == 255;
+                blue += px[0] != 0;
+            }
+    KV_CHECK(c, red == 36 + 64 + 121 + 36 + 121 && blue == 0);
+    ui.free();
+    rb_cpu::renderer_destroy(r);
+    engine_shutdown(e);
+}
+
 // The game shaders' registry (shader.h): the game's own form before Slang's, a skipped
 // shader found as skipped, an unknown one not at all.
 void own_form(const CpuShaderCall&) {}
@@ -144,6 +203,7 @@ int main() {
     kv::TestCtx c;
     test_headless(c);
     test_tile_cache(c);
+    test_region(c);
     test_shader_registry(c);
     kv::names_shutdown();
     kv::mem_shutdown();

@@ -10,7 +10,7 @@ namespace kv {
 namespace {
 
 constexpr u32 k_kind_box = 0, k_kind_glyph = 1;
-constexpr u32 k_box_gradient = 1u << 18, k_box_textured = 1u << 19;
+constexpr u32 k_box_gradient = 1u << 18, k_box_textured = 1u << 19, k_box_nearest = 1u << 20;
 
 u32 bits_of(f32 f) { u32 u; memcpy(&u, &f, sizeof u); return u; }
 
@@ -67,7 +67,7 @@ u32 UiList::clip(rect2 r) {
 
 void UiList::box(const UiBox& b) {
     offsets.push(words.len);
-    u32 flags = (b.gradient ? k_box_gradient : 0) | (b.textured ? k_box_textured : 0);
+    u32 flags = (b.gradient ? k_box_gradient : 0) | (b.textured ? k_box_textured : 0) | (b.nearest ? k_box_nearest : 0);
     words.push(k_kind_box | clip_of(*this, b.clip) << 2 | flags);
     words.push(b.texture);
     words.push(rgba8(b.fill));
@@ -84,8 +84,12 @@ void UiList::box(const UiBox& b) {
     words.push(bits_of(b.shadow_offset.y));
     words.push(bits_of(b.shadow_blur < 0 ? 0 : b.shadow_blur));
     words.push(bits_of(b.shadow_spread));
-    words.push(uv_pair(b.uv.x, b.uv.y));
-    words.push(uv_pair(b.uv.x + b.uv.w, b.uv.y + b.uv.h));
+    // A box's uv is four floats: a region of a 4096-texel sheet needs better than unorm16's
+    // sixteenth of a texel.
+    words.push(bits_of(b.uv.x));
+    words.push(bits_of(b.uv.y));
+    words.push(bits_of(b.uv.x + b.uv.w));
+    words.push(bits_of(b.uv.y + b.uv.h));
 }
 
 void UiList::glyph(const UiGlyph& g) {

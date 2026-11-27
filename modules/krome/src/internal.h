@@ -192,6 +192,9 @@ struct KromeFont { Name path; u32 px; Handle asset; bool ready; };
 // An image node's asset: a texture, or a shape (a path to an .svg or a .kshape), which is
 // rasterized at the size it is drawn (shapes.cc).
 struct KromeImage { Name path; Handle asset; bool ready; bool shape = false; };
+// The part of a w x h image (the file's pixels) a look draws: its region, else the whole.
+// False when the region reaches outside the file.
+bool krome_image_source(const KromeLook& l, f32 w, f32 h, rect2* out);
 
 // The shapes' pages (shapes.cc): rasterized shapes packed as glyphs are, a texture each.
 struct KromeShapePage {
@@ -283,6 +286,7 @@ struct KromeModule {
     bool                viewport_fixed = false;
     Array<KromeFont>    fonts;
     Array<KromeImage>   images;
+    Array<u64>          image_errors; // the images whose region was found outside their file, said once each
     Array<KromeShapePage>  shape_pages;
     Array<KromeShapeEntry> shape_entries;
     u64                 shape_clock = 0;

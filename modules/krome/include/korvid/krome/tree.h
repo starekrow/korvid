@@ -61,6 +61,7 @@ struct KromeLook {
     Name  font;                            // an asset path, interned
     f32   size = 0.0f;                     // font size, logical pixels
     Name  image;                           // an image node's texture, by asset path
+    f32   region[4] = {};                  // x, y, w, h in the file's pixels: the part of it drawn (set: KROME_LOOK_REGION)
     color tint{1, 1, 1, 1};
     f32   line_height = 0.0f;              // a text's lines, times its size; 0: the font's own
     color caret_color{0, 0, 0, 0};         // an edit's caret; unset: its text's color
@@ -69,6 +70,7 @@ struct KromeLook {
     color scrollbar_track{0, 0, 0, 0};     // and the track under it
     f32   scrollbar_size = 6.0f;           // its width, logical pixels
     f32   transition = 0.0f;               // seconds its colors and opacity ease over when they change; 0 at once
+    bool  pixel = false;                   // resolved: the node or an ancestor is `pixel` (images sampled nearest)
     u32   set = 0;
 };
 
@@ -93,6 +95,7 @@ constexpr u32 KROME_LOOK_SCROLLBAR_COLOR = 1u << 17;
 constexpr u32 KROME_LOOK_SCROLLBAR_TRACK = 1u << 18;
 constexpr u32 KROME_LOOK_SCROLLBAR_SIZE = 1u << 19;
 constexpr u32 KROME_LOOK_TRANSITION = 1u << 20;
+constexpr u32 KROME_LOOK_REGION   = 1u << 21;
 constexpr u32 KROME_LOOK_INHERITED = KROME_LOOK_COLOR | KROME_LOOK_FONT | KROME_LOOK_SIZE | KROME_LOOK_LINE_HEIGHT;
 
 // Node flags.
@@ -113,6 +116,7 @@ constexpr u32 KROME_FOCUSABLE = 1u << 13; // takes the keyboard focus though it 
 constexpr u32 KROME_NOFOCUS   = 1u << 14; // never takes it, though it has one
 constexpr u32 KROME_SECRET    = 1u << 15; // an edit drawn as bullets, never copied
 constexpr u32 KROME_TABS      = 1u << 16; // an edit that keeps Tab (a code editor's) rather than leaving on it
+constexpr u32 KROME_PIXEL     = 1u << 17; // its images, and those of everything under it, are sampled nearest: a skin's pixels stay square
 
 // Modifier keys, as a shortcut and a behaviour's key call see them.
 constexpr u32 KROME_MOD_SHIFT = 1u << 0;

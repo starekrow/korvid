@@ -68,7 +68,9 @@ struct Layout {
                 narrow = c.x;
             }
         } else if (n.type == KromeType::Image) {
-            if (m.image && (l.set & KROME_LOOK_IMAGE)) c = m.image(m.user, l.image);
+            // A region measures as its own size, the file's whatever it is.
+            if (l.set & KROME_LOOK_REGION) c = vec2{l.region[2], l.region[3]};
+            else if (m.image && (l.set & KROME_LOOK_IMAGE)) c = m.image(m.user, l.image);
         }
         // Children: along the direction they add up, across it the largest; in a stack the
         // largest each way.

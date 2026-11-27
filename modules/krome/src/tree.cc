@@ -156,6 +156,13 @@ bool look_prop(KromeLook& l, const char* prop, const KromeValue& v, const char**
     if (!strcmp(prop, "line-height"))  { if (v.kind != KromeValue::Number || v.n <= 0) *why = "line-height takes a number above 0, times the size"; else { l.line_height = v.n; l.set |= KROME_LOOK_LINE_HEIGHT; } return true; }
     if (!strcmp(prop, "font"))         { if (v.kind != KromeValue::String) *why = "font takes an asset path"; else { l.font = name_intern(v.s); l.set |= KROME_LOOK_FONT; } return true; }
     if (!strcmp(prop, "image"))        { if (v.kind != KromeValue::String) *why = "image takes an asset path"; else { l.image = name_intern(v.s); l.set |= KROME_LOOK_IMAGE; } return true; }
+    if (!strcmp(prop, "region")) {
+        // x, y, w, h in the file's pixels.
+        if (!numbers(v, f, 4, &n) || n != 4 || f[0] < 0 || f[1] < 0 || !(f[2] > 0) || !(f[3] > 0)) { *why = "region takes x, y, w and h: a corner at 0 or more, a size above 0"; return true; }
+        memcpy(l.region, f, sizeof l.region);
+        l.set |= KROME_LOOK_REGION;
+        return true;
+    }
     if (!strcmp(prop, "radius")) {
         if (!numbers(v, f, 4, &n) || n == 3) { *why = "radius takes one, two or four numbers"; return true; }
         if (n == 1) f[1] = f[2] = f[3] = f[0];
@@ -191,6 +198,7 @@ void overlay(KromeLook& to, const KromeLook& from) {
     if (s & KROME_LOOK_FONT) to.font = from.font;
     if (s & KROME_LOOK_SIZE) to.size = from.size;
     if (s & KROME_LOOK_IMAGE) to.image = from.image;
+    if (s & KROME_LOOK_REGION) memcpy(to.region, from.region, sizeof to.region);
     if (s & KROME_LOOK_TINT) to.tint = from.tint;
     if (s & KROME_LOOK_LINE_HEIGHT) to.line_height = from.line_height;
     if (s & KROME_LOOK_CARET_COLOR) to.caret_color = from.caret_color;
@@ -362,7 +370,7 @@ const char* KromeTree::set(u32 node, const char* prop, const KromeValue& v, Krom
     if (why) return why;
     if (!at) { at = looks.len; looks.push(l); *slot = state == KromeState::Base ? at : at + 1; }
     else looks[at] = l;
-    if (!strcmp(prop, "font") || !strcmp(prop, "size") || !strcmp(prop, "image") || !strcmp(prop, "line-height")) dirty = true;
+    if (!strcmp(prop, "font") || !strcmp(prop, "size") || !strcmp(prop, "image") || !strcmp(prop, "line-height") || !strcmp(prop, "region")) dirty = true;
     return nullptr;
 }
 
@@ -387,7 +395,8 @@ const char* KromeTree::flag(u32 node, const char* w) {
                                {"disabled", KROME_DISABLED}, {"selected", KROME_SELECTED}, {"hidden", KROME_HIDDEN},
                                {"subpixel", KROME_SUBPIXEL}, {"nowrap", KROME_NOWRAP},
                                {"multiline", KROME_MULTILINE}, {"readonly", KROME_READONLY},
-                               {"focusable", KROME_FOCUSABLE}, {"nofocus", KROME_NOFOCUS}, {"secret", KROME_SECRET}, {"tabs", KROME_TABS}};
+                               {"focusable", KROME_FOCUSABLE}, {"nofocus", KROME_NOFOCUS}, {"secret", KROME_SECRET}, {"tabs", KROME_TABS},
+                               {"pixel", KROME_PIXEL}};
     for (const Bit& b : bits) if (!strcmp(w, b.word)) { n.flags |= b.bit; dirty = true; return nullptr; }
     if (!strcmp(w, "left"))   { n.align_x = KromeAlign::Start; dirty = true; return nullptr; }
     if (!strcmp(w, "center")) { n.align_x = KromeAlign::Center; dirty = true; return nullptr; }
@@ -414,6 +423,8 @@ KromeLook KromeTree::resolve_look(u32 node, KromeState state, const KromeLook* p
     if (!(l.set & KROME_LOOK_SIZE)) l.size = parent ? parent->size : KROME_DEFAULT_SIZE;
     if (!(l.set & KROME_LOOK_LINE_HEIGHT)) l.line_height = parent ? parent->line_height : 0.0f;
     if (parent) l.opacity *= parent->opacity;
+    // `pixel` is a flag that inherits: a skin says it once, at its root.
+    l.pixel = (n.flags & KROME_PIXEL) || (parent && parent->pixel);
     // What was inherited counts as said from here down.
     l.set |= KROME_LOOK_INHERITED;
     return l;

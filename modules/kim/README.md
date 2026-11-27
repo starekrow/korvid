@@ -51,3 +51,7 @@ the command line; goldberg compiles `.kim` in process (its built-in `kim` conver
 - **A bare word as a value is a string.** Whether `bg=panel2` is a theme token and
   `w=fill` a keyword is Krome's to say.
 - **`id=` is not a property.** It is the node's `"id"`.
+- **A state's word among a node's children is a look**, when a block follows it on its line:
+  `hover { region=20,0,20,20 }` is the node's `"looks": {"hover": {...}}`, as a style's is
+  (Krome slice 7). A definition named `hover`, `pressed`, `focused`, `disabled` or
+  `selected` cannot be used with a block of children.

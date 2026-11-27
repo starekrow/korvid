@@ -20,6 +20,7 @@ void test_hooks(kv::TestCtx&);
 void test_rebuild(kv::TestCtx&);
 void test_reload(kv::TestCtx&);
 void test_grips(kv::TestCtx&);
+void test_pictures(kv::TestCtx&);
 
 int main() {
     kv::TestCtx c;
@@ -41,6 +42,7 @@ int main() {
     test_rebuild(c);
     test_reload(c);
     test_grips(c);
+    test_pictures(c);
     kv::names_shutdown();
     kv::mem_shutdown();
     return kv::test_report(c, "krome_tests");

@@ -72,6 +72,25 @@ screen gallery {
                 labeled "Secret" {
                     password id=secret @secret placeholder="Password"
                 }
+                // A skin's buttons (Krome slice 7): regions of one sheet (skin.png, 20 x 20
+                // cells), a state's look a region beside it, drawn twice their size with
+                // their pixels square.
+                labeled "Skin" {
+                    row gap=8 middle pixel {
+                        image "kromedemo/skin.png" id=skin_play region=0,0,20,20 w=40 h=40 -> skin {
+                            hover { region=20,0,20,20 }
+                            pressed { region=40,0,20,20 }
+                        }
+                        image "kromedemo/skin.png" id=skin_stop region=0,20,20,20 w=40 h=40 -> skin {
+                            hover { region=20,20,20,20 }
+                            pressed { region=40,20,20,20 }
+                        }
+                        image "kromedemo/skin.png" id=skin_small region=0,0,20,20 -> skin {
+                            hover { region=20,0,20,20 }
+                            pressed { region=40,0,20,20 }
+                        }
+                    }
+                }
                 row gap=8 {
                     button "Rename..." id=open_dialog -> open_dialog key="mod+r" tooltip="Ctrl+R"
                     button "Later" id=later -> open_dialog disabled

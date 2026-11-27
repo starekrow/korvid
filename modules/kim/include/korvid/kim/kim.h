@@ -18,7 +18,9 @@
 // then an optional block of children. `each item in list { }` (`each row in rows height=24 { }`:
 // fixed-height rows, "height", only those in view built) and `if name { }` (`if tab=rules { }`:
 // "ov", built while the model holds that value) are nodes
-// too. `//` comments to the end of a line wherever white space may stand.
+// too. Among a node's children, a state's word with a block of properties is that state's
+// look, as in a style (`image "b.png" region=0,0,20,20 { hover { region=20,0,20,20 } }`).
+// `//` comments to the end of a line wherever white space may stand.
 //
 // Values: numbers (8, -2, 1.5), percentages (40%, kept as the string "40%"), a value bound
 // to the model (@name, kept as "@name"; @@ in a definition's body, its use's binding), strings ("..."), colors (#rrggbb, #rrggbbaa, #rgb, #rgba), ranges
@@ -35,15 +37,17 @@
 //   node: { "w", "id", "f": [flags], "p": {props}, "s": [styles], "t": text, "a": [more
 //           strings], "r": [min, max] (null for an open end), "b": binding, "bv": the value of
 //           @key=value, "e": event,
-//           "v" and "in" (each), "on" (if), "c": [children] }, each key only when present.
+//           "v" and "in" (each), "on" (if), "looks": {STATE: {props}}, "c": [children] },
+//           each key only when present.
 //
 // Canonical: maps in name order (properties, styles, themes, definitions, screens, a
-// style's looks, a theme's tokens); a repeated property or token takes its last value;
+// style's or a node's looks, a theme's tokens); a repeated property or token takes its last value;
 // flags, styles, strings, uses and scripts in the order written; empty sections left out.
 //
 // Lines are a sidecar, "lines", one per entry in this walk: each use, each script, each
 // prop; each screen by name (its own line, then its nodes depth first); each definition by
-// name (its line, then its body's nodes); each style by name (its line, then each look);
+// name (its line, then its body's nodes; a node's looks have none: they are its line's);
+// each style by name (its line, then each look);
 // each theme by name (its line, then each token). Leaving it out (KV_KIM_NO_LINES)
 // changes no other byte.
 #pragma once

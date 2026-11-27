@@ -51,6 +51,7 @@ return {
 
   on = {
     nav = function() end, -- the game opens the page
+    skin = function(id) model.last = id end,
     more = function()
       local v = tonumber((model.done:gsub("%%", ""))) + 10
       if v > 100 then v = 0 end
