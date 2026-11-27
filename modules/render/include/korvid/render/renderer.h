@@ -136,6 +136,9 @@ void renderer_surface_visible(Renderer* r, u32 surface, bool visible);
 bool renderer_surface_pending(const Renderer* r);
 // How many frames a surface has presented, 0 the main window: for tests and the PRD's count.
 u64  renderer_surface_presents(const Renderer* r, u32 surface);
+// A surface's lists' version, which moves whenever one of them is set or cleared: a frame loop
+// compares the main window's to tell whether its UI changed (RenderView::main_surface).
+u64  renderer_ui_version(const Renderer* r, u32 surface);
 
 // ---- the render world -------------------------------------------------------------
 // Applies a tick's worth (or a frame's worth) of sprite deltas to the persistent world.

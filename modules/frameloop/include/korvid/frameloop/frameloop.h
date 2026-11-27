@@ -16,6 +16,7 @@
 #pragma once
 #include "korvid/core/engine.h"
 #include "korvid/math/color.h"
+#include "korvid/platform_hid/host_window.h" // frameloop_open_window
 #include "korvid/render/renderer.h"
 
 namespace kv {
@@ -93,6 +94,21 @@ inline void frameloop_request_frame(Engine& e) { engine_want_frame(e); }
 // The value given after the `index`th occurrence of one of the game's declared options
 // ("--dial bullets=2" twice is index 0 and 1), or null when there are not that many.
 const char* frameloop_option(Engine& e, const char* option, u32 index = 0);
+
+// Another window the loop draws (docs/PRDs/Engine-Slice-13-PRD.md, KR40): opened for the
+// renderer's backend, with a surface of its own (renderer_surface_add) by its id. Only UI
+// lists draw in it (renderer_ui_set with that id; a Krome screen opened in it), never the
+// world. Each frame gives the surface its size and whether the window is seen: a hidden one
+// is not drawn, and the loop rests only when every window is hidden. With another window
+// open, the main one is presented only when something of its own changed (its lists, a
+// sprite, its size; every frame under Pacing::Continuous). Its CloseRequested is the
+// program's to answer. Null when the platform or the renderer refuses (logged).
+HostWindow* frameloop_open_window(Engine& e, const WindowDesc& desc);
+// Closes it, and lets go of its surface.
+void        frameloop_close_window(Engine& e, HostWindow* window);
+// Frames that left the main window as it was, presented nothing there, since another window
+// was open: for tests.
+u64         frameloop_main_skipped(Engine& e);
 
 // Recording and replay (--record FILE, --replay FILE; replay.cc has the file). Whether a
 // replay is driving the recorded actions (a game's own pilots stand down while it does);

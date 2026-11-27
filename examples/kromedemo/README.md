@@ -23,6 +23,8 @@ gallery) fires `nav`; the game opens the page it names in place of the one shown
     build/linux-dev/bin/kromedemo --demo --shots DIR # and keeps pictures of the form, the menu and the modal,
                                                      # the form and the menu in the light theme, then the
                                                      # gallery: its dropdown, table, split, dialog, light
+    build/linux-dev/bin/kromedemo --two              # and a playlist in a second window (F2 hides and shows it)
+    build/linux-dev/bin/kromedemo --two-check        # each window presented only when it changes, a hide, one keyboard: "two: passed"
     build/linux-dev/bin/kromedemo --bench --pacing continuous --prof-report   # 2,000 nodes laid out and painted every tick
 
 The pictures are taken once Krome has settled (`krome_settled`: fonts in, changes painted),

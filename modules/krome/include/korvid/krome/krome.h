@@ -50,12 +50,15 @@ struct KromeSet { u64 screen; u64 key; f64 number; u32 kind; u32 pad; char text[
 constexpr i32 KROME_DEFAULT_LAYER = 100;
 
 // Opens the script at an asset path as a screen named by that path, read through the I/O
-// queue and run when it lands. Opening a name already open replaces it.
-Name krome_open(Engine& e, const char* script, i32 layer = KROME_DEFAULT_LAYER);
+// queue and run when it lands. Opening a name already open replaces it. `window` is the
+// window it is in, its HostWindow::id (0, the main one, when left out; another is opened
+// with frameloop_open_window): laid out at that window's size and scale, hit by the pointer
+// in it, painted on its surface. The keyboard is one node across every window.
+Name krome_open(Engine& e, const char* script, i32 layer = KROME_DEFAULT_LAYER, u32 window = 0);
 // The screen named `screen` in a .kimb at an asset path (docs/PRDs/Krome-Slice-2-PRD.md):
 // the file and the preludes it uses read through the I/O queue, its `script` lines read and
 // run, its tree built once all are in. Its name is "<file>#<screen>".
-Name krome_open(Engine& e, const char* file, const char* screen, i32 layer = KROME_DEFAULT_LAYER);
+Name krome_open(Engine& e, const char* file, const char* screen, i32 layer = KROME_DEFAULT_LAYER, u32 window = 0);
 // Bytes for an asset path that Krome takes instead of reading it: a .kimb, a prelude, a
 // script. Copied. For tests, and for a game that compiles its own markup (the kim module).
 void krome_provide(Engine& e, const char* path, const void* data, usize size);

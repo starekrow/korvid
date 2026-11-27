@@ -388,6 +388,37 @@ through SDL, written at milestones 1 and 2; no Mac is to hand, so it is not trie
   apart, with no shader source changed from main: the baseline is older than main's shaders,
   not this. The CPU gate passed every check, arcfire's replay matched. A second window is first drawn by milestone 6's `kromedemo --two`.
 
+**Milestone 6, the loop and Krome (KR40): built Nov 26, 2026.** As above, and:
+
+- **The loop.** `frameloop_open_window(e, desc)` opens a window for the renderer's backend and
+  adds its surface by its id; `frameloop_close_window` lets both go. Each frame gives the
+  surfaces their sizes and whether their windows are seen; the loop rests only when every
+  window is hidden. With another window open, the main one is presented only when
+  something of its own changed: Continuous pacing, its lists (`renderer_ui_version`), a
+  sprite or the last one gone, its size, the first frames. Deltas alone do not count: they
+  come every tick with no sprites, and counting them presented the main window at every
+  frame the playlist drew (found by the check below). With no other window open nothing
+  changes. The main window's `CloseRequested` alone ends the run (milestone 4).
+- **Krome.** A screen has a window (`krome_open`'s last argument). Each window has a view of
+  its own, size, scale, painted layers, grips and bounds, which `krome_window_enter` swaps
+  into the module's fields, so layout, paint and hit testing see one window at a time and
+  little else changed. Pointer events go to the screens of their window. The keyboard is
+  one node; when the OS gives another window the focus, the node in the one it left is kept
+  and given back when that window has the focus again.
+- **`kromedemo --two`**: the form and a playlist (two hundred tracks and a search box) in a
+  second window; F2 hides it and shows it again, closing it hides it. **`--two-check`** hovers
+  each window in turn, counting each one's presents; scrolls the list, hides and shows its
+  window and finds a track where it was; presses and types in each window's box.
+- **Measured** on Windows 11: D3D12, Vulkan (debug, validation on) and the CPU renderer each
+  passed `--two-check`. Hovering the main window, it presented 36 to 38 times and the playlist
+  0; hovering the playlist, it presented 36 to 38 and the main window 0, while the loop left
+  the main window alone for 67 (CPU) to 1,297 (D3D12) frames. After the hide the list was
+  presented once, track 40 at the same y (278); typing after a press in each went to that
+  window's box alone (notes `ab`, query `cd`). No debug layer or validation errors. A drag of
+  one window across displays of another scale is not tried (one display here).
+- **Verified** (Nov 26): `kormake test ./modules` and `./examples` on windows-dev; kromedemo's
+  `--demo` passed on D3D12 and the CPU renderer.
+
 **Verified for milestones 1 and 2** (Nov 25): `kormake test` on linux-debug, linux-dev and
 linux-ship; `platform_hid` and `krome` under `--sanitize address,undefined` and `thread`
 (`frameloop` has no tests of its own); `tools/determinism-check.sh` (rocks in every

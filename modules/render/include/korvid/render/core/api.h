@@ -52,6 +52,7 @@
     X(void, renderer_surface_resize, (Renderer* r_, u32 surface, u32 width, u32 height), (r, surface, width, height)) \
     X(void, renderer_surface_visible, (Renderer* r_, u32 surface, bool visible), (r, surface, visible)) \
     X(bool, renderer_surface_pending, (const Renderer* r_), (r)) \
+    X(u64, renderer_ui_version, (const Renderer* r_, u32 surface), (r, surface)) \
     X(u64, renderer_surface_presents, (const Renderer* r_, u32 surface), (r, surface))
 
 // What each backend defines in its namespace besides KV_RENDER_API: making and finding its

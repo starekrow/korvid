@@ -104,7 +104,37 @@ struct FrameLoopState {
     bool            timer_sent  = false;
     Handle          overlay_font;              // asset.font, when --overlay
     Handle          overlay_lines[kOverlayLines]; // frameloop.overlay labels, top to bottom
+    // Other windows the loop draws (frameloop_open_window; slice 13, KR40), by id, [0] unused:
+    // the size and whether seen as last given to their surfaces. The main window's lists'
+    // version as last presented: with other windows open, the main one is presented only
+    // when something of its own changed.
+    HostWindow*     others[KV_WINDOWS] = {};
+    u32             other_w[KV_WINDOWS] = {}, other_h[KV_WINDOWS] = {};
+    bool            other_seen[KV_WINDOWS] = {};
+    u64             main_ui_version = ~0ull;
+    u32             main_sprites = 0;  // the sprites the main window last presented
+    u64             main_skipped = 0; // frames that left the main window as it was
 };
+
+// Whether any window the loop draws is seen: the main one, or another.
+bool any_shown(const FrameLoopState& s) {
+    if (!s.window || s.window->visible()) return true;
+    for (u32 i = 1; i < KV_WINDOWS; ++i) if (s.others[i] && s.others[i]->is_open() && s.others[i]->visible()) return true;
+    return false;
+}
+
+// Whether another window has something to draw: a size its surface was not given, or lists
+// changed since it presented.
+bool others_want(const FrameLoopState& s) {
+    bool any = false;
+    for (u32 i = 1; i < KV_WINDOWS; ++i) {
+        const HostWindow* o = s.others[i];
+        if (!o || !o->is_open()) continue;
+        any = true;
+        if (o->width() != s.other_w[i] || o->height() != s.other_h[i] || o->visible() != s.other_seen[i]) return true;
+    }
+    return any && s.renderer && renderer_surface_pending(s.renderer);
+}
 
 // Wall clock in the exact format libwayland's WAYLAND_DEBUG uses (realtime microseconds
 // truncated to 32 bits, printed as ms), so hitch lines line up with a protocol trace.
@@ -383,10 +413,27 @@ void render_frame(Engine& engine, FrameLoopState& s) {
     // The size reaches the renderer at render rate, not tick rate: a frame presented at a
     // stale size during a live resize makes the compositor withhold the next frame.
     u32 w = s.window->width(), h = s.window->height();
-    if (w != s.presented_w || h != s.presented_h) {
+    bool resized = w != s.presented_w || h != s.presented_h;
+    if (resized) {
         renderer_resize(s.renderer, w, h);
         s.presented_w = w;
         s.presented_h = h;
+    }
+    // The other windows' sizes and whether they are seen, at render rate too.
+    bool others = false;
+    for (u32 i = 1; i < KV_WINDOWS; ++i) {
+        HostWindow* o = s.others[i];
+        if (!o || !o->is_open()) continue;
+        others = true;
+        if (o->width() != s.other_w[i] || o->height() != s.other_h[i]) {
+            renderer_surface_resize(s.renderer, i, o->width(), o->height());
+            s.other_w[i] = o->width();
+            s.other_h[i] = o->height();
+        }
+        if (o->visible() != s.other_seen[i]) {
+            renderer_surface_visible(s.renderer, i, o->visible());
+            s.other_seen[i] = o->visible();
+        }
     }
 
     Array<SpriteDelta>* deltas = sprite_deltas(engine);
@@ -406,6 +453,19 @@ void render_frame(Engine& engine, FrameLoopState& s) {
     if (const Camera2* c = sprite_camera(engine)) cam = camera_resolve(engine, *c, w, h, view.alpha);
     view.view     = camera_view(cam, w, h);
     view.rotation = cam.rotation;
+    // With other windows open, the main one is presented only when something of its own may
+    // have changed (KR40: neither is presented while only the other changes): Continuous
+    // pacing, its lists, a sprite (they move with the clock) or the last one gone, a size, the
+    // first frames. Deltas alone are not: they come every tick, sprites or none. With no other
+    // window open, every frame presents it, as before.
+    if (others) {
+        u64 v = renderer_ui_version(s.renderer, 0);
+        u32 sprites = renderer_sprite_count(s.renderer);
+        view.main_surface = s.window->visible() &&
+                            (s.config.pacing == Pacing::Continuous || sprites || sprites != s.main_sprites || v != s.main_ui_version || resized || s.frames_drawn < 3);
+        if (view.main_surface) { s.main_ui_version = v; s.main_sprites = sprites; }
+        else ++s.main_skipped;
+    }
     renderer_render(s.renderer, view);
     RendererGpuStats gs = renderer_gpu_stats(s.renderer);
     if (gs.valid) {
@@ -450,6 +510,7 @@ bool demand_frame(Engine& engine, FrameLoopState& s) {
     bool want = engine.frame_wanted || engine.ticks_wanted || s.demand_tail > 0; // ticks come with frames here
     if (in && memcmp(&before, &in->raw, sizeof before) != 0) want = true;
     if (s.window && (s.window->width() != s.presented_w || s.window->height() != s.presented_h)) want = true;
+    if (others_want(s)) want = true; // another window's size, or lists set outside a frame
     if (IoQueue* io = platform_io(engine)) if (io->pending() || io->completed_count()) want = true;
     if (engine_holds(engine) & HoldLoading) want = true;
     if (engine_wake(engine)) want = true; // a module's socket had something (engine_add_waker)
@@ -515,12 +576,13 @@ bool decoupled_pass(Engine& engine, FrameLoopState& s, bool& slept, bool tick_al
     if (in) before = in->raw;
     platform_pump(engine);
     f64 now = time_now();
-    bool shown = !s.window || s.window->visible();
+    bool shown = any_shown(s); // any window: one seen is drawn, the hidden ones skipped
     bool input = in && memcmp(&before, &in->raw, sizeof before) != 0;
     bool draw  = engine.frame_wanted || input || s.demand_tail > 0 || (engine_holds(engine) & HoldLoading);
     if (shown && s.was_hidden) draw = true; // seen again: what it missed
     s.was_hidden = !shown;
     if (s.window && (s.window->width() != s.presented_w || s.window->height() != s.presented_h)) draw = true;
+    if (others_want(s)) draw = true;
     if (engine.frame_due > 0.0 && now >= engine.frame_due) { draw = true; engine.frame_due = 0.0; }
     if (engine_wake(engine)) draw = true; // a module's socket had something (engine_add_waker)
     if (draw && shown) {
@@ -587,8 +649,9 @@ void run(Engine& engine, FrameLoopState& s) {
     bool decoupled = s.config.pacing == Pacing::Decoupled;
     bool slept = false;
     while (!engine.quit_requested) {
-        // Hidden, under any pacing: ticks as the pacing would have them, and no frame.
-        bool hidden = s.window && !s.window->visible();
+        // Hidden, under any pacing: ticks as the pacing would have them, and no frame. Every
+        // window hidden: one seen is drawn (the main one hidden is left as it is).
+        bool hidden = !any_shown(s);
         if (hidden) ++s.hidden_passes;
         bool decided = decoupled || hidden;
         if (decided && !decoupled_pass(engine, s, slept, hidden && s.config.pacing == Pacing::Continuous)) {
@@ -776,6 +839,41 @@ KV_MODULE_DEFINE(frameloop_module) = {
 const FrameLoopConfig& frameloop_config(Engine& e) {
     FrameLoopState* s = engine_module_state_as<FrameLoopState>(e, "frameloop");
     return s ? s->config : g_config;
+}
+
+HostWindow* frameloop_open_window(Engine& e, const WindowDesc& desc) {
+    FrameLoopState* s = engine_module_state_as<FrameLoopState>(e, "frameloop");
+    if (!s || !s->renderer) { KV_ERROR("frameloop", "another window needs the frame loop up, with its renderer"); return nullptr; }
+    WindowDesc d = desc;
+    d.surface = (WindowSurface)renderer_window_surface(); // made for the backend that draws, as the main one
+    d.vsync = s->config.vsync;
+    HostWindow* w = platform_open_window(e, d);
+    if (!w) return nullptr;
+    // The CPU renderer draws into a HostWindow's software frame; a GPU backend takes its handle.
+    void* native = renderer_surface() == RendererSurface::Software ? (void*)w : w->native_handle();
+    if (!renderer_surface_add(s->renderer, w->id(), native, w->width(), w->height(), w->transparent())) {
+        platform_close_window(e, w);
+        return nullptr;
+    }
+    s->others[w->id()] = w;
+    s->other_w[w->id()] = w->width();
+    s->other_h[w->id()] = w->height();
+    s->other_seen[w->id()] = true;
+    engine_want_frame(e);
+    return w;
+}
+
+void frameloop_close_window(Engine& e, HostWindow* w) {
+    FrameLoopState* s = engine_module_state_as<FrameLoopState>(e, "frameloop");
+    if (!s || !w || w->id() == 0 || s->others[w->id()] != w) return;
+    renderer_surface_remove(s->renderer, w->id());
+    s->others[w->id()] = nullptr;
+    platform_close_window(e, w);
+}
+
+u64 frameloop_main_skipped(Engine& e) {
+    FrameLoopState* s = engine_module_state_as<FrameLoopState>(e, "frameloop");
+    return s ? s->main_skipped : 0;
 }
 
 void frameloop_set_config(const FrameLoopConfig& config) { g_config = config; }

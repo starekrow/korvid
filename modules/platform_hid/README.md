@@ -111,8 +111,10 @@ layouts, dead keys and input methods applied; `WM_CHAR` on Windows, surrogate pa
 and `backspaces` the Backspaces among it, auto-repeat included. A text field asks for it with
 `platform_text_input(e, true)` (counted, so two fields need two offs); SDL then shows an
 input method's window where there is one. `input_text_override(e, "Rowan\n")` types into the
-next sample, for demos and tests. `input_pointer_override(e, x, y, buttons, wheel)` puts the pointer somewhere with these
-buttons held, as the mouse would, for the next sample: Krome's demo clicks through a form with it.
+next sample, for demos and tests. `input_pointer_override(e, x, y, buttons, wheel, window)` puts the pointer somewhere with these
+buttons held, as the mouse would, for the next sample, in a window by its id (the main one
+when left out): Krome's demo clicks through a form with it, and `kromedemo --two-check`
+through two windows.
 
 **As events too** (Krome slice 3). Each commit is a `TextTyped` (UTF-8, split at code
 points into 31-byte pieces), and what an input method is composing, before it commits, a

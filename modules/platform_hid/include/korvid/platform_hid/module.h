@@ -46,6 +46,7 @@ struct HidState {
     Array<char>  clipboard;                // the process's own, when the host has none to give
     bool         pointer_override = false; // input_pointer_override's, for the next sample
     f32          pointer_x = 0.0f, pointer_y = 0.0f, pointer_wheel = 0.0f;
+    u8           pointer_window = 0;
     u8           pointer_buttons = 0;
     HidPress     presses[KV_HID_PRESSES] = {}; // the CLI's, being held
     u32          press_count = 0;
@@ -101,7 +102,8 @@ void platform_capture_mouse(Engine& e, bool on);
 // Puts the pointer at (x, y) (framebuffer pixels, top-left origin) with these buttons held
 // (MouseButton bits) and this much wheel, as if from the mouse, into the next sample; it
 // stays there until the mouse or another override moves it. For demo scripts and tests.
-void input_pointer_override(Engine& e, f32 x, f32 y, u8 buttons, f32 wheel = 0.0f);
+// `window`: the window it is in (HostWindow::id), whose pixels x and y are.
+void input_pointer_override(Engine& e, f32 x, f32 y, u8 buttons, f32 wheel = 0.0f, u32 window = 0);
 // The module's input, or null if the module is not started. Likewise.
 Input*      platform_input(Engine& e);
 // Some OSes hold the main thread in a loop of their own while the window is resized (macOS:

@@ -456,6 +456,7 @@ bool renderer_surface_pending(const Renderer* r) {
 }
 
 u64 renderer_surface_presents(const Renderer* r, u32 surface) { return r && surface < kSurfaces ? r->presents[surface] : 0; }
+u64 renderer_ui_version(const Renderer* r, u32 surface) { return r && surface < kSurfaces ? r->world.ui_surface_version[surface] : 0; }
 
 RendererUiStats renderer_ui_stats(const Renderer* r) {
     RendererUiStats s;

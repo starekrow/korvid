@@ -103,14 +103,15 @@ void input_sample(TickContext& ctx) {
         u8 was = m.buttons;
         m.x = s.pointer_x;
         m.y = s.pointer_y;
+        m.window = s.pointer_window;
         m.buttons = s.pointer_buttons;
         m.wheel += s.pointer_wheel;
         for (u32 b = 0; b < (u32)MouseButton::Count; ++b) {
             bool before = (was >> b) & 1u, now = (m.buttons >> b) & 1u;
-            if (now && !before) ctx.emit(MouseButtonDown{(MouseButton)b, m.x, m.y});
-            if (before && !now) ctx.emit(MouseButtonUp{(MouseButton)b, m.x, m.y});
+            if (now && !before) ctx.emit(MouseButtonDown{(MouseButton)b, m.x, m.y, m.window});
+            if (before && !now) ctx.emit(MouseButtonUp{(MouseButton)b, m.x, m.y, m.window});
         }
-        if (s.pointer_wheel != 0.0f) ctx.emit(MouseWheel{0.0f, s.pointer_wheel});
+        if (s.pointer_wheel != 0.0f) ctx.emit(MouseWheel{0.0f, s.pointer_wheel, m.window});
         s.pointer_override = false;
         s.pointer_wheel = 0.0f;
     }
@@ -286,7 +287,7 @@ void platform_text_input(Engine& e, bool on) {
     for (HostWindow& w : s->windows) if (w.is_open()) w.text_input(s->text_requests != 0);
 }
 
-void input_pointer_override(Engine& e, f32 x, f32 y, u8 buttons, f32 wheel) {
+void input_pointer_override(Engine& e, f32 x, f32 y, u8 buttons, f32 wheel, u32 window) {
     HidState* s = engine_module_state_as<HidState>(e, "platform_hid");
     if (!s) return;
     s->pointer_override = true;
@@ -294,6 +295,7 @@ void input_pointer_override(Engine& e, f32 x, f32 y, u8 buttons, f32 wheel) {
     s->pointer_y = y;
     s->pointer_buttons = buttons;
     s->pointer_wheel += wheel;
+    s->pointer_window = window < KV_WINDOWS ? (u8)window : 0;
 }
 
 void input_text_override(Engine& e, const char* text, u32 backspaces) {

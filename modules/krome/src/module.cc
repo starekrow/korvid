@@ -229,15 +229,21 @@ void krome_input(TickContext& ctx) {
     for (;;) {
         while (d < downs.len && downs[d].button != MouseButton::Left) ++d;
         while (u < ups.len && ups[u].button != MouseButton::Left) ++u;
-        if (!s.down && d < downs.len) { krome_pointer(s, downs[d].x, downs[d].y, true, 0.0f, false); ++d; continue; }
-        if (s.down && u < ups.len) { krome_pointer(s, ups[u].x, ups[u].y, false, 0.0f, false); ++u; continue; }
+        // Each in its window, in that window's pixels (KR40).
+        if (!s.down && d < downs.len) { krome_window_enter(s, downs[d].window); krome_pointer(s, downs[d].x, downs[d].y, true, 0.0f, false); ++d; continue; }
+        if (s.down && u < ups.len) { krome_window_enter(s, ups[u].window); krome_pointer(s, ups[u].x, ups[u].y, false, 0.0f, false); ++u; continue; }
         break;
     }
     // The right button presses for a node's context event.
-    for (const MouseButtonDown& b : downs) if (b.button == MouseButton::Right) krome_context_press(s, b.x, b.y);
+    for (const MouseButtonDown& b : downs)
+        if (b.button == MouseButton::Right) { krome_window_enter(s, b.window); krome_context_press(s, b.x, b.y); }
     f32 wheel = 0.0f, wheel_x = 0.0f;
     for (const MouseWheel& w : ctx.received<MouseWheel>()) { wheel += w.dy; wheel_x += w.dx; }
-    for (const FocusChanged& f : ctx.received<FocusChanged>()) s.window_focused = f.focused;
+    // The keyboard follows the OS's focus between the windows: a gain names the one it is in.
+    for (const FocusChanged& f : ctx.received<FocusChanged>()) {
+        s.window_focused = f.focused;
+        if (f.focused) krome_window_focus(s, f.window);
+    }
     // Keys go to the edit with the keyboard first; what it does not take (Escape with none)
     // is the screens'.
     bool escape = false;
@@ -270,6 +276,7 @@ void krome_input(TickContext& ctx) {
         krome_edit_typed(s, t.text);
     }
     f32 x = in ? in->raw.mouse.x : s.px, y = in ? in->raw.mouse.y : s.py;
+    if (in) krome_window_enter(s, in->raw.mouse.window); // where the pointer is now: its window's screens
     // A press whose release never came (the window lost the focus, or the pointer left it
     // where the platform keeps no hold on it) ends where the pointer is.
     if (s.down && in && !in->raw.mouse.down(MouseButton::Left)) krome_pointer(s, x, y, false, 0.0f, false);
@@ -513,22 +520,24 @@ KV_MODULE_DEFINE(krome_module) = {
 
 // ---- the API ---------------------------------------------------------------------------------------
 
-Name krome_open(Engine& e, const char* script, i32 layer) {
+Name krome_open(Engine& e, const char* script, i32 layer, u32 window) {
     KromeModule* s = krome_state(e);
-    if (!s || !script) return Name{};
+    if (!s || !script || window >= KV_WINDOWS) return Name{};
     Name n = name_intern(script);
     KromeScreen* sc = new_screen(*s, n, layer);
+    sc->window = (u8)window;
     sc->script = n;
     return n;
 }
 
-Name krome_open(Engine& e, const char* file, const char* screen, i32 layer) {
+Name krome_open(Engine& e, const char* file, const char* screen, i32 layer, u32 window) {
     KromeModule* s = krome_state(e);
-    if (!s || !file || !screen) return Name{};
+    if (!s || !file || !screen || window >= KV_WINDOWS) return Name{};
     char name[400];
     format(name, sizeof name, "%s#%s", file, screen);
     Name n = name_intern(name);
     KromeScreen* sc = new_screen(*s, n, layer);
+    sc->window = (u8)window;
     sc->doc = krome_doc(*s, name_intern(file), false);
     sc->screen = name_intern(screen);
     return n;

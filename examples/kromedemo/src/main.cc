@@ -14,8 +14,10 @@
 // theme, the form and the menu again. --theme light starts in it. It paces on demand: still, it draws nothing and
 // ticks four times a second (--pacing continuous for every vsync). --bench opens a screen of
 // two thousand nodes instead and lays it out and paints it every tick: run it with
-// --prof-report for the cost. --hover moves the pointer onto the Save button and off it every
-// tick for ten seconds, then quits: the cost of a frame where one button changes (run it with
+// --prof-report for the cost. --two opens a second window, a playlist, beside the form (F2
+// hides it and shows it); --two-check counts what each presents while only the other changes,
+// and hides and shows it (slice 13). --hover moves the pointer onto the Save button and off it
+// every tick for ten seconds, then quits: the cost of a frame where one button changes (run it with
 // KV_CPU_STATS=1 under --renderer cpu for the backend's side).
 #include "korvid/kromedemo/module.h"
 #include "korvid/core/engine.h"
@@ -54,6 +56,16 @@ struct Demo {
     u64  next = 2, primes = 0;
     f64  started = 0.0, computing = 0.0;
     u64  frames_at_start = 0;
+    // --two: a second window, the playlist (docs/PRDs/Engine-Slice-13-PRD.md, KR40); F2 hides it
+    // and shows it again, and closing it hides it. --two-check drives the pointer in each
+    // window, counting each one's presents, scrolls the list, hides and shows its window, and
+    // says whether it held.
+    bool two = false, two_check = false;
+    HostWindow* list_win = nullptr;
+    Name list;
+    u32  check_step = 0, check_ticks = 0, check_bad = 0;
+    u64  p0 = 0, p1 = 0;
+    rect2 kept;
 };
 
 
@@ -189,11 +201,147 @@ bool aim(Engine& e, const Demo& d, const char* id, f32* x, f32* y) {
     return true;
 }
 
+// A node of the playlist, in its window's pixels.
+bool aim_list(Engine& e, const Demo& d, const char* id, f32* x, f32* y) {
+    rect2 r;
+    if (!d.list_win || !krome_find_rect(e, d.list, id, &r)) return false;
+    f32 k = d.list_win->pixel_scale();
+    *x = (r.x + r.w * 0.5f) * k;
+    *y = (r.y + r.h * 0.5f) * k;
+    return true;
+}
+
+u64 presents(Engine& e, u32 surface) {
+    Renderer* r = renderer_get(e);
+    return r ? renderer_surface_presents(r, surface) : 0;
+}
+
+// --two-check, a step a few ticks: what each window presents while only the other changes,
+// and the list's scroll across a hide.
+void two_check(Engine& e, Demo& d) {
+    engine_want_frame(e);
+    u32 t = d.check_ticks++;
+    f32 x = 0, y = 0;
+    auto next = [&]() { ++d.check_step; d.check_ticks = 0; };
+    auto note = [&]() { d.p0 = presents(e, 0); d.p1 = presents(e, 1); };
+    switch (d.check_step) {
+    case 0: // both screens up and settled
+        if (!krome_ready(e, d.form) || !krome_ready(e, d.list) || !krome_settled(e)) { d.check_ticks = 0; return; }
+        if (t < 10) return;
+        note();
+        next();
+        return;
+    case 1: // the main window changes: on and off its Save button
+        if (t < 40) {
+            if ((t & 1) && aim(e, d, "save", &x, &y)) input_pointer_override(e, x, y, 0, 0.0f, 0);
+            else input_pointer_override(e, 4.0f, 4.0f, 0, 0.0f, 0);
+            return;
+        }
+        {
+            u64 d0 = presents(e, 0) - d.p0, d1 = presents(e, 1) - d.p1;
+            KV_INFO("kromedemo", "two: the main window hovered: it presented %llu, the playlist %llu", (unsigned long long)d0, (unsigned long long)d1);
+            if (!d0 || d1) { KV_ERROR("kromedemo", "two: wanted the main window's presents only"); ++d.check_bad; }
+        }
+        next();
+        return;
+    case 2: // into the playlist, on its header, and settled
+        input_pointer_override(e, 20.0f, 10.0f, 0, 0.0f, 1);
+        if (t < 10) return;
+        note();
+        next();
+        return;
+    case 3: // the playlist changes: on and off a track
+        if (t < 40) {
+            if ((t & 1) && aim_list(e, d, "track3", &x, &y)) input_pointer_override(e, x, y, 0, 0.0f, 1);
+            else input_pointer_override(e, 20.0f, 10.0f, 0, 0.0f, 1);
+            return;
+        }
+        {
+            u64 d0 = presents(e, 0) - d.p0, d1 = presents(e, 1) - d.p1;
+            KV_INFO("kromedemo", "two: the playlist hovered: it presented %llu, the main window %llu (%llu frames left it as it was)",
+                    (unsigned long long)d1, (unsigned long long)d0, (unsigned long long)frameloop_main_skipped(e));
+            if (!d1 || d0) { KV_ERROR("kromedemo", "two: wanted the playlist's presents only"); ++d.check_bad; }
+        }
+        next();
+        return;
+    case 4: // the list scrolled down, and where a track is then
+        if (t < 3 && aim_list(e, d, "track10", &x, &y)) { input_pointer_override(e, x, y, 0, -4.0f, 1); return; }
+        if (t < 15) return;
+        if (!krome_find_rect(e, d.list, "track40", &d.kept)) { KV_ERROR("kromedemo", "two: no track40"); ++d.check_bad; }
+        KV_INFO("kromedemo", "two: scrolled, track40 at y %.1f", d.kept.y);
+        if (d.kept.y > 300.0f) { KV_ERROR("kromedemo", "two: the list did not scroll"); ++d.check_bad; }
+        input_pointer_override(e, 4.0f, 4.0f, 0, 0.0f, 0); // out of the playlist
+        next();
+        return;
+    case 5: // hidden
+        if (t == 0) { d.list_win->show(false); return; }
+        if (t < 20) return;
+        if (d.list_win->visible()) { KV_ERROR("kromedemo", "two: the playlist is seen after show(false)"); ++d.check_bad; }
+        note();
+        next();
+        return;
+    case 6: // shown again: drawn, its scroll where it was
+        if (t == 0) { d.list_win->show(true); return; }
+        if (t < 20) return;
+        {
+            rect2 r;
+            bool found = krome_find_rect(e, d.list, "track40", &r);
+            u64 d1 = presents(e, 1) - d.p1;
+            KV_INFO("kromedemo", "two: shown again: presented %llu, track40 at y %.1f (was %.1f)", (unsigned long long)d1, found ? r.y : -1.0f, d.kept.y);
+            if (!found || r.y != d.kept.y) { KV_ERROR("kromedemo", "two: the list's scroll moved across the hide"); ++d.check_bad; }
+            if (!d1 || !d.list_win->visible()) { KV_ERROR("kromedemo", "two: the playlist was not drawn again"); ++d.check_bad; }
+        }
+        next();
+        return;
+    case 7: { // one keyboard across both: a press in each window, and what is typed after it
+        // Three ticks a click (over it, down, up), then the text, in window 0 and then 1.
+        bool second = t >= 6;
+        u32 at = second ? t - 6 : t;
+        bool aimed = second ? aim_list(e, d, "query", &x, &y) : aim(e, d, "notes", &x, &y);
+        if (at < 3) {
+            if (!aimed) { KV_ERROR("kromedemo", "two: no %s on screen", second ? "query" : "notes"); ++d.check_bad; d.check_ticks = 12; return; }
+            input_pointer_override(e, x, y, at == 1 ? 1 : 0, 0.0f, second ? 1 : 0);
+            return;
+        }
+        if (at == 3) { input_text_override(e, second ? "cd" : "ab"); return; }
+        if (t < 16) return;
+        const char* notes = krome_model_text(e, d.form, "notes");
+        char notes_copy[64];
+        format(notes_copy, sizeof notes_copy, "%s", notes);
+        const char* query = krome_model_text(e, d.list, "query");
+        KV_INFO("kromedemo", "two: typed in each: notes '%s', query '%s'", notes_copy, query);
+        if (strcmp(notes_copy, "ab") != 0 || strcmp(query, "cd") != 0) { KV_ERROR("kromedemo", "two: wanted notes 'ab' and query 'cd'"); ++d.check_bad; }
+        if (d.check_bad) KV_ERROR("kromedemo", "two: %u checks failed", d.check_bad);
+        else KV_INFO("kromedemo", "two: passed");
+        d.failures += d.check_bad;
+        engine_request_quit(e);
+        next();
+        return;
+    }
+    default: return;
+    }
+}
+
 // Phase PreSim, main thread: the pilot, a step every few ticks; and the tick count, every
 // half second, for the form's title bar.
 void kromedemo_tick(TickContext& ctx) {
     Engine& e = *ctx.engine;
     Demo& d = ctx.state_as<Demo>();
+    // --two: the playlist window, opened once the loop and its renderer are up.
+    if (d.two && !d.list_win && d.list.is_null()) {
+        WindowDesc wd;
+        wd.title  = "korvid krome demo: playlist";
+        wd.width  = 360;
+        wd.height = 480;
+        d.list_win = frameloop_open_window(e, wd);
+        if (d.list_win) d.list = krome_open(e, "kromedemo/playlist.lua", KROME_DEFAULT_LAYER, d.list_win->id());
+        else {
+            KV_ERROR("kromedemo", "two: the playlist window did not open");
+            d.list = name_intern("none");
+            if (d.two_check) engine_request_quit(e);
+        }
+    }
+    if (d.two_check) { if (d.list_win) two_check(e, d); return; } // nothing else moves: what presents is what the check did
     if (ctx.tick % 30 == 0 && !d.shots) krome_set(e, d.form, "ticks", (f64)ctx.tick);
     if (!d.bench.is_null()) { krome_set(e, d.bench, "tick", (f64)ctx.tick); engine_want_frame(e); return; }
     if (d.type) {
@@ -342,6 +490,18 @@ void kromedemo_events(TickContext& ctx) {
 
 void kromedemo_exit(TickContext& ctx, Span<const ExitRequested>) { engine_request_quit(*ctx.engine); }
 
+// --two: closing the playlist hides it; F2 hides it or shows it again.
+void kromedemo_close(TickContext& ctx, Span<const CloseRequested> evs) {
+    Demo& d = ctx.state_as<Demo>();
+    for (const CloseRequested& c : evs)
+        if (d.list_win && c.window == d.list_win->id()) d.list_win->show(false);
+}
+void kromedemo_key(TickContext& ctx, Span<const KeyDown> evs) {
+    Demo& d = ctx.state_as<Demo>();
+    for (const KeyDown& k : evs)
+        if (k.key == Key::F2 && !k.repeat && d.list_win) d.list_win->show(!d.list_win->visible());
+}
+
 bool kromedemo_startup(Engine& e, ModuleInstance& self) {
     Demo* d = arena_push<Demo>(self.arena);
     if (!d) return false;
@@ -349,6 +509,8 @@ bool kromedemo_startup(Engine& e, ModuleInstance& self) {
     d->demo = frameloop_flag(e, "--demo");
     d->work = frameloop_flag(e, "--work");
     d->hover = frameloop_flag(e, "--hover");
+    d->two_check = frameloop_flag(e, "--two-check");
+    d->two = d->two_check || frameloop_flag(e, "--two");
     d->shots = frameloop_option(e, "--shots");
     if (frameloop_flag(e, "--bench")) d->bench = krome_open(e, "kromedemo/bench.lua");
     else if (frameloop_flag(e, "--type")) { d->form = krome_open(e, "kromedemo/type.kimb", "type"); d->type = true; }
@@ -366,6 +528,8 @@ constinit const SystemDesc k_systems[] = {
 };
 constinit const HandlerDesc k_handlers[] = {
     {.name = ".exit", KV_ON(ExitRequested, kromedemo_exit), .phase = Phase::PreSim},
+    {.name = ".close", KV_ON(CloseRequested, kromedemo_close), .phase = Phase::PreSim},
+    {.name = ".key", KV_ON(KeyDown, kromedemo_key), .phase = Phase::PreSim},
 };
 
 } // namespace
@@ -375,13 +539,13 @@ KV_MODULE_DEFINE(kromedemo_module) = {
     .systems  = k_systems,
     .handlers = k_handlers,
     .startup  = kromedemo_startup,
-    .memory   = {.reserve = 4 * 1024},
+    .memory   = {.reserve = 8 * 1024},
 };
 
 } // namespace kv
 
 namespace {
-constinit const char* const k_flags[] = {"--demo", "--bench", "--work", "--lua", "--type", "--hover"};
+constinit const char* const k_flags[] = {"--demo", "--bench", "--work", "--lua", "--type", "--hover", "--two", "--two-check"};
 constinit const char* const k_options[] = {"--shots", "--theme"};
 constinit const kv::FrameLoopConfig k_config = {
     .title          = "korvid krome demo",

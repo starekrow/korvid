@@ -57,6 +57,19 @@ window's bounds (`HostWindow::bounds`), in pixels at the window's scale. A press
 is the OS's: the node and its ancestors take none. Open the window with
 `WindowDesc::borderless` or `transparent`, or the desktop's frame is there as well.
 
+**More than one window** (slice 13, KR40). `krome_open(e, file, screen, layer, window)` opens a
+screen in another window, by its id (`HostWindow::id`; the main one, 0, when left out),
+which `frameloop_open_window` opened. Each window has its own view: its size and scale, the
+lists it paints on its surface (`renderer_ui_set` with its id), its grips and bounds. A press,
+a release, the wheel and the pointer's moves go to the screens of the window they are in
+(`MouseButtonDown::window`, `MouseState::window`), in its pixels; an overlay is placed
+inside its screen's window. The keyboard is one node across every window, the one last
+pressed in any: when the OS gives another window the focus, the node in the window it left
+is kept and let go of, and has the keyboard again when that window has the focus. A hidden
+window's screens stay built, their models and scrolls with them. Inside, the module's view
+fields are the current window's (`KromeModule::cur_window`; `krome_window_enter` swaps
+them), so layout, paint and hit testing see one window at a time. `kromedemo --two` shows it.
+
 **Documents.** A `.kimb` (`modules/kim` compiles it from `.kim`; goldberg does that as it
 cooks) is read as a blob asset (`asset_load_blob`), or taken from what `krome_provide` gave,
 and kept: `modules/kimb` reads it, with each node's line from the sidecar. A screen's names
@@ -275,8 +288,8 @@ Header `korvid/krome/krome.h`:
 
 | name | kind | what |
 |---|---|---|
-| `krome_open(e, file, screen, layer)` | function | the screen of a `.kimb`, named `"<file>#<screen>"` |
-| `krome_open(e, script, layer)`, `krome_open_source(e, name, source, layer)` | functions | a screen from a script; its name |
+| `krome_open(e, file, screen, layer, window)` | function | the screen of a `.kimb`, named `"<file>#<screen>"`, in a window (the main one when left out) |
+| `krome_open(e, script, layer, window)`, `krome_open_source(e, name, source, layer)` | functions | a screen from a script; its name |
 | `krome_close`, `krome_ready`, `krome_tree`, `krome_find`, `krome_find_rect` | functions | the screen and its nodes |
 | `krome_set(e, screen, key, value)`, `krome_set_bool`, `krome_set_doc(e, screen, key, kbor, size)` | functions | a model value from C++; a list or table as KBOR |
 | `krome_model_text(e, screen, key)` | function | a model value as text shows it; a dotted path (`sel.key`) as a text reads one |

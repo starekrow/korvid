@@ -171,6 +171,8 @@ Header `korvid/frameloop/frameloop.h`:
 | `frameloop_config(engine)` | function | the config in effect: the declaration plus the command line |
 | `frameloop_flag(engine, flag)` | function | whether one of the declared flags was given |
 | `frameloop_option(engine, option, i)` | function | the value after the `i`th occurrence of a declared option, or null |
+| `frameloop_open_window(engine, desc)`, `frameloop_close_window(engine, window)` | functions | another window the loop draws, with a renderer surface of its own; closed, with its surface |
+| `frameloop_main_skipped(engine)` | function | frames that left the main window as it was while another was open |
 | `frameloop_request_frame(engine)` | function | another frame, for code that does not include the engine's header (`engine_want_frame`) |
 | `frameloop_replaying(engine)`, `frameloop_record_note(engine, args)` | functions | whether a replay is driving the recorded actions; a menu's arguments for the recording's header |
 | `frameloop_set_config(config)`, `frameloop_step(engine, dt)` | functions | for a tool that drives the loop itself |
@@ -194,6 +196,13 @@ touchpad. A game that depends on frameloop has all of them.
 
 ## Behaviour worth knowing
 
+- **Other windows** (slice 13, KR40). `frameloop_open_window(engine, desc)` opens one for the
+  renderer's backend with a surface of its own; only UI lists draw in it. Each frame gives
+  the surfaces their sizes and whether their windows are seen; a hidden one is not drawn,
+  and the loop rests only when every window is. With another window open, the main one is
+  presented only when something of its own changed (its lists, a sprite or the last one
+  gone, its size; every frame under `Continuous`): `kromedemo --two-check` counts it.
+  The main window's `CloseRequested` ends the run; another's is the program's.
 - **Ticks are 60 Hz, four per frame at most.** A frame that takes longer than four ticks
   drops the rest and the game slows; `Engine::clock` has the counters.
 - **Render rate is the display's with vsync.** The renderer blocks in acquire, and that
@@ -224,8 +233,8 @@ touchpad. A game that depends on frameloop has all of them.
 
 ## Not in this module
 
-Fixed-size render targets and letterboxing, more than one window, a main menu, save and
-load, and input mapping (that is [platform_hid](../platform_hid/README.md)'s action
+Fixed-size render targets and letterboxing, a Frame cycle a window (the windows share
+one: docs/design/cycles.md), a main menu, save and load, and input mapping (that is [platform_hid](../platform_hid/README.md)'s action
 map). The game owns those, on top of what the loop provides.
 
 ## Seen in

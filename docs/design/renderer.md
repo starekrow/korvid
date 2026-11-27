@@ -246,7 +246,9 @@ its own size and no sprites), submits once, and presents each after the main one
 frame (its acquire takes no image, `RenderCore::main_skipped`): the frame then draws only the
 other surfaces that changed, which is how a frame loop keeps one window from being presented
 while only another changes. `renderer_surface_pending` says whether any has something to draw;
-`renderer_surface_presents` counts each one's presents, 0 the main window's.
+`renderer_surface_presents` counts each one's presents, 0 the main window's, and
+`renderer_ui_version(r, surface)` is a surface's lists' version, by which the frame loop tells
+whether the main window's UI changed.
 
 Per backend: D3D12 makes a chain for each, as the main one is (a composition one for a
 transparent window), its views at RTVs after the post pass's. Vulkan makes a `VkSurfaceKHR`

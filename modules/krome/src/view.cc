@@ -685,9 +685,10 @@ u32 hit_node(const KromeTree& t, u32 node, f32 x, f32 y, f32 scale, rect2 clip) 
 }
 
 // Screens top first: a higher layer, then the later opened.
+// The current window's ready screens, topmost first.
 void screens_top_first(KromeModule& s, KromeScreen** out, u32* n) {
     *n = 0;
-    for (KromeScreen* sc : s.screens) if (sc->ready) out[(*n)++] = sc;
+    for (KromeScreen* sc : s.screens) if (sc->ready && sc->window == s.cur_window) out[(*n)++] = sc;
     for (u32 i = 1; i < *n; ++i)
         for (u32 j = i; j > 0; --j) {
             KromeScreen* a = out[j - 1];
@@ -1035,10 +1036,10 @@ void krome_window_parts(KromeModule& s, Array<WindowGripRect>& out, u32 bounds[4
 // painted, or the screens or their overlays came or went. Nothing without a window.
 void krome_send_grips(KromeModule& s, bool repainted) {
     if (s.viewport_fixed) return;
-    HostWindow* w = platform_window(*s.e);
+    HostWindow* w = platform_window_by_id(*s.e, s.cur_window);
     if (!w) return;
     u32 n = 0, overlays = 0;
-    for (KromeScreen* sc : s.screens) if (sc->ready) { ++n; overlays += sc->overlays.len; }
+    for (KromeScreen* sc : s.screens) if (sc->ready && sc->window == s.cur_window) { ++n; overlays += sc->overlays.len; }
     if (!repainted && n == s.grip_screens && overlays == s.grip_overlays) return;
     s.grip_screens = n;
     s.grip_overlays = overlays;
@@ -1062,7 +1063,7 @@ void krome_send_grips(KromeModule& s, bool repainted) {
 
 void krome_update_viewport(KromeModule& s) {
     if (s.viewport_fixed) return;
-    HostWindow* w = platform_window(*s.e);
+    HostWindow* w = platform_window_by_id(*s.e, s.cur_window);
     if (!w || !w->width() || !w->height()) return;
     f32 W = (f32)w->width(), H = (f32)w->height(), k = w->pixel_scale();
     if (!(k > 0.0f)) k = 1.0f;
@@ -1071,6 +1072,7 @@ void krome_update_viewport(KromeModule& s) {
     s.win_h = H;
     s.scale = k;
     for (KromeScreen* sc : s.screens) {
+        if (sc->window != s.cur_window) continue;
         sc->tree.dirty = true;
         for (KromeOverlay* o : sc->overlays) o->placed = false;
     }
@@ -1089,9 +1091,131 @@ void krome_paint_screen(KromeModule& s, KromeScreen& sc, UiList& list) {
     }
 }
 
-void krome_view_frame(KromeModule& s) {
+// The windows (KR40): the current one's view and parts put away, `window`'s brought in. The
+// arrays move by value, as Array allows: each is held in one place at a time.
+void krome_window_enter(KromeModule& s, u32 window) {
+    if (window >= KV_WINDOWS || window == s.cur_window) return;
+    KromeModule::WindowView& out = s.views[s.cur_window];
+    out.win_w = s.win_w;
+    out.win_h = s.win_h;
+    out.scale = s.scale;
+    out.layers = s.layers;
+    out.grips = s.grips;
+    out.grips_sent = s.grips_sent;
+    memcpy(out.bounds_sent, s.bounds_sent, sizeof out.bounds_sent);
+    out.grip_screens = s.grip_screens;
+    out.grip_overlays = s.grip_overlays;
+    out.grips_given = s.grips_given;
+    KromeModule::WindowView& in = s.views[window];
+    s.win_w = in.win_w;
+    s.win_h = in.win_h;
+    s.scale = in.scale > 0.0f ? in.scale : 1.0f;
+    s.layers = in.layers;
+    s.grips = in.grips;
+    s.grips_sent = in.grips_sent;
+    memcpy(s.bounds_sent, in.bounds_sent, sizeof s.bounds_sent);
+    s.grip_screens = in.grip_screens;
+    s.grip_overlays = in.grip_overlays;
+    s.grips_given = in.grips_given;
+    // What is now the module's is not also the view's: nothing is freed twice.
+    in.layers = Array<i32>{};
+    in.grips = in.grips_sent = Array<WindowGripRect>{};
+    in.layers.alloc = s.general;
+    in.grips.alloc = in.grips_sent.alloc = s.general;
+    s.cur_window = (u8)window;
+}
+
+void krome_window_focus(KromeModule& s, u32 window) {
+    if (window >= KV_WINDOWS) return;
+    KromeScreen* fsc = s.focus.node != KROME_NONE ? krome_screen_by_id(s, s.focus.screen) : nullptr;
+    if (fsc && fsc->window != window) {
+        s.views[fsc->window].focus_kept = KromeTarget{s.focus.screen, s.focus.overlay, s.focus.node};
+        krome_edit_blur(s);
+    }
+    KromeTarget& kept = s.views[window].focus_kept;
+    if (kept.node == KROME_NONE) return;
+    KromeTarget t = kept;
+    kept = KromeTarget{};
+    if (s.focus.node != KROME_NONE) return; // it has one of its own already
+    KromeScreen* sc = krome_screen_by_id(s, t.screen);
+    if (sc && sc->window == window) krome_focus_take(s, *sc, t.overlay, t.node, false);
+}
+
+namespace {
+
+// One window's screens (the current one's): laid out where they changed, painted a layer at a
+// time, its lists given to its surface, its grips and bounds to its window.
+void view_window(KromeModule& s, Renderer* r, bool landed) {
     krome_update_viewport(s);
     if (!(s.win_w > 0.0f && s.win_h > 0.0f)) return;
+    f32 W = s.win_w / s.scale, H = s.win_h / s.scale;
+    KromeMeasure m{&s, measure_text, measure_image, measure_paragraph};
+    for (KromeScreen* sc : s.screens) {
+        if (!sc->ready || sc->window != s.cur_window) continue;
+        if (landed) sc->tree.dirty = true;
+        krome_sparse_pending(s, *sc); // rows handed over since the last frame, all at once
+        if (sc->tree.dirty && sc->tree.root != KROME_NONE) {
+            krome_layout(sc->tree, sc->tree.root, rect2{0, 0, W, H}, m, true);
+            ++s.layouts;
+            // A virtualized each whose view left what it built is built again, and laid out
+            // (again, should the rows now in view move what is in view: a few rounds at most).
+            for (u32 round = 0; round < 3 && sc->tree.root != KROME_NONE && krome_virtual_regions(s, *sc); ++round) {
+                krome_layout(sc->tree, sc->tree.root, rect2{0, 0, W, H}, m, true);
+                ++s.layouts;
+            }
+            krome_send_views(s, *sc); // a sparse each's owner asked for the rows it now shows
+            sc->repaint = true;
+            for (KromeOverlay* o : sc->overlays) o->placed = false;
+        }
+        for (KromeOverlay* o : sc->overlays)
+            if (!o->placed || o->tree.dirty || landed) place_overlay(*sc, *o, m, W, H);
+    }
+
+    // The lists, a layer at a time: rebuilt where a screen on it changed, cleared where no
+    // screen is left.
+    bool repainted = false;
+    for (KromeScreen* sc : s.screens) if (sc->ready && sc->window == s.cur_window && sc->repaint) repainted = true;
+    krome_send_grips(s, repainted);
+    i32 layers[k_max_screens];
+    u32 nl = 0;
+    for (KromeScreen* sc : s.screens) {
+        if (!sc->ready || sc->window != s.cur_window) continue;
+        bool seen = false;
+        for (u32 i = 0; i < nl; ++i) if (layers[i] == sc->layer) seen = true;
+        if (!seen && nl < k_max_screens) layers[nl++] = sc->layer;
+    }
+    for (u32 i = 0; i < nl; ++i) {
+        i32 layer = layers[i];
+        bool known = false, changed = false;
+        for (i32 l : s.layers) if (l == layer) known = true;
+        for (KromeScreen* sc : s.screens) if (sc->ready && sc->window == s.cur_window && sc->layer == layer && sc->repaint) changed = true;
+        if (known && !changed) continue;
+        s.list.clear();
+        for (KromeScreen* sc : s.screens) {
+            if (!sc->ready || sc->window != s.cur_window || sc->layer != layer) continue;
+            krome_paint_screen(s, *sc, s.list);
+            sc->repaint = false;
+        }
+        ++s.paints;
+        // No frame asked for: this runs in the Frame cycle of the frame that draws the list
+        // (the frame loop's, a live resize's), so one asked for here showed the same pixels
+        // again (S1). A transition mid-way asks, below: that is the next frame's.
+        if (r) { krome_shapes_flush(s, r); renderer_ui_set(r, (u32)s.cur_window, layer, s.list); ++s.submits; }
+        if (!known) s.layers.push(layer);
+    }
+    for (u32 i = 0; i < s.layers.len;) {
+        bool live = false;
+        for (u32 k = 0; k < nl; ++k) if (layers[k] == s.layers[i]) live = true;
+        if (live) { ++i; continue; }
+        if (r) renderer_ui_clear(r, (u32)s.cur_window, s.layers[i]);
+        s.layers[i] = s.layers.last();
+        --s.layers.len;
+    }
+}
+
+} // namespace
+
+void krome_view_frame(KromeModule& s) {
     // A transition mid-way paints again, and asks for the frame to.
     if (s.animating) {
         s.animating = false;
@@ -1114,74 +1238,25 @@ void krome_view_frame(KromeModule& s) {
     for (KromeScreen* sc : s.screens) if (sc->loading) waiting = true;
     if (s.shape_jobs.len) waiting = true;
     if (waiting) engine_want_frame(*s.e);
-    f32 W = s.win_w / s.scale, H = s.win_h / s.scale;
-    KromeMeasure m{&s, measure_text, measure_image, measure_paragraph};
-    for (KromeScreen* sc : s.screens) {
-        if (!sc->ready) continue;
-        if (landed) sc->tree.dirty = true;
-        krome_sparse_pending(s, *sc); // rows handed over since the last frame, all at once
-        if (sc->tree.dirty && sc->tree.root != KROME_NONE) {
-            krome_layout(sc->tree, sc->tree.root, rect2{0, 0, W, H}, m, true);
-            ++s.layouts;
-            // A virtualized each whose view left what it built is built again, and laid out
-            // (again, should the rows now in view move what is in view: a few rounds at most).
-            for (u32 round = 0; round < 3 && sc->tree.root != KROME_NONE && krome_virtual_regions(s, *sc); ++round) {
-                krome_layout(sc->tree, sc->tree.root, rect2{0, 0, W, H}, m, true);
-                ++s.layouts;
-            }
-            krome_send_views(s, *sc); // a sparse each's owner asked for the rows it now shows
-            sc->repaint = true;
-            for (KromeOverlay* o : sc->overlays) o->placed = false;
-        }
-        for (KromeOverlay* o : sc->overlays)
-            if (!o->placed || o->tree.dirty || landed) place_overlay(*sc, *o, m, W, H);
-    }
 
-    // The lists, a layer at a time: rebuilt where a screen on it changed, cleared where no
-    // screen is left.
     Renderer* r = renderer_get(*s.e);
     if (r && !s.warned_no_ui && !renderer_caps(r).ui) {
         KV_WARN("krome", "the %s renderer does not draw the UI primitive yet: Krome's screens run but show nothing", renderer_caps(r).backend);
         s.warned_no_ui = true;
     }
-    bool repainted = false;
-    for (KromeScreen* sc : s.screens) if (sc->ready && sc->repaint) repainted = true;
-    krome_send_grips(s, repainted);
-    i32 layers[k_max_screens];
-    u32 nl = 0;
-    for (KromeScreen* sc : s.screens) {
-        if (!sc->ready) continue;
-        bool seen = false;
-        for (u32 i = 0; i < nl; ++i) if (layers[i] == sc->layer) seen = true;
-        if (!seen && nl < k_max_screens) layers[nl++] = sc->layer;
+    // Each window that has a screen, or lists to clear: the main one always.
+    u32 used = 1;
+    for (KromeScreen* sc : s.screens) used |= 1u << sc->window;
+    for (u32 w = 0; w < KV_WINDOWS; ++w) if (s.views[w].layers.len) used |= 1u << w;
+    if (s.layers.len) used |= 1u << s.cur_window;
+    u32 was = s.cur_window;
+    for (u32 w = 0; w < KV_WINDOWS; ++w) {
+        if (!(used & (1u << w))) continue;
+        krome_window_enter(s, w);
+        view_window(s, r, landed);
     }
-    for (u32 i = 0; i < nl; ++i) {
-        i32 layer = layers[i];
-        bool known = false, changed = false;
-        for (i32 l : s.layers) if (l == layer) known = true;
-        for (KromeScreen* sc : s.screens) if (sc->ready && sc->layer == layer && sc->repaint) changed = true;
-        if (known && !changed) continue;
-        s.list.clear();
-        for (KromeScreen* sc : s.screens) {
-            if (!sc->ready || sc->layer != layer) continue;
-            krome_paint_screen(s, *sc, s.list);
-            sc->repaint = false;
-        }
-        ++s.paints;
-        // No frame asked for: this runs in the Frame cycle of the frame that draws the list
-        // (the frame loop's, a live resize's), so one asked for here showed the same pixels
-        // again (S1). A transition mid-way asks, below: that is the next frame's.
-        if (r) { krome_shapes_flush(s, r); renderer_ui_set(r, layer, s.list); ++s.submits; }
-        if (!known) s.layers.push(layer);
-    }
-    for (u32 i = 0; i < s.layers.len;) {
-        bool live = false;
-        for (u32 k = 0; k < nl; ++k) if (layers[k] == s.layers[i]) live = true;
-        if (live) { ++i; continue; }
-        if (r) renderer_ui_clear(r, s.layers[i]);
-        s.layers[i] = s.layers.last();
-        --s.layers.len;
-    }    if (s.animating) engine_want_frame(*s.e);
+    krome_window_enter(s, was);
+    if (s.animating) engine_want_frame(*s.e);
 }
 
 void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool escape) {
@@ -1359,6 +1434,7 @@ void krome_free_view(KromeModule& s) {
     s.list.free();
     s.grips.free();
     s.grips_sent.free();
+    for (KromeModule::WindowView& v : s.views) { v.layers.free(); v.grips.free(); v.grips_sent.free(); }
 }
 
 } // namespace kv

@@ -150,6 +150,7 @@ struct KromeScreen {
     u32        id = 0;          // what Lua's closures name it by
     Name       name;
     i32        layer = KROME_DEFAULT_LAYER;
+    u8         window = 0;      // the window it is in (HostWindow::id): 0 the main one
     KromeTree  tree;
     Array<KromeDep> deps;
     // Where its tree comes from: a screen of a .kimb (doc, screen), or a script's root
@@ -304,6 +305,24 @@ struct KromeModule {
     u32                 bounds_sent[4] = {};
     u32                 grip_screens = 0, grip_overlays = 0;
     bool                grips_given = false;
+    // The windows (docs/PRDs/Engine-Slice-13-PRD.md, KR40). The view and the window's parts
+    // above (win_w, win_h, scale, layers, grips, grips_sent, bounds_sent, grip_screens,
+    // grip_overlays, grips_given) are the current window's, cur_window; krome_window_enter
+    // puts them away in `views` and brings another's in, so what lays out, paints and hits
+    // sees one window. The keyboard is one node across all of them; when the OS gives another
+    // window the focus, the node in the one it left is kept (focus_kept) and given back
+    // when that window has the focus again.
+    struct WindowView {
+        f32                   win_w = 0.0f, win_h = 0.0f, scale = 1.0f;
+        Array<i32>            layers;
+        Array<WindowGripRect> grips, grips_sent;
+        u32                   bounds_sent[4] = {};
+        u32                   grip_screens = 0, grip_overlays = 0;
+        bool                  grips_given = false;
+        KromeTarget           focus_kept;
+    };
+    WindowView          views[KV_WINDOWS];
+    u8                  cur_window = 0;
     u64                 paints = 0, layouts = 0, submits = 0;
     u32                 input_id = 0; // input.state's resource id in this engine
     // A scrollbar the pointer pressed: its box, which way, where on the thumb it was taken
@@ -562,6 +581,12 @@ KromeTree* krome_target_tree(KromeModule& s, const KromeTarget& t, KromeScreen**
 void krome_update_viewport(KromeModule& s);
 // Lays out what changed and paints what must be; hands each changed layer's list over.
 void krome_view_frame(KromeModule& s);
+// Makes `window` the current one (KromeModule::cur_window): its view and parts are the
+// module's from here, and only its screens are laid out, painted and hit.
+void krome_window_enter(KromeModule& s, u32 window);
+// The OS gave `window` the focus: the keyboard's node, if it is in another window, is kept
+// for that one and let go of; the one this window kept, if any, has it again.
+void krome_window_focus(KromeModule& s, u32 window);
 // The window's grips and bounds as the screens say them (`grip=`, the root's range), in
 // physical pixels, bottom screen first: what krome_send_grips gives the window when it changes.
 void krome_window_parts(KromeModule& s, Array<WindowGripRect>& out, u32 bounds[4]);
