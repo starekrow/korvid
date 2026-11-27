@@ -387,8 +387,9 @@ void rb_destroy_pipelines(Renderer* r) {
 
 namespace {
 
+// The pass's target: the main window's chain, or the surface a Surface pass draws into.
 void set_viewport(Renderer* r, ID3D12GraphicsCommandList* cmd) {
-    const Swapchain& s = r->swapchain;
+    const Swapchain& s = r->surface_at ? r->surfaces[r->surface_at].chain : r->swapchain;
     D3D12_VIEWPORT vp{0.0f, 0.0f, (f32)s.width, (f32)s.height, 0.0f, 1.0f};
     D3D12_RECT scissor{0, 0, (LONG)s.width, (LONG)s.height};
     cmd->RSSetViewports(1, &vp);
@@ -451,6 +452,16 @@ void rb_pass_begin(Renderer* r, FrameInFlight& f, RcPass pass, const RenderView&
         rb_post_begin_world(r, cmd, view);
         return;
     }
+    if (pass == RcPass::Surface) { // another window's back buffer: its lists alone
+        Surface& s = r->surfaces[r->surface_at];
+        rb_transition(cmd, s.chain.buffers[s.image], D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+        rb_label_begin(r, cmd, "surface");
+        D3D12_CPU_DESCRIPTOR_HANDLE rtv = rb_rtv(r, kRtvSurfaces + r->surface_at * kBackBuffers + s.image);
+        cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+        const f32 clear[4] = {view.clear_color.r, view.clear_color.g, view.clear_color.b, view.clear_color.a};
+        cmd->ClearRenderTargetView(rtv, clear, 0, nullptr);
+        return;
+    }
     rb_transition(cmd, r->swapchain.buffers[f.image], D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
     rb_label_begin(r, cmd, "draw");
     D3D12_CPU_DESCRIPTOR_HANDLE rtv = rb_rtv(r, f.image);
@@ -484,6 +495,10 @@ void rb_bind_sprites(Renderer* r, FrameInFlight& f, const PushData& push) {
 
 void rb_pass_end(Renderer* r, FrameInFlight& f, RcPass pass) {
     if (pass == RcPass::World) rb_post_end_world(r, f.cmd);
+    if (pass == RcPass::Surface) {
+        Surface& s = r->surfaces[r->surface_at];
+        rb_transition(f.cmd, s.chain.buffers[s.image], D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+    }
     rb_label_end(r, f.cmd);
 }
 

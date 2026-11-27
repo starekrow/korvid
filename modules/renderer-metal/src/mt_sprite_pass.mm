@@ -374,15 +374,15 @@ void rb_sort_end(Renderer*, FrameInFlight&, bool) {}
 // A render pass into the world's target or the drawable. The draw's GPU timing starts at the
 // first render pass of the frame and ends at the window's.
 void rb_pass_begin(Renderer* r, FrameInFlight& f, RcPass pass, const RenderView& view) {
-    bool world = pass == RcPass::World;
+    bool world = pass == RcPass::World, other = pass == RcPass::Surface;
     MTLRenderPassDescriptor* rp = [MTLRenderPassDescriptor renderPassDescriptor];
-    rb_gpu_attach(r, f, rp, world || !f.world_pass, !world);
-    rp.colorAttachments[0].texture     = world ? r->post.target : f.drawable.texture;
+    if (!other) rb_gpu_attach(r, f, rp, world || !f.world_pass, !world); // another window's pass is not timed
+    rp.colorAttachments[0].texture     = world ? r->post.target : other ? r->surfaces[r->surface_at].drawable.texture : f.drawable.texture;
     rp.colorAttachments[0].loadAction  = MTLLoadActionClear;
     rp.colorAttachments[0].storeAction = MTLStoreActionStore;
     rp.colorAttachments[0].clearColor  = MTLClearColorMake(view.clear_color.r, view.clear_color.g, view.clear_color.b, view.clear_color.a);
     f.enc = [f.rec renderCommandEncoderWithDescriptor:rp];
-    f.enc.label = world ? @"world" : @"draw";
+    f.enc.label = world ? @"world" : other ? @"surface" : @"draw";
     if (world) f.world_pass = true;
 }
 
@@ -390,7 +390,8 @@ void rb_pass_post(Renderer* r, FrameInFlight& f, const RenderView& view) { rb_po
 
 void rb_bind_sprites(Renderer* r, FrameInFlight& f, const PushData& push) {
     id<MTLRenderCommandEncoder> enc = f.enc;
-    [enc setViewport:(MTLViewport){0.0, 0.0, (double)f.width, (double)f.height, 0.0, 1.0}];
+    const Surface* s = r->surface_at ? &r->surfaces[r->surface_at] : nullptr; // a Surface pass's target
+    [enc setViewport:(MTLViewport){0.0, 0.0, (double)(s ? s->width : f.width), (double)(s ? s->height : f.height), 0.0, 1.0}];
     [enc setVertexBytes:&push length:sizeof push atIndex:kBindPush];
     [enc setFragmentBytes:&push length:sizeof push atIndex:kBindPush];
     id<MTLBuffer> bound[] = {f.layers, r->material_table, f.bindless, r->tables.sprites, r->tables.sorted};

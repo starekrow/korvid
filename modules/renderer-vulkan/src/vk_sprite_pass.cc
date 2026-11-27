@@ -497,8 +497,9 @@ void image_barrier(VkCommandBuffer cmd, VkImage image, VkPipelineStageFlags2 src
     vkCmdPipelineBarrier2(cmd, &dep);
 }
 
+// The pass's target: the main window's chain, or the surface a Surface pass draws into.
 void set_viewport(Renderer* r, VkCommandBuffer cmd) {
-    const VkExtent2D e = r->swapchain.extent;
+    const VkExtent2D e = r->surface_at ? r->surfaces[r->surface_at].chain.extent : r->swapchain.extent;
     VkViewport vp{0.0f, 0.0f, (f32)e.width, (f32)e.height, 0.0f, 1.0f};
     VkRect2D scissor{{0, 0}, e};
     vkCmdSetViewport(cmd, 0, 1, &vp);
@@ -568,14 +569,19 @@ void rb_pass_begin(Renderer* r, FrameInFlight& f, RcPass pass, const RenderView&
         rb_post_begin_world(r, cmd, view);
         return;
     }
-    const Swapchain& s = r->swapchain;
+    // The main window's image, or (a Surface pass) another window's: its lists alone, with the
+    // push block it binds next.
+    bool other = pass == RcPass::Surface;
+    const Swapchain& s = other ? r->surfaces[r->surface_at].chain : r->swapchain;
+    u32 image = other ? r->surfaces[r->surface_at].image : f.image;
+    if (other) f.push_stale = true;
     // Undefined -> color attachment. Waiting on the acquire semaphore happens at
     // COLOR_ATTACHMENT_OUTPUT, so that is where the barrier starts too.
-    image_barrier(cmd, s.images[f.image], VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED,
+    image_barrier(cmd, s.images[image], VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED,
                   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     VkRenderingAttachmentInfo color{};
     color.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    color.imageView   = s.views[f.image];
+    color.imageView   = s.views[image];
     color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     color.loadOp      = VK_ATTACHMENT_LOAD_OP_CLEAR;
     color.storeOp     = VK_ATTACHMENT_STORE_OP_STORE;
@@ -586,7 +592,7 @@ void rb_pass_begin(Renderer* r, FrameInFlight& f, RcPass pass, const RenderView&
     ri.layerCount           = 1;
     ri.colorAttachmentCount = 1;
     ri.pColorAttachments    = &color;
-    rb_label_begin(r, cmd, "draw");
+    rb_label_begin(r, cmd, other ? "surface" : "draw");
     vkCmdBeginRendering(cmd, &ri);
 }
 
@@ -611,6 +617,11 @@ void rb_bind_sprites(Renderer* r, FrameInFlight& f, const PushData& push) {
 void rb_pass_end(Renderer* r, FrameInFlight& f, RcPass pass) {
     if (pass == RcPass::World) rb_post_end_world(r, f.cmd);
     else vkCmdEndRendering(f.cmd);
+    if (pass == RcPass::Surface) { // ready to present now: the main image is readied at the frame's end
+        const Surface& s = r->surfaces[r->surface_at];
+        image_barrier(f.cmd, s.chain.images[s.image], VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_NONE, 0, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    }
     rb_label_end(r, f.cmd);
 }
 

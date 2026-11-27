@@ -34,6 +34,7 @@
 //     struct GamePipe      : GamePipeCore  { the module, the pipeline }
 //     struct PostPass      : PostCore      { the target, the pipeline }
 //     struct FrameInFlight : FrameCore     { the command buffer, the fence, the sets }
+//     struct Surface       : SurfaceCore   { another window's swapchain, its images }
 //     struct Renderer      : RenderCore    { the device and everything made from it }
 //
 // A backend's Renderer has, by these names, what the core's functions reach through it:
@@ -42,6 +43,7 @@
 //     GamePipe      game_pipes[kGameSlots];
 //     PostPass      post;
 //     FrameInFlight frames[kFramesInFlight];
+//     Surface       surfaces[kSurfaces];       0 unused: the main window's is the backend's own
 //     GpuProfiler   gpu_prof;                  with `RendererGpuStats last`
 //
 // and its FrameInFlight has `RbBuffer layers`, the layers' offsets for the frame, mapped.
@@ -112,6 +114,7 @@ struct Renderer;
 struct Texture;
 struct GamePipe;
 struct FrameInFlight;
+struct Surface;
 
 // The API in this backend's namespace, declared before the core's code calls any of it (so
 // a call from in here is to the backend's own, not to the public kv:: dispatcher's).
@@ -189,11 +192,32 @@ struct FrameCore {
     u64              ui_capacity = 0;
     u64              ui_version  = 0;
     bool             ui_failed   = false; // the backend could not make it: no UI from this slot
+    // The other surfaces this frame draws and presents (bit per surface, 0 never set): those
+    // whose lists or size changed since they were last presented, and that had an image.
+    u32              surfaces = 0;
+};
+
+// Another window the renderer draws UI into (renderer_surface_add; docs/PRDs/Engine-Slice-13-PRD.md,
+// KR40), by the window's id: 1 to kSurfaces - 1. The main window is surface 0 and is the
+// backend's own swapchain, not one of these. Only UI lists draw on it, never the world.
+constexpr u32 kSurfaces = KV_RENDER_SURFACES;
+struct SurfaceCore {
+    bool  live = false;
+    void* native = nullptr;       // as RendererDesc::native_window: the window's handle (a HostWindow* for the CPU renderer)
+    bool  transparent = false;    // the window is a transparent one: cleared to nothing, presented with alpha where it can be
+    u32   want_width = 0, want_height = 0; // the window's size in pixels, as last given
+    bool  resized = true;         // drawn at the next frame, whatever its lists
+    bool  hidden = false;         // its window is not seen (renderer_surface_visible): not drawn
+    u64   drawn_version = 0;      // the world's ui_surface_version it last presented
+    u64   drawing_version = 0;    // the one the frame recording now draws
+    bool  have_image = false;     // rb_surface_acquire's answer, and the image's size
+    u32   width = 0, height = 0;
 };
 
 // The two passes of a frame that draw sprites: the world's, into the post pass's target
-// (only when a post shader is on), and the window's.
-enum class RcPass : u8 { World, Window };
+// (only when a post shader is on), and the window's. A third draws another window's lists and no
+// sprites: on RenderCore::surface_at, the one rb_surface_acquire gave an image.
+enum class RcPass : u8 { World, Window, Surface };
 
 // The sort, in the order its kernels run (sprite_sort.slang): each step's label for a
 // capture tool and its workgroups. rc_sort_steps fills them; a backend's rb_sort dispatches
@@ -259,6 +283,13 @@ struct RenderCore {
     u32      checks_passed = 0, checks_failed = 0;
 
     f64 last_wait = 0.0; // seconds blocked in the last renderer_render
+
+    // The surfaces (SurfaceCore): what each has presented, 0 the main window's; the one a
+    // Surface pass draws into; and whether this frame leaves the main window alone
+    // (RenderView::main_surface false), which rb_frame_acquire reads: no image.
+    u64  presents[kSurfaces] = {};
+    u32  surface_at = 0;
+    bool main_skipped = false;
 };
 
 // ---- the core's functions (core.inl) ---------------------------------------------------------
@@ -347,11 +378,21 @@ bool rb_frame_wait(Renderer* r, FrameInFlight& f, f64* waited);
 void rb_frame_slot(Renderer* r, FrameInFlight& f, u32 slot);
 // The image this frame draws into: f.have_image, f.width, f.height. Rebuilds what a resize
 // or a new surface asks for first. No image (no surface, no area, a swapchain out of date)
-// is not an error: the frame still sends its uploads. False: give the frame up.
+// is not an error: the frame still sends its uploads. False: give the frame up. With
+// r->main_skipped it takes no image and does the rest.
 bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64* waited);
 bool rb_frame_submit(Renderer* r, FrameInFlight& f);
 bool rb_frame_present(Renderer* r, FrameInFlight& f, f64* waited); // nothing when there is no image
 bool rb_frame_finish(Renderer* r, FrameInFlight& f);               // blocks until the frame just submitted is done
+// Another window's surface (SurfaceCore), made when it is added from its native handle and
+// size, and let go of when it is removed (after the GPU is done with it). acquire gives the
+// frame its image (s.have_image, s.width, s.height), rebuilding what a resize asks for
+// first, and makes it the target of the Surface pass that follows (r->surface_at is set by
+// the core); present shows it once the frame is submitted. No image is not an error.
+bool rb_surface_create(Renderer* r, Surface& s);
+void rb_surface_destroy(Renderer* r, Surface& s);
+bool rb_surface_acquire(Renderer* r, FrameInFlight& f, Surface& s, f64* waited);
+bool rb_surface_present(Renderer* r, FrameInFlight& f, Surface& s, f64* waited);
 // Sprite tables for at least `rows` rows; the old ones retire with the frame.
 bool rb_create_tables(Renderer* r, u32 rows);
 

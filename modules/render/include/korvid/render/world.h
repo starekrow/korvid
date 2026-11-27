@@ -20,6 +20,7 @@ namespace kv {
 // items' byte offsets from the region's start, the clips (float4 each), the items' words.
 // `base` is where the region sits in a frame's UI buffer.
 struct RwUiLayer {
+    u8        surface = 0; // the surface it draws on: 0 the main window's
     i32       layer = 0;
     Array<u8> bytes;
     u32       items = 0;
@@ -42,11 +43,14 @@ struct RenderWorld {
     f32                  layer_cur[kLayerCount][2]  = {};
     u32                  tick = 0;         // Tick deltas seen; the stamp of the newest rows
     u64                  deltas_applied = 0;
-    // The UI lists (renderer_ui_set), by layer ascending, each in the bytes the GPU reads
-    // (rw_ui_set says how). `ui_version` moves on every change, so a frame slot whose copy
-    // is older stages them all again; `ui_bytes` is their total, each region 16-aligned.
+    // The UI lists (renderer_ui_set), by surface and then layer ascending, each in the bytes
+    // the GPU reads (rw_ui_set says how). `ui_version` moves on every change, so a frame
+    // slot whose copy is older stages them all again; `ui_surface_version` moves when one of
+    // that surface's lists changes, so a surface unchanged is not drawn again. `ui_bytes` is
+    // their total, each region 16-aligned.
     Array<RwUiLayer>     ui;
     u64                  ui_version = 1;
+    u64                  ui_surface_version[KV_RENDER_SURFACES] = {};
     u64                  ui_bytes = 0;
     u64                  ui_sets = 0, ui_stages = 0;
 };
@@ -61,8 +65,12 @@ void rw_apply(RenderWorld& w, Span<const SpriteDelta> deltas);
 
 // The UI lists: replace or remove a layer's, keeping the layers in order and their bases
 // packed. Bytes come from the world's allocator.
-void rw_ui_set(RenderWorld& w, i32 layer, const UiList& list);
-void rw_ui_clear(RenderWorld& w, i32 layer);
+void rw_ui_set(RenderWorld& w, u32 surface, i32 layer, const UiList& list);
+void rw_ui_clear(RenderWorld& w, u32 surface, i32 layer);
+// Every list of a surface, removed (the surface is gone).
+void rw_ui_clear_surface(RenderWorld& w, u32 surface);
+// The first of a surface's lists in w.ui, or w.ui.len when it has none.
+u32  rw_ui_first(const RenderWorld& w, u32 surface);
 // Every region into `dst` (w.ui_bytes long), at its base.
 void rw_ui_stage(const RenderWorld& w, u8* dst);
 // The bucket after a UI layer's sprites: a list at `layer` is drawn when the walk of the

@@ -159,8 +159,17 @@ struct GpuProfiler {
     RendererGpuStats last;
 };
 
+// Another window's (SurfaceCore): its layer (and the view that carries it), and the drawable
+// the frame draws into, autoreleased with the frame's scope.
+struct Surface : SurfaceCore {
+    CAMetalLayer*       layer = nil;
+    void*               view = nullptr;
+    id<CAMetalDrawable> drawable = nil;
+};
+
 struct Renderer : RenderCore {
     void*       window     = nullptr; // HostWindow::native_handle(): an SDL_Window*
+    Surface     surfaces[kSurfaces];  // other windows, by id; 0 unused
     void*       metal_view = nullptr; // SDL's view that carries the layer; destroyed with the renderer
     CAMetalLayer* layer    = nil;     // the view's, not retained here
 

@@ -45,7 +45,7 @@ void test_ui_lists(kv::TestCtx& c) {
     RenderWorld w;
     KV_CHECK(c, rw_init(w, mem_general()));
     u64 v0 = w.ui_version;
-    rw_ui_set(w, 5, list);
+    rw_ui_set(w, 0, 5, list);
     KV_CHECK(c, w.ui.len == 1 && w.ui_version == v0 + 1 && w.ui_bytes % 16 == 0 && w.ui[0].items == 2);
     const RwUiLayer& l = w.ui[0];
     // The header, the offsets, the clips, the words.
@@ -66,17 +66,33 @@ void test_ui_lists(kv::TestCtx& c) {
     UiList small;
     small.init(mem_general());
     small.glyph(g);
-    rw_ui_set(w, -300, small); // clamped to -128
-    rw_ui_set(w, 50, small);
+    rw_ui_set(w, 0, -300, small); // clamped to -128
+    rw_ui_set(w, 0, 50, small);
     KV_CHECK(c, w.ui.len == 3 && w.ui[0].layer == -128 && w.ui[1].layer == 5 && w.ui[2].layer == 50);
     KV_CHECK(c, w.ui[0].base == 0 && w.ui[1].base == (w.ui[0].bytes.len + 15) / 16 * 16 && w.ui[2].base == w.ui[1].base + (w.ui[1].bytes.len + 15) / 16 * 16);
     u64 before = w.ui_version;
-    rw_ui_set(w, 5, small); // replaced in place
+    rw_ui_set(w, 0, 5, small); // replaced in place
     KV_CHECK(c, w.ui.len == 3 && w.ui[1].items == 1 && w.ui_version == before + 1);
-    rw_ui_clear(w, -128);
+    rw_ui_clear(w, 0, -128);
     KV_CHECK(c, w.ui.len == 2 && w.ui[0].layer == 5 && w.ui[0].base == 0);
-    rw_ui_clear(w, 77); // nothing there
+    rw_ui_clear(w, 0, 77); // nothing there
     KV_CHECK(c, w.ui.len == 2);
+
+    // Another surface's lists come after the main one's, in layer order, and move its
+    // version alone (slice 13, KR40).
+    u64 main_v = w.ui_surface_version[0], two_v = w.ui_surface_version[2];
+    rw_ui_set(w, 2, 9, small);
+    rw_ui_set(w, 2, -4, small);
+    rw_ui_set(w, 1, 100, small);
+    KV_CHECK(c, w.ui.len == 5 && w.ui[2].surface == 1 && w.ui[3].surface == 2 && w.ui[3].layer == -4 && w.ui[4].layer == 9);
+    KV_CHECK(c, w.ui_surface_version[0] == main_v && w.ui_surface_version[2] == two_v + 2);
+    KV_CHECK(c, rw_ui_first(w, 0) == 0 && rw_ui_first(w, 1) == 2 && rw_ui_first(w, 2) == 3 && rw_ui_first(w, 3) == 5);
+    rw_ui_clear(w, 2, 5); // the main surface has a 5, surface 2 has none
+    KV_CHECK(c, w.ui.len == 5 && w.ui_surface_version[2] == two_v + 2);
+    rw_ui_clear_surface(w, 2);
+    KV_CHECK(c, w.ui.len == 3 && w.ui[2].surface == 1 && w.ui_surface_version[2] == two_v + 3 && w.ui_surface_version[0] == main_v);
+    rw_ui_clear_surface(w, 1);
+    KV_CHECK(c, w.ui.len == 2 && w.ui[1].base + w.ui[1].bytes.len <= w.ui_bytes);
 
     // Staging copies each region to its base.
     Array<u8> gpu;

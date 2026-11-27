@@ -100,7 +100,8 @@ constexpr u32 kHeapPost     = kMaxTextures * kFramesInFlight;
 constexpr u32 kHeapSize     = kHeapPost + kFramesInFlight;
 // The render target heap: the back buffers, then the post pass's world target.
 constexpr u32 kRtvPost      = kBackBuffers;
-constexpr u32 kRtvSize      = kBackBuffers + 1;
+constexpr u32 kRtvSurfaces  = kBackBuffers + 1;           // another window's, at kRtvSurfaces + its id * kBackBuffers
+constexpr u32 kRtvSize      = kRtvSurfaces + KV_RENDER_SURFACES * kBackBuffers;
 
 // The push block (PushData, layout.h) is root constants at b0, 28 of them.
 
@@ -205,6 +206,13 @@ struct Swapchain {
     IUnknown*        dcomp_visual = nullptr; // IDCompositionVisual2
 };
 
+// Another window's (SurfaceCore): a chain of its own, made as the main one is (d3d_swapchain.cc),
+// and the back buffer the frame draws into.
+struct Surface : SurfaceCore {
+    Swapchain chain;
+    u32       image = 0;
+};
+
 struct Renderer : RenderCore {
     HWND        window     = nullptr;
     IoQueue*    io         = nullptr; // the platform's queue: game and post shaders are read through it, owner `this`
@@ -223,6 +231,7 @@ struct Renderer : RenderCore {
 
     Swapchain swapchain;
     bool      swapchain_dirty = true;
+    Surface   surfaces[kSurfaces]; // other windows, by id; 0 unused
 
     ID3D12DescriptorHeap* heap = nullptr;     // shader visible: textures, post inputs
     ID3D12DescriptorHeap* rtv_heap = nullptr;

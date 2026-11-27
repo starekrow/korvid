@@ -357,6 +357,37 @@ through SDL, written at milestones 1 and 2; no Mac is to hand, so it is not trie
   (Linux, macOS), Android's and iOS's are written and not built here; nine windows at once
   is not tried.
 
+**Milestone 5, surfaces (KR40): built Nov 26, 2026.** As above, and:
+
+- **The API.** `renderer_surface_add(r, id, native, w, h, transparent)` by the window's id (the
+  main window is surface 0, the backend's own), `_remove`, `_resize`, `_visible` (a hidden one is
+  not drawn, and is drawn whole when shown), `_pending` (another surface has something to
+  draw) and `_presents` (each one's count, 0 the main one's). `renderer_ui_set(r, surface,
+  layer, list)` and `_clear`; the forms without a surface are the main one's.
+  `RenderView::main_surface` false leaves the main window alone for a frame: only the other
+  surfaces that changed draw.
+- **The core.** The world keeps every surface's lists in one array, by surface then layer, so a
+  slot stages them in one buffer as before; each surface has a version of its own. A frame
+  acquires the surfaces whose lists or size changed after the main image, records a
+  `RcPass::Surface` for each after the main passes (a clear and its lists, a push block of its
+  size, no sprites), submits once, and presents each after the main one. Three new backend
+  hooks: create and destroy a surface, acquire it, present it; the pass itself is
+  `rb_pass_begin` on `RenderCore::surface_at`.
+- **The backends.** D3D12: a chain each, made as the main one is (a composition one when
+  transparent), its views after the post pass's. Vulkan: a `VkSurfaceKHR` and chain each, an
+  acquire semaphore a slot, the one submit waiting on and signalling every image it draws; a
+  surface whose format is not the main one's is not drawn. Metal: a layer each, presented by
+  the frame's command buffer. CPU: the window's software frame, the main target set aside for
+  the pass. D3D12 and CPU are built and run here; Vulkan is built and run here too, by binding
+  it for Windows for the run (rocks on an AMD 780M, no validation errors); Metal is written and
+  not built.
+- **Verified** (Nov 26): `kormake test ./modules windows-dev`, `render_tests` with the surfaces'
+  order and versions; rocks and kromedemo on D3D12 and the CPU renderer as before; render-gate
+  for windows d3d12 and windows cpu. D3D12's gallery is exact (10 of 10); its one failure is
+  the compiled shaders against a baseline of Nov 14, two of arcfire's game shaders a byte
+  apart, with no shader source changed from main: the baseline is older than main's shaders,
+  not this. The CPU gate passed every check, arcfire's replay matched. A second window is first drawn by milestone 6's `kromedemo --two`.
+
 **Verified for milestones 1 and 2** (Nov 25): `kormake test` on linux-debug, linux-dev and
 linux-ship; `platform_hid` and `krome` under `--sanitize address,undefined` and `thread`
 (`frameloop` has no tests of its own); `tools/determinism-check.sh` (rocks in every

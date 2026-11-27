@@ -10,6 +10,7 @@
 #pragma once
 #include "korvid/render/material.h"
 #include "korvid/render/sprite.h"
+#include "korvid/render/ui.h" // KV_RENDER_SURFACES
 
 namespace kv {
 
@@ -65,6 +66,10 @@ struct RenderView {
     rect2 view;            // the world rect that fills the window, +y up, before rotation
     f32   rotation = 0.0f; // the camera's rotation about the rect's center, radians counter-clockwise
     color clear_color{0.09f, 0.09f, 0.11f, 1.0f};
+    // Draw and present the main window (the world and its UI lists). False: only the other
+    // windows whose lists changed are drawn (renderer_surface_add), and the main one is left
+    // as it is, not presented; the uploads still go.
+    bool  main_surface = true;
     // Screen-space sprites are placed in window pixels, center origin, +y up; the renderer
     // knows the window's size and needs nothing more for them.
 };
@@ -109,15 +114,38 @@ void       renderer_resize(Renderer* r, u32 width, u32 height);
 // whose surface lives as long as its window returns true and does nothing.
 bool       renderer_set_surface(Renderer* r, void* native_window);
 
+// ---- other windows ---------------------------------------------------------------
+// Another window the renderer draws UI lists into (docs/PRDs/Engine-Slice-13-PRD.md, KR40):
+// `surface` is the window's id, 1 to KV_RENDER_SURFACES - 1 (the main window is 0, the
+// renderer's own); `native_window` its handle as RendererDesc::native_window is, its size in
+// pixels, and whether it is a transparent one (cleared to nothing, its alpha presented where
+// the backend can). One device draws them all; the world (sprites, post) is the main
+// window's alone. A surface is drawn and presented in a renderer_render only when its lists
+// (renderer_ui_set with its id) or its size changed since it last was. False when the id is
+// taken or out of range, or the system refuses the surface (logged).
+bool renderer_surface_add(Renderer* r, u32 surface, void* native_window, u32 width, u32 height, bool transparent);
+// Lets go of it, and of its lists, after the GPU is done with it.
+void renderer_surface_remove(Renderer* r, u32 surface);
+// Its window's framebuffer changed size: drawn again at the next frame, at that size.
+void renderer_surface_resize(Renderer* r, u32 surface, u32 width, u32 height);
+// Its window is hidden, or shown again: a hidden surface is not drawn, whatever its lists, and
+// is drawn whole when it is shown.
+void renderer_surface_visible(Renderer* r, u32 surface, bool visible);
+// Whether a surface other than the main one has something to draw: lists or a size that
+// changed since it last presented, and seen. What a frame loop that draws on demand asks.
+bool renderer_surface_pending(const Renderer* r);
+// How many frames a surface has presented, 0 the main window: for tests and the PRD's count.
+u64  renderer_surface_presents(const Renderer* r, u32 surface);
+
 // ---- the render world -------------------------------------------------------------
 // Applies a tick's worth (or a frame's worth) of sprite deltas to the persistent world.
 void       renderer_apply(Renderer* r, Span<const SpriteDelta> deltas);
 u32        renderer_sprite_count(const Renderer* r);
 
-// Draws the world as of the last deltas, interpolated by view.alpha, and presents.
-// Uploads (textures, changed rows) are submitted even when nothing is presented.
-// Returns false when nothing was presented (zero-size window, swapchain being
-// rebuilt); that is not an error.
+// Draws the world as of the last deltas, interpolated by view.alpha, and presents; and each
+// other window whose lists or size changed (renderer_surface_add). Uploads (textures,
+// changed rows) are submitted even when nothing is presented. Returns false when nothing
+// was presented (zero-size window, swapchain being rebuilt); that is not an error.
 bool       renderer_render(Renderer* r, const RenderView& view);
 
 // Seconds the last renderer_render spent blocked on the GPU or the display (fences,

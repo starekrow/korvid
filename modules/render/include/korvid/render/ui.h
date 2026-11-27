@@ -73,9 +73,17 @@ struct UiList {
 };
 
 // Replaces what is drawn at `layer` (the sprites' layer space, clamped to -128..127): drawn
-// after that layer's sprites and before the next layer's. The list is copied.
+// after that layer's sprites and before the next layer's. The list is copied. On the main
+// window's surface; the forms with a `surface` draw on another window's
+// (renderer_surface_add), where there are no sprites, only the lists, in layer order.
 void renderer_ui_set(Renderer* r, i32 layer, const UiList& list);
 void renderer_ui_clear(Renderer* r, i32 layer);
+void renderer_ui_set(Renderer* r, u32 surface, i32 layer, const UiList& list);
+void renderer_ui_clear(Renderer* r, u32 surface, i32 layer);
+
+// The most surfaces a renderer draws: the main window's, 0, and one for each other window,
+// by the window's id (platform_hid's KV_WINDOWS).
+constexpr u32 KV_RENDER_SURFACES = 8;
 // Lists set over the run, and the bytes the GPU holds for them now.
 struct RendererUiStats { u64 sets = 0, stages = 0; u32 layers = 0; u64 bytes = 0; };
 RendererUiStats renderer_ui_stats(const Renderer* r);

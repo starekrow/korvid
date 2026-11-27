@@ -85,6 +85,7 @@ void renderer_destroy(Renderer* r) {
         vkDeviceWaitIdle(r->device); // the one wait-idle: nothing is in flight after this
         rb_destroy_pipelines_now(r);
         rb_post_destroy_now(r);
+        for (Surface& s : r->surfaces) if (s.live) { rb_surface_destroy(r, s); s.live = false; }
         rb_destroy_swapchain_now(r);
         rb_destroy_frames(r); // runs every frame's garbage
         rb_destroy_resources(r);
@@ -183,7 +184,7 @@ bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64* waited) {
     // Without a surface (Android has taken it) the frame runs its uploads and presents nothing.
     if (r->surface && r->swapchain_dirty && !rb_recreate_swapchain(r)) return false;
 
-    f.have_image = r->surface && r->swapchain.handle != VK_NULL_HANDLE;
+    f.have_image = r->surface && r->swapchain.handle != VK_NULL_HANDLE && !r->main_skipped; // skipped: only other windows draw
     f.image      = 0;
     if (f.have_image) {
         KV_ZONE_WAIT("acquire");
@@ -202,33 +203,41 @@ bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64* waited) {
         }
     }
 
-    f.width  = r->swapchain.extent.width;
-    f.height = r->swapchain.extent.height;
+    f.width  = f.have_image ? r->swapchain.extent.width : 0;
+    f.height = f.have_image ? r->swapchain.extent.height : 0;
     return true;
 }
 
 bool rb_frame_submit(Renderer* r, FrameInFlight& f) {
     VK_CHECK(vkResetFences(r->device, 1, &f.fence)); // only once the submit is certain
 
-    VkSemaphoreSubmitInfo wait{};
-    wait.sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-    wait.semaphore = f.acquire;
-    wait.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkSemaphoreSubmitInfo signal{};
-    signal.sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
-    signal.semaphore = f.have_image ? r->swapchain.present[f.image] : VK_NULL_HANDLE;
-    signal.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    // The main window's image, when it has one, and each other window's this frame draws: wait
+    // for each to be acquired, signal each one's "rendering done".
+    VkSemaphoreSubmitInfo waits[kSurfaces]{}, signals[kSurfaces]{};
+    u32 n = 0;
+    auto both = [&](VkSemaphore acquired, VkSemaphore done) {
+        waits[n].sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        waits[n].semaphore   = acquired;
+        waits[n].stageMask   = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        signals[n].sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+        signals[n].semaphore = done;
+        signals[n].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        ++n;
+    };
+    if (f.have_image) both(f.acquire, r->swapchain.present[f.image]);
+    for (u32 i = 1; i < kSurfaces; ++i)
+        if (f.surfaces & (1u << i)) both(r->surfaces[i].acquire[&f - r->frames], r->surfaces[i].chain.present[r->surfaces[i].image]);
     VkCommandBufferSubmitInfo cbi{};
     cbi.sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
     cbi.commandBuffer = f.cmd;
     VkSubmitInfo2 si{};
     si.sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
-    si.waitSemaphoreInfoCount   = f.have_image ? 1 : 0;
-    si.pWaitSemaphoreInfos      = &wait;
+    si.waitSemaphoreInfoCount   = n;
+    si.pWaitSemaphoreInfos      = waits;
     si.commandBufferInfoCount   = 1;
     si.pCommandBufferInfos      = &cbi;
-    si.signalSemaphoreInfoCount = f.have_image ? 1 : 0;
-    si.pSignalSemaphoreInfos    = &signal;
+    si.signalSemaphoreInfoCount = n;
+    si.pSignalSemaphoreInfos    = signals;
     f.submit_ticks = os_ticks(); // where an uncalibrated GPU timeline starts
     VK_CHECK(vkQueueSubmit2(r->queue, 1, &si, f.fence));
     return true;

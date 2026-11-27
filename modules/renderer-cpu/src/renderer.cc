@@ -106,6 +106,7 @@ void renderer_destroy(Renderer* r) {
     free_in(mem_general(), r->check_keys, sizeof(f32) * (r->check_rows ? r->check_rows : 1));
     r->check_keys = nullptr;
     if (r->presenting && r->window) r->window->present_software();
+    for (Surface& s : r->surfaces) if (s.live) { rb_surface_destroy(r, s); s.live = false; }
     for (FrameInFlight& f : r->frames) {
         f.garbage_owned = f.garbage.len; // nothing is in flight: all of it
         rc_run_garbage(r, f);
@@ -293,6 +294,7 @@ bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64*) {
     f.width = f.height = 0;
     r->target = nullptr;
     r->copy_out = false;
+    if (r->main_skipped) return true; // only other windows draw this frame
     if (r->window) {
         u32 W = r->window->width(), H = r->window->height();
         u32 s = frame_scale(r);
@@ -424,6 +426,45 @@ bool rb_frame_present(Renderer* r, FrameInFlight&, f64*) {
 }
 
 bool rb_frame_finish(Renderer*, FrameInFlight&) { return true; }
+
+// ---- other windows' surfaces ------------------------------------------------------------
+
+// A surface is a HostWindow (RendererDesc::native_window's kind here) drawn at its own pixels:
+// no render scale, no tile cache, its software frame held from acquire to present.
+bool rb_surface_create(Renderer*, Surface& s) {
+    s.window = (HostWindow*)s.native;
+    s.frame = CpuTarget{};
+    return s.window != nullptr;
+}
+
+void rb_surface_destroy(Renderer*, Surface& s) {
+    if (s.frame.pixels && s.window) s.window->present_software(); // let go of a frame still held
+    s.frame = CpuTarget{};
+    s.window = nullptr;
+}
+
+bool rb_surface_acquire(Renderer*, FrameInFlight&, Surface& s, f64*) {
+    s.have_image = false;
+    s.frame = CpuTarget{};
+    if (!s.window) return true;
+    s.window->software_size(0, 0);
+    HostWindow::SoftwareFrame sf;
+    if (!s.window->software_frame(&sf)) return true;
+    if (!sf.width || !sf.height) { s.window->present_software(); return true; }
+    s.frame = CpuTarget{sf.pixels, sf.width, sf.height, sf.pitch, sf.rgba};
+    s.have_image = true;
+    s.width  = s.frame.width;
+    s.height = s.frame.height;
+    return true;
+}
+
+bool rb_surface_present(Renderer* r, FrameInFlight&, Surface& s, f64*) {
+    f64 t0 = r->stats ? time_now() : 0.0;
+    if (s.frame.pixels && s.window) s.window->present_software();
+    s.frame = CpuTarget{};
+    if (r->stats) r->stat_present += time_now() - t0;
+    return true;
+}
 
 bool rb_record_begin(Renderer* r, FrameInFlight&) {
     if (r->stats) r->record_start = time_now();

@@ -4,14 +4,15 @@
 // whose fence passes after every earlier frame on the queue. Nothing waits for the device
 // to idle except renderer_destroy.
 #include "renderer_internal.h"
+#include "korvid/core/format.h"
+#include "korvid/core/time.h"
 
 namespace kv { namespace KV_RB_NS {
 
 namespace {
 
-// Queues the current chain's objects for destruction after the frame and forgets them.
-void retire_swapchain(Renderer* r) {
-    Swapchain& s = r->swapchain;
+// Queues a chain's objects for destruction after the frame and forgets them.
+void retire_chain(Renderer* r, Swapchain& s) {
     for (VkSemaphore sem : s.present) rb_defer_destroy(r, Garbage::SemaphoreKind, (u64)sem);
     for (VkImageView v : s.views) rb_defer_destroy(r, Garbage::ImageViewKind, (u64)v);
     rb_defer_destroy(r, Garbage::SwapchainKind, (u64)s.handle);
@@ -22,32 +23,33 @@ void retire_swapchain(Renderer* r) {
     s.extent = {0, 0};
 }
 
-// Builds the swapchain for the current surface size. Returns true with a zero extent when
-// the window has no area (minimized); the caller then skips the frame.
-bool create_swapchain(Renderer* r) {
+// Builds a chain for a surface at its size now: the main window's, or another's (`label`
+// names it in the log; `generation` counts its rebuilds). Returns true with a zero extent
+// when the window has no area (minimized); the caller then skips the frame.
+bool create_chain(Renderer* r, VkSurfaceKHR surface, Swapchain& s, u32 want_width, u32 want_height, bool transparent, u32& generation, const char* label) {
     VkSurfaceCapabilitiesKHR caps;
-    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(r->gpu, r->surface, &caps));
+    VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(r->gpu, surface, &caps));
 
     // Wayland leaves currentExtent undefined; the window's pixel size decides then.
     VkExtent2D extent = caps.currentExtent;
     if (extent.width == UINT32_MAX) {
-        extent.width  = r->want_width;
-        extent.height = r->want_height;
+        extent.width  = want_width;
+        extent.height = want_height;
     }
     extent.width  = extent.width  < caps.minImageExtent.width  ? caps.minImageExtent.width  :
                     extent.width  > caps.maxImageExtent.width  ? caps.maxImageExtent.width  : extent.width;
     extent.height = extent.height < caps.minImageExtent.height ? caps.minImageExtent.height :
                     extent.height > caps.maxImageExtent.height ? caps.maxImageExtent.height : extent.height;
     if (extent.width == 0 || extent.height == 0) {
-        if (r->swapchain.handle) retire_swapchain(r);
+        if (s.handle) retire_chain(r, s);
         return true;
     }
 
     u32 fmt_count = 0;
-    vkGetPhysicalDeviceSurfaceFormatsKHR(r->gpu, r->surface, &fmt_count, nullptr);
+    vkGetPhysicalDeviceSurfaceFormatsKHR(r->gpu, surface, &fmt_count, nullptr);
     Array<VkSurfaceFormatKHR> formats;
     formats.push_n(fmt_count);
-    vkGetPhysicalDeviceSurfaceFormatsKHR(r->gpu, r->surface, &fmt_count, formats.data);
+    vkGetPhysicalDeviceSurfaceFormatsKHR(r->gpu, surface, &fmt_count, formats.data);
     VkSurfaceFormatKHR chosen = formats[0];
     for (u32 i = 0; i < fmt_count; ++i) {
         if ((formats[i].format == VK_FORMAT_B8G8R8A8_SRGB || formats[i].format == VK_FORMAT_R8G8B8A8_SRGB) &&
@@ -56,10 +58,10 @@ bool create_swapchain(Renderer* r) {
     formats.free();
 
     u32 mode_count = 0;
-    vkGetPhysicalDeviceSurfacePresentModesKHR(r->gpu, r->surface, &mode_count, nullptr);
+    vkGetPhysicalDeviceSurfacePresentModesKHR(r->gpu, surface, &mode_count, nullptr);
     Array<VkPresentModeKHR> modes;
     modes.push_n(mode_count);
-    vkGetPhysicalDeviceSurfacePresentModesKHR(r->gpu, r->surface, &mode_count, modes.data);
+    vkGetPhysicalDeviceSurfacePresentModesKHR(r->gpu, surface, &mode_count, modes.data);
     VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR; // always available
     if (!r->vsync) {
         for (u32 i = 0; i < mode_count; ++i)
@@ -73,10 +75,10 @@ bool create_swapchain(Renderer* r) {
     u32 image_count = caps.minImageCount + 1;
     if (caps.maxImageCount > 0 && image_count > caps.maxImageCount) image_count = caps.maxImageCount;
 
-    VkSwapchainKHR old = r->swapchain.handle;
+    VkSwapchainKHR old = s.handle;
     VkSwapchainCreateInfoKHR ci{};
     ci.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    ci.surface          = r->surface;
+    ci.surface          = surface;
     ci.minImageCount    = image_count;
     ci.imageFormat      = chosen.format;
     ci.imageColorSpace  = chosen.colorSpace;
@@ -96,8 +98,8 @@ bool create_swapchain(Renderer* r) {
     // "inherit", which for an app's own window is opaque. A transparent window's frame is
     // premultiplied (the sprite and UI blends keep it so, over a clear of nothing), and is
     // presented so where the surface takes it: Wayland's and a composited X11's do.
-    bool premultiplied = r->transparent && (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR);
-    if (r->transparent && !premultiplied && r->swapchain_generation == 0)
+    bool premultiplied = transparent && (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR);
+    if (transparent && !premultiplied && generation == 0)
         KV_INFO("vulkan", "a transparent window, and a surface that composites no premultiplied alpha (it offers 0x%x): the frame is presented opaque",
                 (u32)caps.supportedCompositeAlpha);
     ci.compositeAlpha   = premultiplied ? VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR :
@@ -110,12 +112,11 @@ bool create_swapchain(Renderer* r) {
 
     VkSwapchainKHR sc = VK_NULL_HANDLE;
     VkResult res = vkCreateSwapchainKHR(r->device, &ci, nullptr, &sc);
-    if (old) retire_swapchain(r); // the old chain may still be presenting: it goes with the frame
+    if (old) retire_chain(r, s); // the old chain may still be presenting: it goes with the frame
     if (res != VK_SUCCESS) {
         KV_ERROR("vulkan", "vkCreateSwapchainKHR: %s", vk_result_name(res));
         return false;
     }
-    Swapchain& s = r->swapchain;
     s.handle = sc;
     s.format = chosen.format;
     s.unrotated = unrotated;
@@ -144,8 +145,8 @@ bool create_swapchain(Renderer* r) {
         s.present.push(sem);
     }
     // A live resize rebuilds this every frame; only the first one is worth an INFO line.
-    log_write(r->swapchain_generation++ == 0 ? LogLevel::Info : LogLevel::Debug, "vulkan",
-              "swapchain %ux%u, %u images, format %d, %s%s", extent.width, extent.height, n,
+    log_write(generation++ == 0 ? LogLevel::Info : LogLevel::Debug, "vulkan",
+              "%s %ux%u, %u images, format %d, %s%s", label, extent.width, extent.height, n,
               (int)s.format, present_mode == VK_PRESENT_MODE_FIFO_KHR ? "fifo" :
               present_mode == VK_PRESENT_MODE_MAILBOX_KHR ? "mailbox" : "immediate",
               premultiplied ? ", premultiplied alpha" : "");
@@ -156,7 +157,7 @@ bool create_swapchain(Renderer* r) {
 
 bool rb_recreate_swapchain(Renderer* r) {
     VkFormat before = r->swapchain.format;
-    if (!create_swapchain(r)) return false;
+    if (!create_chain(r, r->surface, r->swapchain, r->want_width, r->want_height, r->transparent, r->swapchain_generation, "swapchain")) return false;
     r->swapchain_dirty = false;
     if (r->swapchain.handle && (before != r->swapchain.format || !r->pipelines[0])) {
         rb_defer_destroy_pipelines(r);
@@ -166,8 +167,7 @@ bool rb_recreate_swapchain(Renderer* r) {
 }
 
 // Device idle only.
-void rb_destroy_swapchain_now(Renderer* r) {
-    Swapchain& s = r->swapchain;
+static void destroy_chain_now(Renderer* r, Swapchain& s) {
     for (VkSemaphore sem : s.present) vkDestroySemaphore(r->device, sem, nullptr);
     for (VkImageView v : s.views) vkDestroyImageView(r->device, v, nullptr);
     if (s.handle) vkDestroySwapchainKHR(r->device, s.handle, nullptr);
@@ -176,6 +176,82 @@ void rb_destroy_swapchain_now(Renderer* r) {
     s.images.free();
     s.handle = VK_NULL_HANDLE;
     s.extent = {0, 0};
+}
+
+void rb_destroy_swapchain_now(Renderer* r) { destroy_chain_now(r, r->swapchain); }
+
+// ---- other windows' surfaces ------------------------------------------------------------
+// Each its own VkSurfaceKHR and chain, made as the main one is, and an acquire semaphore a
+// frame in flight. The pipelines are the main chain's format's: a surface whose chain has
+// another is not drawn (logged once).
+
+bool rb_surface_create(Renderer* r, Surface& s) {
+    if (!vk_platform_create_surface(s.native, r->instance, &s.surface)) return false;
+    VkBool32 present = VK_FALSE;
+    vkGetPhysicalDeviceSurfaceSupportKHR(r->gpu, r->queue_family, s.surface, &present);
+    if (!present) { KV_ERROR("vulkan", "surface %u cannot be presented to from the renderer's queue", r->surface_at); return false; }
+    VkSemaphoreCreateInfo sci{};
+    sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    for (VkSemaphore& sem : s.acquire) VK_CHECK(vkCreateSemaphore(r->device, &sci, nullptr, &sem));
+    s.generation = 0;
+    s.told = false;
+    return true;
+}
+
+void rb_surface_destroy(Renderer* r, Surface& s) {
+    if (r->device) vkDeviceWaitIdle(r->device); // its images and semaphores may be in a frame in flight
+    // Retired chains of it are in the frames' garbage, made from its surface: they go first.
+    for (FrameInFlight& f : r->frames) { f.garbage_owned = f.garbage.len; rc_run_garbage(r, f); }
+    destroy_chain_now(r, s.chain);
+    for (VkSemaphore& sem : s.acquire) {
+        if (sem) vkDestroySemaphore(r->device, sem, nullptr);
+        sem = VK_NULL_HANDLE;
+    }
+    if (s.surface) vkDestroySurfaceKHR(r->instance, s.surface, nullptr);
+    s.surface = VK_NULL_HANDLE;
+}
+
+bool rb_surface_acquire(Renderer* r, FrameInFlight& f, Surface& s, f64* waited) {
+    char label[32];
+    format(label, sizeof label, "surface %u", r->surface_at);
+    if ((s.resized || !s.chain.handle) && !create_chain(r, s.surface, s.chain, s.want_width, s.want_height, s.transparent, s.generation, label)) return false;
+    s.have_image = false;
+    s.width  = s.chain.extent.width;
+    s.height = s.chain.extent.height;
+    if (!s.chain.handle || !r->ui_pipeline) return true;
+    if (s.chain.format != r->swapchain.format) {
+        if (!s.told) KV_ERROR("vulkan", "surface %u's format (%d) is not the main window's (%d): it is not drawn", r->surface_at, (int)s.chain.format, (int)r->swapchain.format);
+        s.told = true;
+        return true;
+    }
+    KV_ZONE_WAIT("acquire surface");
+    f64 t = time_now();
+    VkResult acq = vkAcquireNextImageKHR(r->device, s.chain.handle, UINT64_MAX, s.acquire[&f - r->frames], VK_NULL_HANDLE, &s.image);
+    *waited += time_now() - t;
+    if (acq == VK_ERROR_OUT_OF_DATE_KHR) { s.resized = true; return true; } // rebuilt at its next frame
+    if (acq != VK_SUCCESS && acq != VK_SUBOPTIMAL_KHR) {
+        KV_ERROR("vulkan", "vkAcquireNextImageKHR (surface %u): %s", r->surface_at, vk_result_name(acq));
+        return false;
+    }
+    s.have_image = true;
+    return true;
+}
+
+bool rb_surface_present(Renderer* r, FrameInFlight&, Surface& s, f64* waited) {
+    KV_ZONE_WAIT("present surface");
+    VkPresentInfoKHR pi{};
+    pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    pi.waitSemaphoreCount = 1;
+    pi.pWaitSemaphores    = &s.chain.present[s.image];
+    pi.swapchainCount     = 1;
+    pi.pSwapchains        = &s.chain.handle;
+    pi.pImageIndices      = &s.image;
+    f64 t = time_now();
+    VkResult pres = vkQueuePresentKHR(r->queue, &pi);
+    *waited += time_now() - t;
+    if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) s.resized = true;
+    else if (pres != VK_SUCCESS) KV_ERROR("vulkan", "vkQueuePresentKHR (surface %u): %s", r->surface_at, vk_result_name(pres));
+    return true;
 }
 
 // ---- frames in flight -------------------------------------------------------------------

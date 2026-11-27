@@ -84,6 +84,7 @@ void renderer_destroy(Renderer* r) {
         rb_wait_idle(r); // the one wait-idle: nothing is in flight after this
         rb_destroy_pipelines(r);
         rb_post_destroy(r);
+        for (Surface& s : r->surfaces) if (s.live) { rb_surface_destroy(r, s); s.live = false; }
         rb_destroy_swapchain(r);
         rb_destroy_frames(r); // runs every frame's garbage
         rb_destroy_resources(r);
@@ -153,7 +154,7 @@ void rb_frame_slot(Renderer* r, FrameInFlight& f, u32 slot) { rb_write_texture_s
 bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64* waited) {
     rb_shaders_pump(r); // the game and post shaders that have come since the last frame
     if (r->swapchain_dirty && !rb_recreate_swapchain(r)) return false;
-    f.have_image = r->swapchain.handle != nullptr;
+    f.have_image = r->swapchain.handle != nullptr && !r->main_skipped; // skipped: only other windows draw
     f.image      = 0;
     if (f.have_image) {
         // The frame latency object: signaled once a back buffer is free to draw into. What
@@ -164,8 +165,8 @@ bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64* waited) {
         *waited += time_now() - t;
         f.image = r->swapchain.handle->GetCurrentBackBufferIndex();
     }
-    f.width  = r->swapchain.width;
-    f.height = r->swapchain.height;
+    f.width  = f.have_image ? r->swapchain.width : 0;
+    f.height = f.have_image ? r->swapchain.height : 0;
     return true;
 }
 

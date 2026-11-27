@@ -226,6 +226,37 @@ backend that draws the primitive defines `KV_RB_UI 1` and makes its `rb_ui_buffe
 `rb_ui_draw` real; one that does not leaves them stubs, `renderer_caps(r).ui` false, and
 the gallery and Krome leave the UI out there.
 
+## More than one window
+
+Engine slice 13 (docs/PRDs/Engine-Slice-13-PRD.md, KR40). One renderer, one device, a
+surface a window: the main window's is the backend's own swapchain, surface 0, and each other
+window is added by its id (`renderer_surface_add(r, id, native, w, h, transparent)`), up to
+`KV_RENDER_SURFACES`. Only UI lists draw on another surface: the world (sprites, post) is the
+main window's. `renderer_ui_set(r, surface, layer, list)` gives a surface a list; the form
+without one is the main window's. The world keeps every surface's lists in the one array,
+by surface and then layer, so a frame slot stages them all into its one buffer as before,
+and a version a surface that moves only when one of its own lists does.
+
+A surface is drawn and presented only when its lists or its size changed since it last
+presented: the core's frame (`frame.inl`) acquires those (`rb_surface_acquire`) after the
+main window's image, records a pass for each after the main window's passes
+(`RcPass::Surface`, on `RenderCore::surface_at`: a clear and its lists, with a push block of
+its own size and no sprites), submits once, and presents each after the main one
+(`rb_surface_present`). `RenderView::main_surface` false leaves the main window alone for a
+frame (its acquire takes no image, `RenderCore::main_skipped`): the frame then draws only the
+other surfaces that changed, which is how a frame loop keeps one window from being presented
+while only another changes. `renderer_surface_pending` says whether any has something to draw;
+`renderer_surface_presents` counts each one's presents, 0 the main window's.
+
+Per backend: D3D12 makes a chain for each, as the main one is (a composition one for a
+transparent window), its views at RTVs after the post pass's. Vulkan makes a `VkSurfaceKHR`
+and a chain for each, an acquire semaphore a frame slot, and the frame's one submit waits on
+every image it draws and signals each one's own; a surface whose chain's format is not the
+main one's is not drawn, since the pipelines are made for that format. Metal makes a layer
+for each, its drawable presented by the frame's command buffer with the main one's. The CPU
+renderer draws into the window's software frame, the main target set aside for the pass, at
+the surface's own pixels, with no render scale and no tile cache.
+
 ## The core and the backends
 
 Slice 9 (docs/PRDs/Engine-Slice-9-PRD.md). Three backends draw this renderer: `renderer-vulkan` (Linux, Windows,

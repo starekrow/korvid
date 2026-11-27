@@ -25,8 +25,7 @@ namespace {
 
 // The layer: the device, the format the pipelines are made for, vsync, and drawables a
 // screenshot can read in the builds that take them.
-void configure_layer(Renderer* r) {
-    CAMetalLayer* l = r->layer;
+void configure_layer(Renderer* r, CAMetalLayer* l) {
     l.device             = r->device;
     l.pixelFormat        = MTLPixelFormatBGRA8Unorm_sRGB; // the hardware encodes linear to sRGB, as the Vulkan swapchain does
     l.maximumDrawableCount = 3;
@@ -97,7 +96,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
         if (ok) r->queue.label = @"korvid";
         if (ok) r->layer = mt_platform_layer(r->window, &r->metal_view);
         if (ok && !r->layer) ok = false;
-        if (ok) configure_layer(r);
+        if (ok) configure_layer(r, r->layer);
         ok = ok && rb_gpu_profile_create(r);
         ok = ok && rc_create_pools(r);
         ok = ok && rb_create_tables(r, desc.sprite_rows > kInitialSpriteRows ? desc.sprite_rows : kInitialSpriteRows);
@@ -131,6 +130,7 @@ void renderer_destroy(Renderer* r) {
     for (FrameInFlight& f : r->frames) {
         if (f.cb) { [f.cb waitUntilCompleted]; [f.cb release]; f.cb = nil; }
     }
+    for (Surface& s : r->surfaces) if (s.live) { rb_surface_destroy(r, s); s.live = false; }
     for (FrameInFlight& f : r->frames) { rb_release_all(r, f); f.garbage.free(); f.dirty_slots.free(); }
     [r->shot_buffer release];
     r->shot_buffer = nil;
@@ -215,7 +215,7 @@ bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64* waited) {
         r->size_dirty = false;
     }
     f.drawable = nil;
-    if (r->want_width && r->want_height) {
+    if (r->want_width && r->want_height && !r->main_skipped) { // skipped: only other windows draw
         KV_ZONE_WAIT("drawable");
         f64 t = time_now();
         f.drawable = [r->layer nextDrawable];
@@ -231,8 +231,10 @@ bool rb_frame_acquire(Renderer* r, FrameInFlight& f, f64* waited) {
 void rb_read_window(Renderer* r, FrameInFlight& f) { record_screenshot(r, f.rec, f.drawable.texture); }
 
 // Presenting is part of the command buffer: scheduled before it is committed.
-bool rb_frame_submit(Renderer*, FrameInFlight& f) {
+bool rb_frame_submit(Renderer* r, FrameInFlight& f) {
     if (f.drawable) [f.rec presentDrawable:f.drawable];
+    for (u32 i = 1; i < kSurfaces; ++i)
+        if ((f.surfaces & (1u << i)) && r->surfaces[i].drawable) [f.rec presentDrawable:r->surfaces[i].drawable];
     [f.rec commit];
     f.cb = [f.rec retain]; // waited for when this slot comes round again
     f.rec = nil;
@@ -246,6 +248,46 @@ bool rb_frame_present(Renderer*, FrameInFlight& f, f64*) {
 
 bool rb_frame_finish(Renderer*, FrameInFlight& f) {
     [f.cb waitUntilCompleted];
+    return true;
+}
+
+// ---- other windows' surfaces ------------------------------------------------------------
+// Each a layer of its own from its window, configured as the main one is; its drawable is
+// presented by the frame's command buffer with the main one's (rb_frame_submit).
+
+bool rb_surface_create(Renderer* r, Surface& s) {
+    s.layer = mt_platform_layer(s.native, &s.view);
+    if (!s.layer) return false;
+    configure_layer(r, s.layer);
+    if (s.transparent) s.layer.opaque = NO;
+    return true;
+}
+
+void rb_surface_destroy(Renderer* r, Surface& s) {
+    for (FrameInFlight& f : r->frames) if (f.cb) [f.cb waitUntilCompleted]; // its drawables may be in one
+    s.drawable = nil;
+    mt_platform_release(s.view);
+    s.view = nullptr;
+    s.layer = nil;
+}
+
+bool rb_surface_acquire(Renderer*, FrameInFlight&, Surface& s, f64* waited) {
+    if (s.resized && s.want_width && s.want_height) s.layer.drawableSize = CGSizeMake(s.want_width, s.want_height);
+    s.drawable = nil;
+    if (s.want_width && s.want_height) {
+        KV_ZONE_WAIT("drawable");
+        f64 t = time_now();
+        s.drawable = [s.layer nextDrawable];
+        *waited += time_now() - t;
+    }
+    s.have_image = s.drawable != nil;
+    s.width  = s.drawable ? (u32)s.drawable.texture.width : 0;
+    s.height = s.drawable ? (u32)s.drawable.texture.height : 0;
+    return true;
+}
+
+bool rb_surface_present(Renderer*, FrameInFlight&, Surface& s, f64*) {
+    s.drawable = nil; // presented with the frame's commit
     return true;
 }
 

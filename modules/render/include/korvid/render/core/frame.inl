@@ -7,11 +7,15 @@
 //   1. Wait for this slot's last frame; release its span of the ring; run its garbage.
 //   2. Grow the tables if the world outgrew them; write the layers' offsets and the texture
 //      slots that changed into this frame's own.
-//   3. Acquire: the backend says whether there is an image to draw into, and its size.
+//   3. Acquire: the backend says whether there is an image to draw into, and its size (none
+//      when RenderView::main_surface is false); then the image of each other window whose
+//      lists or size changed since it last presented (rb_surface_acquire).
 //   4. Record: the uploads (staged textures, then the rows the ticks changed); the sort,
 //      when there is something to draw; the world's pass up to the post layer when the post
-//      pass is on; the window's pass, the post shader first, the rest of the runs over it.
-//   5. Submit and present. Uploads are submitted even when nothing is presented.
+//      pass is on; the window's pass, the post shader first, the rest of the runs over it;
+//      a Surface pass for each other window acquired, its lists alone.
+//   5. Submit and present, the main window and then the others. Uploads are submitted even
+//      when nothing is presented.
 //   6. A requested screenshot or sort check waits for the frame and is written or verified.
 
 namespace kv { namespace KV_RB_NS {
@@ -85,10 +89,11 @@ bool stage_ui(Renderer* r, FrameInFlight& f) {
 }
 
 // The buckets [*from, end) of a pass, with the UI lists whose layers end in it drawn after
-// their layers' sprites. `*ui` walks the lists in order across the frame's passes.
-u32 draw_with_ui(Renderer* r, FrameInFlight& f, const PushData& push, bool sprites, bool ui_ok, u32 from, u32 end, u32* ui) {
+// their layers' sprites. `*ui` walks the lists in order across the frame's passes, the
+// surface's alone (its lists are together, the main window's first).
+u32 draw_with_ui(Renderer* r, FrameInFlight& f, const PushData& push, bool sprites, bool ui_ok, u32 from, u32 end, u32* ui, u32 surface = 0) {
     u32 draws = 0;
-    while (*ui < r->world.ui.len) {
+    while (*ui < r->world.ui.len && r->world.ui[*ui].surface == surface) {
         const RwUiLayer& l = r->world.ui[*ui];
         u32 at = rw_ui_bucket_end(l.layer);
         if (at > end) break;
@@ -149,7 +154,44 @@ bool record_frame(Renderer* r, FrameInFlight& f, const RenderView& view, bool ui
         rb_pass_end(r, f, RcPass::Window);
         if (r->shot_pending) rb_read_window(r, f);
     }
+
+    // The other windows whose lists changed: each a pass of its lists alone, in its own size.
+    for (u32 s = 1; s < kSurfaces; ++s) {
+        if (!(f.surfaces & (1u << s))) continue;
+        Surface& sf = r->surfaces[s];
+        RenderView sv = view;
+        if (sf.transparent) sv.clear_color = color{0.0f, 0.0f, 0.0f, 0.0f};
+        r->surface_at = s;
+        rb_pass_begin(r, f, RcPass::Surface, sv);
+        PushData sp = rw_push_block(r->world, sv, (f32)sf.width, (f32)sf.height, (f32)(time_now() - r->start_time), KV_RB_CLIP_Y_UP != 0);
+        rb_bind_sprites(r, f, sp);
+        u32 at = rw_ui_first(r->world, s);
+        draw_with_ui(r, f, sp, false, ui_ok, 0, kBucketCount, &at, s);
+        rb_pass_end(r, f, RcPass::Surface);
+        r->surface_at = 0;
+    }
     return rb_record_end(r, f);
+}
+
+// The other windows to draw this frame: each one live whose lists or size changed since it
+// last presented, given an image. Into f.surfaces.
+bool acquire_surfaces(Renderer* r, FrameInFlight& f, bool ui_ok, f64* waited) {
+    f.surfaces = 0;
+    for (u32 s = 1; s < kSurfaces; ++s) {
+        Surface& sf = r->surfaces[s];
+        if (!sf.live || sf.hidden) continue;
+        u64 version = r->world.ui_surface_version[s];
+        if (!sf.resized && sf.drawn_version == version) continue;
+        if (!ui_ok) continue;
+        r->surface_at = s;
+        bool ok = rb_surface_acquire(r, f, sf, waited);
+        r->surface_at = 0;
+        if (!ok) return false;
+        if (!sf.have_image) continue; // no area (minimized): drawn when it has one
+        sf.drawing_version = version;
+        f.surfaces |= 1u << s;
+    }
+    return true;
 }
 
 } // namespace rc
@@ -183,13 +225,28 @@ bool renderer_render(Renderer* r, const RenderView& view) {
         // The UI lists before anything is recorded: a new buffer rewrites this slot's bindings.
         bool ui_ok = rc::stage_ui(r, f);
 
+        r->main_skipped = !view.main_surface;
         if (!rb_frame_acquire(r, f, &waited)) return false;
+        r->main_skipped = false;
+        if (!rc::acquire_surfaces(r, f, ui_ok, &waited)) return false;
         if (!rc::record_frame(r, f, view, ui_ok)) return false;
         if (!rb_frame_submit(r, f)) return false;
         f.submitted = true;
         f.garbage_owned = f.garbage.len; // destroyed when the frame is done; anything queued later waits for the next
         rc_ring_submitted(r, f);
         if (!rb_frame_present(r, f, &waited)) return false;
+        if (f.have_image) ++r->presents[0];
+        for (u32 s = 1; s < kSurfaces; ++s) {
+            if (!(f.surfaces & (1u << s))) continue;
+            Surface& sf = r->surfaces[s];
+            r->surface_at = s;
+            bool ok = rb_surface_present(r, f, sf, &waited);
+            r->surface_at = 0;
+            if (!ok) return false;
+            sf.drawn_version = sf.drawing_version;
+            sf.resized = false;
+            ++r->presents[s];
+        }
 
         if (r->shot_recorded || r->check_recorded) { // a dev stall: wait for this frame and read it back now
             if (!rb_frame_finish(r, f)) return false;
@@ -200,7 +257,7 @@ bool renderer_render(Renderer* r, const RenderView& view) {
     r->last_wait = waited;
     r->frame_index = (r->frame_index + 1) % kFramesInFlight;
     ++r->frame_count;
-    return f.have_image;
+    return f.have_image || f.surfaces != 0;
 }
 
 } } // namespace kv::KV_RB_NS

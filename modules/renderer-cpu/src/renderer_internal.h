@@ -70,8 +70,25 @@ struct GpuProfiler {
     RendererGpuStats last;
 };
 
+// A target's pixels: the main window's, kept aside while a Surface pass draws into another's;
+// a surface's software frame.
+struct CpuTarget {
+    u8*  pixels = nullptr;
+    u32  width = 0, height = 0, pitch = 0;
+    bool rgba = false;
+};
+
+// Another window's (SurfaceCore): its HostWindow, whose software frame the Surface pass draws
+// into, held from rb_surface_acquire to rb_surface_present.
+struct Surface : SurfaceCore {
+    HostWindow* window = nullptr;
+    CpuTarget   frame;
+};
+
 struct Renderer : RenderCore {
     Pool<Texture> textures;
+    Surface       surfaces[kSurfaces]; // other windows, by id; 0 unused
+    CpuTarget     main_target;         // during a Surface pass
     GamePipe      game_pipes[kGameSlots];
     PostPass      post;
     FrameInFlight frames[kFramesInFlight];

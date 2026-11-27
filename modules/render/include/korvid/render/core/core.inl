@@ -385,13 +385,77 @@ void renderer_post_params(Renderer* r, const f32* params, u32 count) {
 
 // ---- the UI primitive's lists ------------------------------------------------------------------
 
-void renderer_ui_set(Renderer* r, i32 layer, const UiList& list) {
-    if (r) rw_ui_set(r->world, layer, list);
+void renderer_ui_set(Renderer* r, i32 layer, const UiList& list) { renderer_ui_set(r, 0u, layer, list); }
+void renderer_ui_clear(Renderer* r, i32 layer) { renderer_ui_clear(r, 0u, layer); }
+
+void renderer_ui_set(Renderer* r, u32 surface, i32 layer, const UiList& list) {
+    if (r && surface < kSurfaces && (surface == 0 || r->surfaces[surface].live)) rw_ui_set(r->world, surface, layer, list);
 }
 
-void renderer_ui_clear(Renderer* r, i32 layer) {
-    if (r) rw_ui_clear(r->world, layer);
+void renderer_ui_clear(Renderer* r, u32 surface, i32 layer) {
+    if (r) rw_ui_clear(r->world, surface, layer);
 }
+
+// ---- other windows ----------------------------------------------------------------------------
+
+bool renderer_surface_add(Renderer* r, u32 surface, void* native_window, u32 width, u32 height, bool transparent) {
+    if (!r) return false;
+    if (surface == 0 || surface >= kSurfaces || r->surfaces[surface].live || !native_window) {
+        KV_ERROR(KV_RB_NAME, "surface %u: %s", surface, surface == 0 || surface >= kSurfaces ? "not an id another window has (1 to 7)" : !native_window ? "no window" : "already added");
+        return false;
+    }
+    Surface& s = r->surfaces[surface];
+    s.native = native_window;
+    s.transparent = transparent;
+    s.want_width = width;
+    s.want_height = height;
+    s.resized = true;
+    s.drawn_version = s.drawing_version = 0;
+    if (!rb_surface_create(r, s)) {
+        rb_surface_destroy(r, s);
+        return false;
+    }
+    s.live = true;
+    r->presents[surface] = 0;
+    KV_INFO(KV_RB_NAME, "surface %u added: %ux%u%s", surface, width, height, transparent ? ", transparent" : "");
+    return true;
+}
+
+void renderer_surface_remove(Renderer* r, u32 surface) {
+    if (!r || surface == 0 || surface >= kSurfaces || !r->surfaces[surface].live) return;
+    rb_surface_destroy(r, r->surfaces[surface]);
+    r->surfaces[surface].live = false;
+    rw_ui_clear_surface(r->world, surface);
+    KV_INFO(KV_RB_NAME, "surface %u removed after %llu presents", surface, (unsigned long long)r->presents[surface]);
+}
+
+void renderer_surface_resize(Renderer* r, u32 surface, u32 width, u32 height) {
+    if (!r || surface == 0 || surface >= kSurfaces || !r->surfaces[surface].live) return;
+    Surface& s = r->surfaces[surface];
+    if (s.want_width == width && s.want_height == height) return;
+    s.want_width = width;
+    s.want_height = height;
+    s.resized = true;
+}
+
+void renderer_surface_visible(Renderer* r, u32 surface, bool visible) {
+    if (!r || surface == 0 || surface >= kSurfaces || !r->surfaces[surface].live) return;
+    Surface& s = r->surfaces[surface];
+    if (s.hidden == !visible) return;
+    s.hidden = !visible;
+    if (visible) s.resized = true; // what it shows is drawn again
+}
+
+bool renderer_surface_pending(const Renderer* r) {
+    if (!r) return false;
+    for (u32 i = 1; i < kSurfaces; ++i) {
+        const Surface& s = r->surfaces[i];
+        if (s.live && !s.hidden && (s.resized || s.drawn_version != r->world.ui_surface_version[i])) return true;
+    }
+    return false;
+}
+
+u64 renderer_surface_presents(const Renderer* r, u32 surface) { return r && surface < kSurfaces ? r->presents[surface] : 0; }
 
 RendererUiStats renderer_ui_stats(const Renderer* r) {
     RendererUiStats s;

@@ -44,7 +44,15 @@
     X(Handle, renderer_default_material, (const Renderer* r_), (r)) \
     X(void, renderer_ui_set, (Renderer* r_, i32 layer, const UiList& list), (r, layer, list)) \
     X(void, renderer_ui_clear, (Renderer* r_, i32 layer), (r, layer)) \
-    X(RendererUiStats, renderer_ui_stats, (const Renderer* r_), (r))
+    X(void, renderer_ui_set, (Renderer* r_, u32 surface, i32 layer, const UiList& list), (r, surface, layer, list)) \
+    X(void, renderer_ui_clear, (Renderer* r_, u32 surface, i32 layer), (r, surface, layer)) \
+    X(RendererUiStats, renderer_ui_stats, (const Renderer* r_), (r)) \
+    X(bool, renderer_surface_add, (Renderer* r_, u32 surface, void* native_window, u32 width, u32 height, bool transparent), (r, surface, native_window, width, height, transparent)) \
+    X(void, renderer_surface_remove, (Renderer* r_, u32 surface), (r, surface)) \
+    X(void, renderer_surface_resize, (Renderer* r_, u32 surface, u32 width, u32 height), (r, surface, width, height)) \
+    X(void, renderer_surface_visible, (Renderer* r_, u32 surface, bool visible), (r, surface, visible)) \
+    X(bool, renderer_surface_pending, (const Renderer* r_), (r)) \
+    X(u64, renderer_surface_presents, (const Renderer* r_, u32 surface), (r, surface))
 
 // What each backend defines in its namespace besides KV_RENDER_API: making and finding its
 // renderer, its surfaces, and whether it can draw here at all (the loader there, a device; a

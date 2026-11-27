@@ -159,6 +159,17 @@ struct Swapchain {
     bool               unrotated = false; // identity on a turned screen: suboptimal by choice, never rebuilt for it
 };
 
+// Another window's (SurfaceCore): its surface and chain, an acquire semaphore a frame slot,
+// the image the frame draws into, its chain's rebuilds, whether a format mismatch was told.
+struct Surface : SurfaceCore {
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    Swapchain    chain;
+    VkSemaphore  acquire[kFramesInFlight] = {};
+    u32          image = 0;
+    u32          generation = 0;
+    bool         told = false;
+};
+
 struct Renderer : RenderCore {
     void*       window     = nullptr; // HostWindow::native_handle()
 
@@ -176,6 +187,7 @@ struct Renderer : RenderCore {
 
     Swapchain swapchain;
     bool      swapchain_dirty = true;
+    Surface   surfaces[kSurfaces]; // other windows, by id; 0 unused
     u32       swapchain_generation = 0;
 
     VkDescriptorSetLayout tables_layout   = VK_NULL_HANDLE; // set 0

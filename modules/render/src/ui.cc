@@ -116,12 +116,14 @@ i32 clamp_layer(i32 layer) { return layer < kLayerMin ? kLayerMin : layer > kLay
 
 } // namespace
 
-void rw_ui_set(RenderWorld& w, i32 layer, const UiList& list) {
+void rw_ui_set(RenderWorld& w, u32 surface, i32 layer, const UiList& list) {
+    if (surface >= KV_RENDER_SURFACES) return;
     layer = clamp_layer(layer);
     u32 at = 0;
-    while (at < w.ui.len && w.ui[at].layer < layer) ++at;
-    if (at == w.ui.len || w.ui[at].layer != layer) {
+    while (at < w.ui.len && (w.ui[at].surface < surface || (w.ui[at].surface == surface && w.ui[at].layer < layer))) ++at;
+    if (at == w.ui.len || w.ui[at].surface != surface || w.ui[at].layer != layer) {
         RwUiLayer fresh;
+        fresh.surface = (u8)surface;
         fresh.layer = layer;
         fresh.bytes.alloc = w.ui.alloc;
         w.ui.push(fresh);
@@ -145,19 +147,41 @@ void rw_ui_set(RenderWorld& w, i32 layer, const UiList& list) {
     if (list.words.len) memcpy(p + words_at, list.words.data, (usize)list.words.len * 4);
     l.items = items;
     ++w.ui_sets;
+    ++w.ui_surface_version[surface];
     repack(w);
 }
 
-void rw_ui_clear(RenderWorld& w, i32 layer) {
+void rw_ui_clear(RenderWorld& w, u32 surface, i32 layer) {
+    if (surface >= KV_RENDER_SURFACES) return;
     layer = clamp_layer(layer);
     for (u32 i = 0; i < w.ui.len; ++i) {
-        if (w.ui[i].layer != layer) continue;
+        if (w.ui[i].surface != surface || w.ui[i].layer != layer) continue;
         w.ui[i].bytes.free();
         for (u32 j = i + 1; j < w.ui.len; ++j) w.ui[j - 1] = w.ui[j];
         --w.ui.len;
+        ++w.ui_surface_version[surface];
         repack(w);
         return;
     }
+}
+
+void rw_ui_clear_surface(RenderWorld& w, u32 surface) {
+    u32 k = 0;
+    bool gone = false;
+    for (u32 i = 0; i < w.ui.len; ++i) {
+        if (w.ui[i].surface == surface) { w.ui[i].bytes.free(); gone = true; continue; }
+        w.ui[k++] = w.ui[i];
+    }
+    w.ui.len = k;
+    if (!gone) return;
+    if (surface < KV_RENDER_SURFACES) ++w.ui_surface_version[surface];
+    repack(w);
+}
+
+u32 rw_ui_first(const RenderWorld& w, u32 surface) {
+    u32 i = 0;
+    while (i < w.ui.len && w.ui[i].surface < surface) ++i;
+    return i;
 }
 
 void rw_ui_stage(const RenderWorld& w, u8* dst) {

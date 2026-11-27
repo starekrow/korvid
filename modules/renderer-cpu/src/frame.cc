@@ -474,6 +474,16 @@ void rb_sort_end(Renderer*, FrameInFlight&, bool) {}
 // ---- a pass -----------------------------------------------------------------------------------
 
 void rb_pass_begin(Renderer* r, FrameInFlight& f, RcPass pass, const RenderView& view) {
+    if (pass == RcPass::Surface) {
+        // Another window's frame is the target until the pass ends; the main one's is kept.
+        const Surface& s = r->surfaces[r->surface_at];
+        r->main_target = CpuTarget{r->target, r->target_width, r->target_height, r->target_pitch, r->target_rgba};
+        r->target = s.frame.pixels;
+        r->target_width = s.frame.width;
+        r->target_height = s.frame.height;
+        r->target_pitch = s.frame.pitch;
+        r->target_rgba = s.frame.rgba;
+    }
     r->pass = pass;
     r->post_on = false;
     r->clear[0] = cpu_linear16(view.clear_color.r);
@@ -567,7 +577,24 @@ void rb_ui_draw(Renderer* r, FrameInFlight& f, const PushData& push) {
 
 // The pass's draws into tiles, in order, and the tiles drawn: a job each. In the window
 // pass a tile whose draws hash as last frame's did, into the same target, is not drawn.
-void rb_pass_end(Renderer* r, FrameInFlight&, RcPass) {
+// A Surface pass's end gives the main window back its target.
+static void restore_target(Renderer* r) {
+    const CpuTarget& m = r->main_target;
+    r->target = m.pixels;
+    r->target_width = m.width;
+    r->target_height = m.height;
+    r->target_pitch = m.pitch;
+    r->target_rgba = m.rgba;
+}
+
+static void pass_end(Renderer* r);
+
+void rb_pass_end(Renderer* r, FrameInFlight&, RcPass pass) {
+    pass_end(r);
+    if (pass == RcPass::Surface) restore_target(r);
+}
+
+static void pass_end(Renderer* r) {
     if (!r->target) return;
     KV_ZONE("cpu.raster");
     f64 t0 = r->stats ? time_now() : 0.0;
