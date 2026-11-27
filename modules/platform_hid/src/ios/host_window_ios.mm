@@ -90,6 +90,40 @@ SoftSurface g_soft;
 
 void soft_release(void* info, const void*, size_t) { atomic_store(&((SoftBuffer*)info)->held, 0u, MO_RELEASE); }
 
+// At close: the frame shown is taken off its layer, and each buffer is freed once Core
+// Animation has let go of the image that showed it (soft_release), which a moment of the run
+// loop gives it. One still held after half a second is left, said, rather than freed under a
+// reader.
+void soft_surface_free() {
+    if (g_soft.drawing) { atomic_store(&g_soft.drawing->held, 0u, MO_RELEASE); g_soft.drawing = nullptr; }
+    if (g_soft.layer) {
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        g_soft.layer.contents = nil;
+        [g_soft.layer removeFromSuperlayer];
+        [CATransaction commit];
+        [CATransaction flush];
+        [g_soft.layer release];
+        g_soft.layer = nil;
+    }
+    auto any_held = [] {
+        for (SoftBuffer& b : g_soft.buf) if (b.pixels && atomic_load(&b.held, MO_ACQUIRE)) return true;
+        return false;
+    };
+    for (f64 until = time_now() + 0.5; any_held() && time_now() < until;)
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, true);
+    u32 kept = 0;
+    for (SoftBuffer& b : g_soft.buf) {
+        if (!b.pixels) continue;
+        if (atomic_load(&b.held, MO_ACQUIRE)) { ++kept; continue; }
+        mem_free(b.pixels);
+        b = SoftBuffer{};
+    }
+    if (kept) KV_WARN("window", "%u software buffer%s still held by Core Animation at close: left, not freed", kept, kept == 1 ? "" : "s");
+    if (g_soft.space) { CGColorSpaceRelease(g_soft.space); g_soft.space = nullptr; }
+    g_soft.told = false;
+}
+
 void post(const IosMsg& m) {
     if (g_app.tail - g_app.head >= kRing) { ++g_app.dropped; return; }
     g_app.ring[g_app.tail++ % kRing] = m;
@@ -322,6 +356,8 @@ bool HostWindow::open(const WindowDesc& desc) {
 
 void HostWindow::close() {
     if (!native_) return;
+    software_ = nullptr;
+    soft_surface_free();
     g_app.window.hidden = YES; // kept for the next open: see there
     native_ = nullptr;
     width_ = height_ = 0;

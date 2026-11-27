@@ -494,6 +494,7 @@ int run(int argc, char** argv) {
     if (g_snap.on) KV_INFO("window", "snap: the follower moved with the leader %u times", g_snap.follows);
     g_snap = Snap{};
     round.mask.free();
+    round.kept.free();
     engine_shutdown(e);
     names_shutdown();
     mem_shutdown();
