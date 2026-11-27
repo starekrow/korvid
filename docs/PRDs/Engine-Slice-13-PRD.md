@@ -385,8 +385,8 @@ through SDL, written at milestones 1 and 2; no Mac is to hand, so it is not trie
   order and versions; rocks and kromedemo on D3D12 and the CPU renderer as before; render-gate
   for windows d3d12 and windows cpu. D3D12's gallery is exact (10 of 10); its one failure is
   the compiled shaders against a baseline of Nov 14, two of arcfire's game shaders a byte
-  apart, with no shader source changed from main: the baseline is older than main's shaders,
-  not this. The CPU gate passed every check, arcfire's replay matched. A second window is first drawn by milestone 6's `kromedemo --two`.
+  apart, with no shader source changed from main: the baseline was older than main's shaders,
+  not this. Retaken at main (Nov 26), the D3D12 gate passed every check. The CPU gate passed every check, arcfire's replay matched. A second window is first drawn by milestone 6's `kromedemo --two`.
 
 **Milestone 6, the loop and Krome (KR40): built Nov 26, 2026.** As above, and:
 
