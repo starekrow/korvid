@@ -409,12 +409,15 @@ diff review as a rule edit's preview, since goldberg has no lockfile yet (slice 
 **After it, drafted and not built** (Nov 23, 2026). Blackwing's skin import note asks
 Krome to draw other players' skins, which are made of pieces of bitmaps placed by
 coordinate (`docs/PRDs/Korvid-Changes-For-Blackwing.md` in Blackwing's checkout, KR28 to
-KR42). Two slices are drafted from it. Neither is scheduled, and neither is part of
-"done" above.
+KR42). Two slices are drafted from it, and the first is built. Neither is part of "done"
+above.
 
 7. **Pictures.** A region of an image, strips of frames, tiled and nine-slice fits,
    bitmap fonts, looks computed from an image's pixels (KR28, KR29, KR31, KR32, KR34).
-   Drafted: [Krome-Slice-7-PRD.md](Krome-Slice-7-PRD.md).
+   Built on Linux (Nov 26; [Krome-Slice-7-PRD.md](Krome-Slice-7-PRD.md)): `region`,
+   `pixel`, `fit`, `frames` and their play, `.kbf` and inline bitmap fonts, `gain`, `hue`,
+   `saturation`; Metal and D3D12 not verified. A skin written by hand found what a converter
+   still needs, placement (KR30) first; its As built lists the rest.
 8. **Placed, moving, and not a rectangle.** Edges and offsets in a stack, easing of sizes
    and positions, timers for scripts, text that scrolls, hit testing through a mask
    (KR30, KR33, KR35, KR36, KR37). Drafted: [Krome-Slice-8-PRD.md](Krome-Slice-8-PRD.md).

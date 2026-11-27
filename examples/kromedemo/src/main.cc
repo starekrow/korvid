@@ -43,13 +43,16 @@ struct Demo {
     bool lua = false;       // --lua: the form is form_lua.lua
     Name bench;
     bool demo = false;
+    const struct Step* steps = nullptr; // the demo's: the form and gallery's, or the player's
+    u32  nsteps = 0;
     const char* shots = nullptr;
     u32  step = 0, wait = 0;
     u32  failures = 0;
     u32  settled = 0;
     bool hover = false;    // --hover: on and off a button every tick, ten seconds
     u32  hovers = 0;
-    bool type = false;     // --type: the small-text specimen; with --shots, its picture, then quit
+    bool type = false;     // --type: the small-text specimen; with --shots, its picture, then quit (and --player's)
+    const char* one = "type"; // that picture's name
     u32  type_done = 0;
     // --work: a tool's work in the Work cycle, behind the window (docs/design/cycles.md).
     bool work = false;
@@ -72,6 +75,30 @@ struct Demo {
 // A step of the pilot: where the pointer goes and what it does there.
 enum class Act : u8 { Move, Click, Wheel, Shot, Check, Theme, Type, Key, Compose, Quit, Settle };
 struct Step { Act act; const char* id; f32 value; const char* expect; };
+
+// The hand-written skin (--player --demo, Krome slice 7 M6): its transport, toggles,
+// sliders and title, each pressed and checked in the model.
+constinit const Step k_player_steps[] = {
+    {Act::Shot, "player", 0, nullptr},
+    {Act::Click, "pause", 0, nullptr},
+    {Act::Check, "state", 0, "1"},
+    {Act::Click, "play", 0, nullptr},
+    {Act::Check, "state", 0, "0"},
+    {Act::Click, "shuffle", 0, nullptr},
+    {Act::Check, "shuffle", 0, "true"},
+    {Act::Click, "loop", 0, nullptr},
+    {Act::Check, "loop", 0, "false"},
+    {Act::Click, "next", 0, nullptr},
+    {Act::Check, "title", 0, "PICTURES 7"},
+    {Act::Click, "volume", 0, nullptr},      // its middle: std's slider takes a 14-pixel knob off
+    {Act::Check, "volume", 0, "0.5"},
+    {Act::Click, "seek", 0, nullptr},
+    {Act::Check, "pos", 0, "0.5"},
+    {Act::Click, "stop", 0, nullptr},
+    {Act::Check, "mm", 0, "00"},
+    {Act::Shot, "player_stopped", 0, nullptr},
+    {Act::Quit, nullptr, 0, nullptr},
+};
 
 // Positions are found when the step runs, so a reflow or a scroll is followed.
 constinit const Step k_steps[] = {
@@ -364,7 +391,7 @@ void kromedemo_tick(TickContext& ctx) {
         if (d.settled++ < 3) return;
         if (d.type_done++ == 0) {
             char path[600];
-            format(path, sizeof path, "%s/kromedemo_type.ppm", d.shots);
+            format(path, sizeof path, "%s/kromedemo_%s.ppm", d.shots, d.one);
             if (Renderer* r = renderer_get(e)) renderer_screenshot(r, path);
         } else if (d.type_done > 6) engine_request_quit(e);
         return;
@@ -382,8 +409,8 @@ void kromedemo_tick(TickContext& ctx) {
     if (!d.demo || !krome_ready(e, d.form)) return;
     engine_want_frame(e); // the pilot is input the window does not see: keep the loop awake for it
     if (d.wait) { --d.wait; return; }
-    if (d.step >= KV_COUNTOF(k_steps)) return;
-    const Step& s = k_steps[d.step];
+    if (d.step >= d.nsteps) return;
+    const Step& s = d.steps[d.step];
     f32 x = 0, y = 0;
     switch (s.act) {
     case Act::Move:
@@ -452,9 +479,10 @@ void kromedemo_tick(TickContext& ctx) {
     }
     case Act::Quit:
         // The Icons page's 280 px icon is rasterized on a job.
-        if (krome_stats(e).shape_jobs == 0) { KV_ERROR("kromedemo", "demo: no shape was rasterized on a job"); ++d.failures; }
+        if (d.steps == k_steps && krome_stats(e).shape_jobs == 0) { KV_ERROR("kromedemo", "demo: no shape was rasterized on a job"); ++d.failures; }
         if (d.failures) KV_ERROR("kromedemo", "demo: %u checks failed", d.failures);
         else KV_INFO("kromedemo", "demo passed");
+        if (d.steps == k_player_steps) engine_request_quit(e); // the gallery's ends on its own quit button
         break;
     }
     ++d.step;
@@ -524,6 +552,8 @@ bool kromedemo_startup(Engine& e, ModuleInstance& self) {
     if (!d) return false;
     *d = Demo{};
     d->demo = frameloop_flag(e, "--demo");
+    d->steps = frameloop_flag(e, "--player") ? k_player_steps : k_steps;
+    d->nsteps = frameloop_flag(e, "--player") ? (u32)KV_COUNTOF(k_player_steps) : (u32)KV_COUNTOF(k_steps);
     d->work = frameloop_flag(e, "--work");
     d->hover = frameloop_flag(e, "--hover");
     d->two_check = frameloop_flag(e, "--two-check");
@@ -531,6 +561,7 @@ bool kromedemo_startup(Engine& e, ModuleInstance& self) {
     d->shots = frameloop_option(e, "--shots");
     if (frameloop_flag(e, "--bench")) d->bench = krome_open(e, "kromedemo/bench.lua");
     else if (frameloop_flag(e, "--type")) { d->form = krome_open(e, "kromedemo/type.kimb", "type"); d->type = true; }
+    else if (frameloop_flag(e, "--player")) { d->form = krome_open(e, "kromedemo/player.kimb", "player"); d->type = !d->demo; d->one = "player"; }
     else if (frameloop_flag(e, "--lua")) { d->form = krome_open(e, "kromedemo/form_lua.lua"); d->lua = true; }
     else d->form = krome_open(e, "kromedemo/form.kimb", "form");
     if (const char* theme = frameloop_option(e, "--theme")) krome_theme(e, theme);
@@ -562,7 +593,7 @@ KV_MODULE_DEFINE(kromedemo_module) = {
 } // namespace kv
 
 namespace {
-constinit const char* const k_flags[] = {"--demo", "--bench", "--work", "--lua", "--type", "--hover", "--two", "--two-check"};
+constinit const char* const k_flags[] = {"--demo", "--bench", "--work", "--lua", "--type", "--player", "--hover", "--two", "--two-check"};
 constinit const char* const k_options[] = {"--shots", "--theme"};
 constinit const kv::FrameLoopConfig k_config = {
     .title          = "korvid krome demo",

@@ -1,6 +1,6 @@
 # Krome Slice 7 — Pictures
 
-Nov 23, 2026 · @starekrow · building (see As built)
+Nov 23, 2026 · @starekrow · built on Linux (see As built)
 
 ## Goal and exit criteria
 
@@ -389,3 +389,63 @@ In review of the draft (Nov 26):
   `kormake test debug` and then crashed (it goes on to use a socket that never connected);
   it passed alone twice and in the next full run. With milestone 4's `watch` failure, that is
   goldberg's own tests' five-second waits under load, not this slice's.
+
+**Milestone 6, A skin by hand** (Nov 26).
+
+A classic 275 x 116 player, `examples/kromedemo/assets/player.kim`, from eight sheets in
+`assets/player/` (original art in the classic layout, a sheet per bitmap as a converter
+finds them: the body, the title bar with its close button, the transport's buttons and their
+pressed row, shuffle and repeat in four states, a 28-frame volume strip, the position bar's
+groove and thumb, the state's lamps, seven-segment digits). Its time is a bitmap font, its
+title the pixel font inline, its volume a strip bound to the model and dragged by std's
+slider, its toggles bound, `pixel` at its root. `kromedemo --player` shows it;
+`--player --demo` pauses, plays, toggles both, skips a title, drags the volume and the
+position to their middles and stops, checking the model after each.
+
+What the five could not say, or said only by being written another way:
+
+1. **Placement.** A converter has coordinates. Written as a stack of boxes padded to their
+   corners, the skin drew right and took no press: each padded box covers the stack from its
+   top left, and the last (the eject button's) is over every part. Laid out in bands of rows
+   and columns, as a person would write it, it works; a converter cannot easily do that. This
+   is KR30 (slice 8), and it should come before a converter. Until then a stack's child
+   could at least let the pointer through where it has nothing that takes a press.
+2. **Four states for a toggle.** Off, off and pressed, on, on and pressed: `selected` overlays
+   `pressed` (`resolve_look` applies the selected look over the pointer's), so on-and-pressed
+   has no region of its own. Wanted: a look for a pair of states (`selected+pressed { }`), or
+   `pressed` over `selected`.
+3. **A part's look by its parent's state.** The position bar's thumb has a pressed picture,
+   but the press is the slider's, not the thumb's, and only `selected` and `disabled` reach
+   descendants. Wanted: `pressed` (and `hover`) reaching a behaviour's parts.
+4. **std's slider for a skin.** Its Lua takes 14 pixels off the track for the knob, so a
+   29-pixel thumb's value runs over the wrong width (half its difference at each end), and its
+   `update` refuses a node without both parts (`fill`, `lead`): the skin gives it empty ones.
+   Wanted: the knob's width from the node, and parts that may be absent.
+5. **Frames at a pitch.** Classic volume and balance strips are frames 13 high every 15
+   pixels. `frames` takes them end to end, so a converter must repack the image, or Krome
+   needs a pitch (`frames=28,15`).
+6. **The window's own state.** A title bar has an active and an inactive picture; no look
+   follows the window's focus. Wanted: a state, or a model key Krome keeps.
+7. **A skin at twice its size.** Players offer double size; Krome's only scale is the window's
+   (`pixel_scale`). A subtree's scale would do it; so would a window opened at twice its
+   scale, which is the program's.
+8. **Not tried here:** the window's shape (masks, slice 8, and the windows of engine slice 13),
+   a scrolling title (motion, slice 8), an equalizer's sliders, a playlist's, a skin's own
+   cursors. The digits sit where classic skins put them by being four texts, not one: more
+   nodes, nothing missing.
+
+**Requirements.** KR28, KR29, KR31, KR32 and KR34 are built, with the differences above;
+KP2's pages changed with their headers and `tools/doccheck.sh` reports nothing new (its one
+error, asset_render's `AssetReloaded`, is older). KP1 is Vulkan's and the CPU renderer's on
+Linux: their gallery references are remade at each shader change and agree within the gate's
+tolerance. **Not verified:** Metal and D3D12, which build the same `ui.slang` (its
+`GetDimensions` on their bindless arrays is untried) and whose `ui` references are stale until
+their machines draw them again; render-gate's own run (its "shaders: unchanged" step fails by
+design against main while a slice changes `ui.slang`, and it wants a baseline taken on this
+machine at main).
+
+**As they drew.** kromescreens' nine `--demo` pictures are byte for byte those of `main` before
+the slice (c4b5e5e), and so are kromedemo's form, menu, about, light and edit pictures; its
+gallery pictures differ by what the slice added to the page (the Skin row and tab, the
+header's last event). goldberg's window draws its screens with the same paths as
+kromescreens and was not pictured separately.

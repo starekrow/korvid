@@ -1,0 +1,110 @@
+// A skin written by hand, as a converter would write it (Krome slice 7, milestone 6): a
+// classic 275 x 116 player from the sheets in kromedemo/player/ (original art, a sheet per
+// bitmap). Each part is a region of its sheet, its states regions beside it.
+//
+// A converter has coordinates; Krome has rows, columns and stacks. A stack's child padded
+// to its place covers the stack from its top left, and the last such child takes the
+// pointer from every part under it, so the parts are laid out here in bands, as a person
+// would, the padded boxes only where nothing under them takes a press. Placement by x and y
+// is slice 8's (KR30). What else this could not say: docs/PRDs/Krome-Slice-7-PRD.md, As built.
+
+use "krome/std"
+script "kromedemo/player.lua"
+
+// The time's digits, and the title's letters (kromedemo's 5 x 7 pixel font).
+font numbers { image="kromedemo/player/numbers.png" cell=9,13 chars="0123456789 -" }
+font small { image="kromedemo/pixfont.png" cell=6,8 chars="0123456789:- ABCDEFGHIJKLMNOPQRSTUVWXYZ" }
+
+screen player {
+    box dir=stack w=275 h=116 pixel {
+        image "kromedemo/player/main.png"
+        col w=275 h=116 {
+            // The title bar moves the window; its close button is the program's.
+            box dir=stack w=275 h=14 {
+                image "kromedemo/player/titlebar.png" id=titlebar region=0,0,275,14 grip=move
+                box pad=264,3,0,0 {
+                    image "kromedemo/player/titlebar.png" id=close region=0,28,9,9 -> close {
+                        pressed { region=9,28,9,9 }
+                    }
+                }
+            }
+            row h=50 {
+                // The display: the state's lamp, the time either side of the colon main.png
+                // draws. Nothing here takes a press, so its parts may be padded into place.
+                box dir=stack w=110 h=50 {
+                    box pad=22,14,0,0 {
+                        image "kromedemo/player/playpaus.png" id=lamp frames=3 across frame=@state
+                    }
+                    box pad=36,12,0,0 {
+                        text "{mm}" id=mm font=numbers size=13
+                    }
+                    box pad=61,12,0,0 {
+                        text "{ss}" id=ss font=numbers size=13
+                    }
+                }
+                col pad=2,11,0,0 {
+                    box w=150 h=8 pad=2,0,0,0 clip {
+                        text "{title}" id=title font=small size=8 color=#dce2ec nowrap
+                    }
+                    box h=10
+                    row {
+                        // The volume: 28 frames following the model, dragged by std's slider
+                        // behaviour (which insists on its two parts, `fill` and `lead`: here
+                        // they are empty).
+                        hit id=volume behave=slider @volume 0..1 dir=stack w=68 h=13 {
+                            image "kromedemo/player/volume.png" frames=28 frame-at=@volume w=68 h=13
+                            box part=fill w=0 h=0
+                            box part=lead w=0 h=0
+                        }
+                        box w=6
+                        // Shuffle and repeat: a region each for off, pressed and on.
+                        image "kromedemo/player/shufrep.png" id=shuffle region=0,0,47,15 @shuffle cursor=hand {
+                            pressed { region=0,15,47,15 }
+                            selected { region=0,30,47,15 }
+                        }
+                        image "kromedemo/player/shufrep.png" id=loop region=47,0,28,15 @loop cursor=hand {
+                            pressed { region=47,15,28,15 }
+                            selected { region=47,30,28,15 }
+                        }
+                    }
+                }
+            }
+            // The position: a groove, and a thumb placed by the slider's lead.
+            box pad=16,0,0,0 {
+                box id=seek behave=slider @pos 0..1 dir=stack w=248 h=10 {
+                    image "kromedemo/player/posbar.png" region=0,0,248,10
+                    box part=fill w=0 h=0
+                    box dir=row w=fill pad=0,0,29,0 {
+                        box part=lead w=0 h=1
+                        image "kromedemo/player/posbar.png" id=thumb region=248,0,29,10
+                    }
+                }
+            }
+            box h=14
+            // The transport.
+            row pad=16,0,0,0 {
+                image "kromedemo/player/cbuttons.png" id=prev region=0,0,23,18 -> prev {
+                    pressed { region=0,18,23,18 }
+                }
+                image "kromedemo/player/cbuttons.png" id=play region=23,0,23,18 -> play {
+                    pressed { region=23,18,23,18 }
+                }
+                image "kromedemo/player/cbuttons.png" id=pause region=46,0,23,18 -> pause {
+                    pressed { region=46,18,23,18 }
+                }
+                image "kromedemo/player/cbuttons.png" id=stop region=69,0,23,18 -> stop {
+                    pressed { region=69,18,23,18 }
+                }
+                image "kromedemo/player/cbuttons.png" id=next region=92,0,22,18 -> next {
+                    pressed { region=92,18,22,18 }
+                }
+                box w=6
+                box pad=0,1,0,0 {
+                    image "kromedemo/player/cbuttons.png" id=eject region=114,0,22,16 -> eject {
+                        pressed { region=114,18,22,16 }
+                    }
+                }
+            }
+        }
+    }
+}
