@@ -222,6 +222,11 @@ struct KromeImagePieces {
     bool  clip = false;
 };
 KromeFit krome_fit_of(const KromeLook& l);
+// A marquee's offset (logical pixels its text is moved left) `t` seconds into its timeline: a
+// text `w` wide in a `room` that is narrower, moved by `unit` at a time (a pixel, or its
+// step). Looped: at rest `marquee_pause`, then on by its width and the gap, again and again;
+// bounced: at rest, to its end, at rest, back. *next the time it next moves; 0 when it fits.
+f32 krome_marquee_offset(const KromeNode& n, f32 w, f32 room, f64 t, f32 unit, f64* next);
 void krome_image_pieces(const KromeLook& l, rect2 src, f32 tw, f32 th, rect2 r, f32 scale, KromeAlign ax, KromeAlign ay, KromeImagePieces& out);
 
 // The shapes' pages (shapes.cc): rasterized shapes packed as glyphs are, a texture each.
@@ -411,6 +416,13 @@ struct KromeModule {
     // chunk and line it was set at, for its error.
     struct Timer { u32 id, screen; int fn; f64 due, every; char where[160]; };
     Array<Timer>        timers;
+    // A marquee moving (KR37), by node, kept as a strip's play is: its timeline begun on the
+    // clock at the first paint that found its text too wide (again when the text changes:
+    // `key`), `due` the clock's time it next moves (0: still, held, or out of view); `held`
+    // while the pointer drags it, from `grab_off` at `grab_x`; `off` where it was last drawn,
+    // `w` and `room` its text's width and its inside's, logical pixels.
+    struct Marquee { u32 screen, overlay, node; Name id; u64 key; f64 start, due; f32 off, w, room, grab_x, grab_off; bool seen, held; };
+    Array<Marquee>      marquees;
     u32                 next_timer = 1;
     u32                 lua_screen = 0; // the screen a behaviour's call (or a timer's) is for, while it runs
     f64                 clock = 0.0;      // the Frame cycle's dt summed

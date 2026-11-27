@@ -202,6 +202,29 @@ u32 krome_strip_frame(u32 frames, u32 from, f32 fps, u32 loops, f64 elapsed, boo
     return (u32)(pos % frames);
 }
 
+f32 krome_marquee_offset(const KromeNode& n, f32 w, f32 room, f64 t, f32 unit, f64* next) {
+    *next = 0.0;
+    f64 v = n.marquee;
+    if (!(v > 0.0) || !(w > room) || !(unit > 0.0f)) return 0.0f;
+    f64 pause = n.marquee_pause;
+    f64 len = n.marquee_bounce ? (f64)(w - room) : (f64)(w + n.marquee_gap); // one move's distance
+    f64 move = len / v;
+    f64 half = pause + move;                 // a rest, then a move
+    f64 cycle = n.marquee_bounce ? 2.0 * half : half;
+    if (t < 0.0) t = 0.0;
+    f64 base = floor(t / cycle) * cycle, tc = t - base;
+    bool back = false;
+    if (n.marquee_bounce && tc >= half) { back = true; tc -= half; base += half; }
+    if (tc < pause) { *next = base + pause + unit / v; return back ? (f32)len : 0.0f; }
+    f64 steps = floor((tc - pause) * v / unit + 1e-9);
+    f64 d = steps * unit;
+    if (d > len) d = len;
+    f64 at = base + pause + (steps + 1.0) * unit / v, end = base + half;
+    *next = at < end ? at : end;             // the end of the move, then the rest
+    if (!back && !n.marquee_bounce && d >= len) d = 0.0; // looped round: its start again
+    return (f32)(back ? len - d : d);
+}
+
 KromeFit krome_fit_of(const KromeLook& l) {
     if (l.set & KROME_LOOK_FIT) return l.fit;
     return (l.set & KROME_LOOK_SLICE) ? KromeFit::Slice : KromeFit::Stretch;
@@ -440,7 +463,25 @@ void ease(Paint& p, u32 node, const KromeNode& n, KromeLook& l) {
     s.animating = true;
 }
 
-void paint_text(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect2 r, u32 clip) {
+void paint_line(Paint& p, const KromeNode& n, const FontAsset* fa, const char* str, f32 x, f32 baseline, color c, u32 slot, u32 clip, bool pixel);
+
+// A marquee's record (KR37): found, or begun now; begun again when its text or its
+// properties changed.
+KromeModule::Marquee& marquee_for(Paint& p, u32 node, const KromeNode& n, const char* str) {
+    KromeModule& s = p.s;
+    u64 key = hash_bytes(str, strlen(str));
+    f32 params[5] = {n.marquee, n.marquee_step, n.marquee_gap, n.marquee_pause, n.marquee_bounce ? 1.0f : 0.0f};
+    key ^= hash_bytes(params, sizeof params) * 31u;
+    KromeModule::Marquee* m = nullptr;
+    for (KromeModule::Marquee& x : s.marquees) if (x.screen == p.sc.id && x.overlay == p.overlay && x.node == node) { m = &x; break; }
+    if (!m) { s.marquees.alloc = s.general; s.marquees.push(KromeModule::Marquee{}); m = &s.marquees.last(); }
+    if (m->screen != p.sc.id || m->id != n.id || m->key != key)
+        *m = KromeModule::Marquee{p.sc.id, p.overlay, node, n.id, key, s.clock, 0.0, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, false, false};
+    m->seen = true;
+    return *m;
+}
+
+void paint_text(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect2 r, u32 clip, rect2 clip_rect) {
     const char* str = p.tree.text(node);
     if (!*str) return;
     KromeModule& s = p.s;
@@ -496,7 +537,31 @@ void paint_text(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect
     if (n.align_y == KromeAlign::Center) top += (in.h - height) * 0.5f;
     else if (n.align_y == KromeAlign::End) top += in.h - height;
     f32 baseline = floor(top + fa->ascent + 0.5f);
+    // A marquee (KR37): too wide, it moves inside its rect (clipped to it) on its timeline,
+    // and asks for its next frame only while some of it can be seen.
+    if (n.marquee > 0.0f && (n.flags & KROME_NOWRAP) && one > room + 0.5f && room > 0.0f) {
+        KromeModule::Marquee& m = marquee_for(p, node, n, str);
+        f32 wl = one / scale, rl = room / scale;
+        f32 unit = n.marquee_step > 0.0f ? n.marquee_step : 1.0f / scale;
+        f64 next = 0.0;
+        f32 off = m.held ? m.off : krome_marquee_offset(n, wl, rl, s.clock - m.start, unit, &next);
+        rect2 seen = intersect(clip_rect, in);
+        m.due = !m.held && next > 0.0 && seen.w > 0.0f && seen.h > 0.0f ? m.start + next : 0.0;
+        m.off = off;
+        m.w = wl;
+        m.room = rl;
+        u32 mc = p.list.clip(seen);
+        f32 x0 = floor(in.x - off * scale + 0.5f);
+        paint_line(p, n, fa, str, x0, baseline, c, slot, mc, l.pixel);
+        if (!n.marquee_bounce) paint_line(p, n, fa, str, x0 + floor((wl + n.marquee_gap) * scale + 0.5f), baseline, c, slot, mc, l.pixel);
+        return;
+    }
     x = floor(x + 0.5f);
+    paint_line(p, n, fa, str, x, baseline, c, slot, clip, l.pixel);
+}
+
+// One line of text from pen x on a baseline, whole pixels (or a quarter, `subpixel`).
+void paint_line(Paint& p, const KromeNode& n, const FontAsset* fa, const char* str, f32 x, f32 baseline, color c, u32 slot, u32 clip, bool pixel) {
     u32 prev = 0;
     for (const char* q = str; *q;) {
         u32 cp = utf8_next(q);
@@ -521,7 +586,7 @@ void paint_text(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect
             gl.texture = g->texture.is_null() ? slot : renderer_texture_slot(p.r, g->texture);
             gl.tint = c;
             gl.clip = clip;
-            gl.nearest = l.pixel; // a bitmap font under `pixel` stays square
+            gl.nearest = pixel; // a bitmap font under `pixel` stays square
             p.list.glyph(gl);
         }
         x += g->advance;
@@ -680,7 +745,7 @@ void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u3
     }
     // A shape over the node's own box (its background, border and shadow).
     if (shp && r.w >= 1.0f && r.h >= 1.0f) paint_shape(p, node, n, l, r, *ki, *shp, clip);
-    if (n.type == KromeType::Text) paint_text(p, n, node, l, r, clip);
+    if (n.type == KromeType::Text) paint_text(p, n, node, l, r, clip, clip_rect);
     if (n.type == KromeType::Edit) paint_edit(p, n, node, l, r, clip_rect);
     if (n.first == KROME_NONE) return;
     if (n.flags & (KROME_CLIP | KROME_SCROLL)) {
@@ -894,7 +959,13 @@ void paint_tree(KromeModule& s, KromeScreen& sc, const KromeTree& t, u32 overlay
     Paint p{s, sc, t, list, renderer_get(*s.e), overlay, {}, 0, KROME_NONE};
     pointer_states(p);
     for (KromeModule::Play& pl : s.plays) if (pl.screen == sc.id && pl.overlay == overlay) pl.seen = false;
+    for (KromeModule::Marquee& m : s.marquees) if (m.screen == sc.id && m.overlay == overlay) m.seen = false;
     paint_node(p, t.root, nullptr, k_everywhere, 0);
+    // A marquee no longer painted moving (hidden, fits now, gone) starts again from its rest.
+    u32 mw = 0;
+    for (u32 i = 0; i < s.marquees.len; ++i)
+        if (s.marquees[i].seen || s.marquees[i].screen != sc.id || s.marquees[i].overlay != overlay) s.marquees[mw++] = s.marquees[i];
+    s.marquees.len = mw;
     // A strip no longer painted playing (hidden, still, gone) forgets where it was.
     u32 w = 0;
     for (u32 i = 0; i < s.plays.len; ++i)
@@ -948,6 +1019,10 @@ void krome_drop_anims(KromeModule& s, u32 screen, u32 overlay) {
     for (u32 i = 0; i < s.plays.len; ++i)
         if (!(s.plays[i].screen == screen && s.plays[i].overlay == overlay)) s.plays[w++] = s.plays[i];
     s.plays.len = w;
+    w = 0;
+    for (u32 i = 0; i < s.marquees.len; ++i)
+        if (!(s.marquees[i].screen == screen && s.marquees[i].overlay == overlay)) s.marquees[w++] = s.marquees[i];
+    s.marquees.len = w;
     w = 0;
     for (u32 i = 0; i < s.motions.len; ++i)
         if (!(s.motions[i].screen == screen && s.motions[i].overlay == overlay)) s.motions[w++] = s.motions[i];
@@ -1122,7 +1197,7 @@ KromeTarget pressable(KromeModule& s, KromeTarget t) {
         if (node.flags & KROME_DISABLED) return KromeTarget{};
         if (found == KROME_NONE && node.grip == KromeGrip::Drag && place) found = n; // the program's move: Krome takes the press
         if (found == KROME_NONE && node.grip != KromeGrip::None) return KromeTarget{}; // the OS's: it moves or resizes the window
-        if (found == KROME_NONE && (!node.event.is_null() || !node.binding.is_null() || !node.behave.is_null() || node.type == KromeType::Hit || node.type == KromeType::Edit)) found = n;
+        if (found == KROME_NONE && (!node.event.is_null() || !node.binding.is_null() || !node.behave.is_null() || node.type == KromeType::Hit || node.type == KromeType::Edit || (node.flags & KROME_MARQUEE_DRAG))) found = n;
     }
     t.node = found;
     return found == KROME_NONE ? KromeTarget{} : t;
@@ -1324,7 +1399,7 @@ namespace {
 
 // Whether a press on the node is Krome's own, as pressable() finds one.
 bool takes_press(const KromeNode& n) {
-    return !n.event.is_null() || !n.binding.is_null() || !n.behave.is_null() || n.type == KromeType::Hit || n.type == KromeType::Edit;
+    return !n.event.is_null() || !n.binding.is_null() || !n.behave.is_null() || n.type == KromeType::Hit || n.type == KromeType::Edit || (n.flags & KROME_MARQUEE_DRAG);
 }
 
 // A tree's grips, and the nodes that take a press of their own (as None: the program's),
@@ -1589,6 +1664,17 @@ void view_window(KromeModule& s, Renderer* r, bool landed) {
 
 } // namespace
 
+namespace {
+
+// Whether a window is seen: one hidden draws nothing, so nothing in it asks for a frame.
+bool window_seen(KromeModule& s, u32 window) {
+    if (s.viewport_fixed || !s.e) return true;
+    HostWindow* w = platform_window_by_id(*s.e, window);
+    return !w || w->visible();
+}
+
+} // namespace
+
 void krome_view_frame(KromeModule& s) {
     // A transition mid-way paints again, and asks for the frame to.
     if (s.animating) {
@@ -1596,10 +1682,13 @@ void krome_view_frame(KromeModule& s) {
         for (KromeScreen* sc : s.screens) sc->repaint = true;
         engine_want_frame(*s.e);
     }
-    // A strip whose next frame is due paints its screen again.
+    // A strip whose next frame is due paints its screen again; a marquee likewise.
     for (const KromeModule::Play& pl : s.plays)
         if (pl.due > 0.0 && s.clock + 1e-9 >= pl.due)
             if (KromeScreen* sc = krome_screen_by_id(s, pl.screen)) sc->repaint = true;
+    for (const KromeModule::Marquee& m : s.marquees)
+        if (m.due > 0.0 && s.clock + 1e-6 >= m.due)
+            if (KromeScreen* sc = krome_screen_by_id(s, m.screen)) sc->repaint = true;
     // A font or an image that has landed changes what text and images measure.
     bool landed = false;
     for (KromeFont& f : s.fonts)
@@ -1664,6 +1753,13 @@ void krome_view_frame(KromeModule& s) {
     // on-demand window wakes for each frame and no more often.
     f64 due = 0.0;
     for (const KromeModule::Play& pl : s.plays) if (pl.due > 0.0 && (due <= 0.0 || pl.due < due)) due = pl.due;
+    // A marquee's next pixel, in a window that is seen (KR37).
+    for (const KromeModule::Marquee& m : s.marquees) {
+        if (!(m.due > 0.0)) continue;
+        KromeScreen* sc = krome_screen_by_id(s, m.screen);
+        if (!sc || !window_seen(s, sc->window)) continue;
+        if (due <= 0.0 || m.due < due) due = m.due;
+    }
     // And a script's timer, the soonest due in a window that is seen (KR35).
     f64 timer = krome_next_timer(s);
     if (timer > 0.0 && (due <= 0.0 || timer < due)) due = timer;
@@ -1689,6 +1785,35 @@ bool desktop_point(KromeModule& s, f32 x, f32 y, i32* ox, i32* oy) {
     *ox = wx + (i32)x;
     *oy = wy + (i32)y;
     return true;
+}
+
+// A marquee-drag text's record, while it moves (KR37).
+KromeModule::Marquee* dragged_marquee(KromeModule& s, const KromeTarget& t) {
+    KromeTree* tree = t.node != KROME_NONE ? krome_target_tree(s, t, nullptr) : nullptr;
+    if (!tree || t.node >= tree->nodes.len || !(tree->nodes[t.node].flags & KROME_MARQUEE_DRAG)) return nullptr;
+    for (KromeModule::Marquee& m : s.marquees) if (m.screen == t.screen && m.overlay == t.overlay && m.node == t.node) return &m;
+    return nullptr;
+}
+
+// Where the pointer has dragged a held marquee: looped, round its width and gap; bounced,
+// held between its ends.
+void marquee_drag(KromeModule& s, KromeModule::Marquee& m, const KromeNode& n, f32 x) {
+    f32 off = m.grab_off - (x - m.grab_x) / s.scale;
+    if (n.marquee_bounce) {
+        f32 most = m.w - m.room;
+        off = off < 0.0f ? 0.0f : off > most ? most : off;
+    } else {
+        f32 len = m.w + n.marquee_gap;
+        if (len > 0.0f) { off = fmod(off, len); if (off < 0.0f) off += len; }
+    }
+    m.off = off;
+}
+
+// Released: it moves on from where it was left, as though it had come there by itself.
+void marquee_release(KromeModule& s, KromeModule::Marquee& m, const KromeNode& n) {
+    m.held = false;
+    f32 v = n.marquee > 0.0f ? n.marquee : 1.0f;
+    m.start = s.clock - ((f64)n.marquee_pause + (f64)m.off / (f64)v);
 }
 
 void drag_send(KromeModule& s, u8 phase) {
@@ -1760,6 +1885,8 @@ void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool esca
             krome_behave(s, s.captured, KromeCall::Press, a);
             s.drag_at = vec2{x, y};
         }
+        // A marquee the pointer may drag: held where it is.
+        if (KromeModule::Marquee* m = dragged_marquee(s, s.captured)) { m->held = true; m->grab_x = x; m->grab_off = m->off; m->due = 0.0; }
         // A grip=drag node: where the pointer is on the desktop at the press, and the press told.
         i32 px = 0, py = 0;
         if (is_drag(s, s.captured) && desktop_point(s, x, y, &px, &py)) {
@@ -1795,6 +1922,7 @@ void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool esca
         repaint(s, was);
         KromeScreen* wsc = nullptr;
         KromeTree* wt = was.node != KROME_NONE ? krome_target_tree(s, was, &wsc) : nullptr;
+        if (KromeModule::Marquee* m = dragged_marquee(s, was)) marquee_release(s, *m, wt->nodes[was.node]);
         bool was_edit = wt && wt->nodes[was.node].type == KromeType::Edit;
         // A behaviour's node: the release is its, and it says what a click is.
         if (wt && !wt->nodes[was.node].behave.is_null()) {
@@ -1813,6 +1941,7 @@ void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool esca
         KromeTree* ct = krome_target_tree(s, s.captured, nullptr);
         bool edit = ct && ct->nodes[s.captured.node].type == KromeType::Edit;
         if (edit && krome_is_focused(s, s.captured.screen, s.captured.overlay, s.captured.node)) krome_edit_drag(s, x, y);
+        else if (KromeModule::Marquee* m = dragged_marquee(s, s.captured)) marquee_drag(s, *m, ct->nodes[s.captured.node], x);
         else if (ct && !ct->nodes[s.captured.node].behave.is_null() && (x != s.drag_at.x || y != s.drag_at.y)) {
             s.drag_at = vec2{x, y};
             KromeCallArgs a;

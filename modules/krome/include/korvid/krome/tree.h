@@ -147,6 +147,7 @@ constexpr u32 KROME_SECRET    = 1u << 15; // an edit drawn as bullets, never cop
 constexpr u32 KROME_TABS      = 1u << 16; // an edit that keeps Tab (a code editor's) rather than leaving on it
 constexpr u32 KROME_PIXEL     = 1u << 17; // its images, and those of everything under it, are sampled nearest: a skin's pixels stay square
 constexpr u32 KROME_ACROSS    = 1u << 18; // its strip's frames are laid across the image, not down it
+constexpr u32 KROME_MARQUEE_DRAG = 1u << 19; // a marquee the pointer drags; it moves on again when released
 
 // Modifier keys, as a shortcut and a behaviour's key call see them.
 constexpr u32 KROME_MOD_SHIFT = 1u << 0;
@@ -186,6 +187,12 @@ struct KromeNode {
     KromeEdge  edge[4];
     vec2       offset;
     u8         tied = 0;
+    // A one-line text wider than its rect that moves (KR37): logical pixels a second (0: it is
+    // clipped), moved `marquee_step` at a time (0: by the pixel), looped with `marquee_gap`
+    // between its end and its start or bounced end to end, resting `marquee_pause` seconds at
+    // each end and before it starts.
+    f32        marquee = 0.0f, marquee_step = 0.0f, marquee_gap = 40.0f, marquee_pause = 0.0f;
+    bool       marquee_bounce = false;
     u32        parent = KROME_NONE, first = KROME_NONE, last = KROME_NONE, next = KROME_NONE;
     u32        text = KROME_NONE;  // content: an offset into KromeTree::strings, as written
     u32        shown = KROME_NONE; // the content with {name} filled in, when someone filled it

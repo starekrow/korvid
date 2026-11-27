@@ -341,7 +341,7 @@ In Lua: the helpers (and `edit`, with `bind = "key"`), `model`, `emit(name, valu
 
 Properties: layout `w`, `h` (a number, a percentage, `hug`, `fill`, a range), `pad`, `gap`,
 `dir`, `anchor`, `l`, `t`, `r`, `b` (a stack child's edges), `x`, `y` (its offset), `scroll` (`x`, `y` or `xy`), `tooltip`, `context`, `behave`, `taborder`,
-`key` (a shortcut), `step`, `range` (Lua's form of a node's `1..99`), `arrived` (an event); an edit's `placeholder`,
+`key` (a shortcut), `step`, `range` (Lua's form of a node's `1..99`), `arrived` (an event), `marquee`, `marquee-step`, `marquee-mode`, `marquee-gap`, `marquee-pause`; an edit's `placeholder`,
 `change`, `blur`; `cursor`; `grip` (`move`, an edge or corner by compass point, `none`); any of them `@key` (bound to the model); look `bg`, `bg2` (a gradient to it), `angle`, `radius` (one, two
 or four), `border`, `border-color`, `shadow` (x y blur [spread]), `shadow-color`, `color`,
 `opacity`, `font`, `size`, `line-height`, `image`, `region` (x, y, w, h), `fit` (`stretch`,
@@ -355,6 +355,18 @@ binding or a behaviour's `w:part` changes them, laid out each frame while they m
 when layout itself moves the node). `arrived=NAME` fires NAME once its sizes and offsets reach
 where the latest change sent them (`on.NAME(id)`, and `KromeEvent`); at once, with no
 transition.
+**Text that scrolls** (slice 8, KR37). A one-line text (`nowrap`) wider than its rect moves
+instead of being cut with `marquee=30` (logical pixels a second): looped, its start following
+its end after `marquee-gap` (40), or `marquee-mode=bounce`, end to end; `marquee-step=8` moves
+it that many pixels at a time; `marquee-pause=1.5` rests it at each end and before it starts.
+It is clipped to its inside. A text that fits does not move and asks for nothing; one that
+moves asks for its next frame when it will next be a whole pixel (or a step) further, so 30
+pixels a second at scale 1 is 30 frames a second, and only while some of its rect, clipped by
+its ancestors, can be seen in a window that is seen. Hidden, it starts again from its rest
+when shown; its text changed, likewise. The flag `marquee-drag` lets the pointer drag it; it
+moves on from where it was left when released. Anywhere but a one-line text, `marquee=` is an
+error.
+
 **Images and shapes.** `image="hero.png"` draws a texture. A path ending `.svg` (or
 `.kshape`) draws a shape: the svg module's cook of it, rasterized by patherizer at the node's
 pixel size (logical size times the scale), measured at its view box unless `w` or `h` says
@@ -434,7 +446,7 @@ kromescreens do). They are drawn on a 20 px grid: 20 is their size, and smaller 
 
 Flags: `fill`, `clip`, `scroll`, `disabled`, `selected`, `hidden`, the alignments,
 `subpixel`, `nowrap`, `multiline`, `readonly`, `focusable`, `nofocus`, `secret`, `tabs`,
-`pixel` (inherited), `across`. The
+`pixel` (inherited), `across`, `marquee-drag`. The
 vocabulary is fixed (`modules/kimb`); `prop name type` in a prelude types a definition's
 parameter.
 

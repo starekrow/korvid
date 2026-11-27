@@ -744,6 +744,11 @@ void node(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const Kro
         else error(b, fr, f.file, line, "%s= places a child of a stack, and this one's parent is a %s", said, t.nodes[parent].dir == KromeDir::Row ? "row" : "col");
         t.nodes[id].tied = 0;
     }
+    // A marquee is a one-line text's.
+    if (t.nodes[id].marquee > 0.0f && (type != KromeType::Text || !(t.nodes[id].flags & KROME_NOWRAP))) {
+        error(b, fr, f.file, line, "marquee= moves a one-line text, and this is %s", type != KromeType::Text ? "not a text" : "a text without nowrap");
+        t.nodes[id].marquee = 0.0f;
+    }
     // A range is a behaviour's (`slider @v 1..99`): kept on the node for it.
     if (range) {
         const JsonValue* lo = json_first(*range_doc, *range);

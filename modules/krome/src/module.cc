@@ -348,6 +348,7 @@ void krome_shutdown(Engine&, ModuleInstance& self) {
     s->plays.free();
     s->motions.free();
     s->timers.free(); // their functions went with the Lua state
+    s->marquees.free();
     s->arrivals.free();
 }
 

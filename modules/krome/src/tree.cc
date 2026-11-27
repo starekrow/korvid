@@ -405,6 +405,24 @@ const char* KromeTree::set(u32 node, const char* prop, const KromeValue& v, Krom
             n.shortcut_mods = (u8)mods;
             return nullptr;
         }
+        if (!strncmp(prop, "marquee", 7)) {
+            const char* rest = prop + 7;
+            if (!strcmp(rest, "-mode")) {
+                if (v.kind != KromeValue::String || (strcmp(v.s, "loop") && strcmp(v.s, "bounce"))) return "marquee-mode takes loop or bounce";
+                n.marquee_bounce = !strcmp(v.s, "bounce");
+                return nullptr;
+            }
+            f32* at = !*rest ? &n.marquee : !strcmp(rest, "-step") ? &n.marquee_step : !strcmp(rest, "-gap") ? &n.marquee_gap : !strcmp(rest, "-pause") ? &n.marquee_pause : nullptr;
+            if (at) {
+                if (v.kind != KromeValue::Number || !(v.n >= 0.0f && v.n <= 10000.0f)) {
+                    if (!*rest) return "marquee takes logical pixels a second, 0 or more";
+                    if (rest[1] == 'p') return "marquee-pause takes seconds, 0 or more";
+                    return rest[1] == 's' ? "marquee-step takes logical pixels, 0 or more" : "marquee-gap takes logical pixels, 0 or more";
+                }
+                *at = v.n;
+                return nullptr;
+            }
+        }
         if (!strcmp(prop, "arrived")) {
             if (v.kind != KromeValue::String) return "an event takes a name";
             n.arrived = name_intern(v.s);
@@ -512,7 +530,7 @@ const char* KromeTree::flag(u32 node, const char* w) {
                                {"subpixel", KROME_SUBPIXEL}, {"nowrap", KROME_NOWRAP},
                                {"multiline", KROME_MULTILINE}, {"readonly", KROME_READONLY},
                                {"focusable", KROME_FOCUSABLE}, {"nofocus", KROME_NOFOCUS}, {"secret", KROME_SECRET}, {"tabs", KROME_TABS},
-                               {"pixel", KROME_PIXEL}, {"across", KROME_ACROSS}};
+                               {"pixel", KROME_PIXEL}, {"across", KROME_ACROSS}, {"marquee-drag", KROME_MARQUEE_DRAG}};
     for (const Bit& b : bits) if (!strcmp(w, b.word)) { n.flags |= b.bit; dirty = true; return nullptr; }
     if (!strcmp(w, "left"))   { n.align_x = KromeAlign::Start; dirty = true; return nullptr; }
     if (!strcmp(w, "center")) { n.align_x = KromeAlign::Center; dirty = true; return nullptr; }

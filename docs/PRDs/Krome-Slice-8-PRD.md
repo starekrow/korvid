@@ -351,3 +351,33 @@ In review of the draft (Nov 26):
   none. A behaviour's `every` from its `update`, its screen's, ticking and gone with it.
 - **Not tested headless:** the hidden window's silence itself (no window here can be hidden);
   the test stands in for it with no frames, which is what the loop gives a hidden window.
+
+**Milestone 4, Scrolling text** (Nov 26).
+
+- **The node's** (`KromeNode::marquee`, `marquee_step`, `marquee_gap`, `marquee_pause`,
+  `marquee_bounce`; the flag `KROME_MARQUEE_DRAG`), so not a state's. The gap is 40 when
+  unsaid. On a node that is not a text, or a text without `nowrap`, the builder says
+  `marquee= moves a one-line text, and this is a text without nowrap` and turns it off.
+- **The timeline is one pure function**, `krome_marquee_offset`: the offset `t` seconds in,
+  moved by a unit at a time (a physical pixel, or the step), and when it next moves. Looped:
+  a rest, then on by the text's width and the gap, round to its start. Bounced: a rest, to
+  the far end, a rest, back.
+- **A record per node** (`KromeModule::Marquee`), kept as a strip's play is: begun at the first
+  paint that finds the text too wide, again when its text or properties change, dropped by a
+  paint that no longer finds it moving (hidden, fitting). Paint draws the line clipped to the
+  text's inside at the offset (twice, looped), through `paint_line`, the one-line glyph run
+  `paint_text` drew inline before. A marquee whose inside, clipped by its ancestors, has no
+  area keeps its record and asks for nothing; one in a window that is not seen asks for
+  nothing either (`window_seen`, which the timers' check is too).
+- **Wakes**: a due marquee repaints its screen, and the paint asks for the soonest due frame,
+  with the strips' and the timers'.
+- **`marquee-drag`** makes the text take a press. Held, it asks for nothing and the pointer moves
+  it (looped round its width and gap, bounced held between its ends); released, its timeline is
+  set so it moves on from there, forward.
+- **Tested.** The timeline by hand: a loop smooth, stepped by 8, with a 1.5 s rest, round again;
+  a text that fits; a bounce out, resting at the far end, back and home. Through a running
+  Krome on the test's clock: a long title in a 120-pixel text at 30 pixels a second is 60
+  wakes in 2 s and 60 pixels; a short one has no record; one in a scroll box scrolled out of
+  view has a record that asks for nothing; stepped by 8, 15 wakes in 4 s on multiples of 8;
+  hidden, no record and no wakes in 3 s, and shown again from its rest; dragged 25 pixels,
+  held, released and on from there. The `.kim` words, and the two mistakes by line.

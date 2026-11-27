@@ -369,6 +369,140 @@ void test_behaviour_timers(TestCtx& c) {
     engine_shutdown(e);
 }
 
+// Text that scrolls (KR37): the timeline by hand, then wakes counted through a running Krome.
+void test_marquee_offsets(TestCtx& c) {
+    c.begin("krome placed: a marquee's timeline");
+    KromeNode n;
+    n.marquee = 10.0f;     // 10 pixels a second
+    n.marquee_gap = 20.0f; // a 100-wide text in 60: a loop is 120 long, 12 s
+    f64 next = 0.0;
+    auto near = [](f64 a, f64 b) { return a - b < 1e-6 && b - a < 1e-6; };
+    KV_CHECK(c, krome_marquee_offset(n, 100, 60, 0.0, 1.0f, &next) == 0.0f && near(next, 0.1));
+    KV_CHECK(c, krome_marquee_offset(n, 100, 60, 2.55, 1.0f, &next) == 25.0f && near(next, 2.6));
+    KV_CHECK(c, krome_marquee_offset(n, 100, 60, 11.95, 1.0f, &next) == 119.0f && near(next, 12.0));
+    KV_CHECK(c, krome_marquee_offset(n, 100, 60, 12.0, 1.0f, &next) == 0.0f && near(next, 12.1)); // round again
+    // It fits: still, and nothing next.
+    KV_CHECK(c, krome_marquee_offset(n, 50, 60, 3.0, 1.0f, &next) == 0.0f && next == 0.0);
+    // Stepped by 8: moves every 0.8 s.
+    KV_CHECK(c, krome_marquee_offset(n, 100, 60, 1.7, 8.0f, &next) == 16.0f && near(next, 2.4));
+    // A rest of 1.5 s before it starts and at each end of a loop.
+    n.marquee_pause = 1.5f;
+    KV_CHECK(c, krome_marquee_offset(n, 100, 60, 1.0, 1.0f, &next) == 0.0f && near(next, 1.6));
+    KV_CHECK(c, krome_marquee_offset(n, 100, 60, 3.5, 1.0f, &next) == 20.0f && near(next, 3.6));
+    KV_CHECK(c, krome_marquee_offset(n, 100, 60, 14.0, 1.0f, &next) == 0.0f && near(next, 15.1)); // resting again
+    // Bounced: 40 to travel (100 in 60), 4 s each way, a rest at each end.
+    n.marquee_bounce = true;
+    KV_CHECK(c, krome_marquee_offset(n, 100, 60, 3.5, 1.0f, &next) == 20.0f);
+    KV_CHECK(c, krome_marquee_offset(n, 100, 60, 5.6, 1.0f, &next) == 40.0f && near(next, 7.1)); // at the far end, resting
+    KV_CHECK(c, krome_marquee_offset(n, 100, 60, 8.0, 1.0f, &next) == 30.0f);                   // on its way back
+    KV_CHECK(c, krome_marquee_offset(n, 100, 60, 11.2, 1.0f, &next) == 0.0f);                   // home, resting
+}
+
+const char* k_marquee = R"lua(
+return {
+  model = { title = "A title far too long for its box, which scrolls", short = "Short" },
+  root = col { gap = 4,
+    text { id = "long", "{title}", nowrap = true, w = 120, marquee = 30, ["marquee-gap"] = 40 },
+    text { id = "short", "{short}", nowrap = true, w = 120, marquee = 30 },
+    col { id = "list", scroll = true, h = 30, w = 200,
+      box { h = 60 },
+      text { id = "below", "{title}", nowrap = true, w = 120, marquee = 30 },
+    },
+  },
+}
+)lua";
+
+void test_marquee(TestCtx& c) {
+    c.begin("krome placed: marquees");
+    Engine e;
+    KV_CHECK(c, engine_init(e, k_list));
+    KromeModule& s = *krome_state(e);
+    krome_viewport(e, 400, 300, 1.0f);
+    krome_provide(e, "t/marquee.lua", k_marquee, strlen(k_marquee));
+    Name scn = krome_open(e, "t/marquee.lua");
+    for (u32 i = 0; i < 200 && !(krome_ready(e, scn) && krome_settled(e)); ++i) frames(e, 1);
+    frames(e, 30);
+    KV_CHECK(c, krome_ready(e, scn));
+    // The long one moves; the short one fits and has no record; the one scrolled out of view
+    // has one that asks for nothing.
+    KromeScreen& sc = *krome_screen(s, scn);
+    u32 lng = krome_find(sc.tree, name_intern("long")), below = krome_find(sc.tree, name_intern("below"));
+    auto rec = [&](u32 node) -> KromeModule::Marquee* { for (KromeModule::Marquee& m : s.marquees) if (m.node == node) return &m; return nullptr; };
+    KV_CHECK(c, s.marquees.len == 2 && rec(lng) && rec(below) && rec(below)->due == 0.0 && rec(lng)->due > 0.0);
+
+    // 30 pixels a second at scale 1: about 30 wakes a second, not the display's 60.
+    Loop lp{e};
+    e.frame_wanted = false;
+    lp.note();
+    lp.run(0.1);
+    lp.wakes = 0;
+    f32 was = rec(lng)->off;
+    lp.run(2.0);
+    f32 moved = rec(lng)->off - was;
+    KV_INFO("test", "a marquee at 30 px/s: %u wakes in 2 s, moved %.0f px", lp.wakes, (f64)moved);
+    KV_CHECK(c, lp.wakes >= 58 && lp.wakes <= 62 && moved > 58.0f && moved < 62.0f);
+    // Stepped: 8 pixels at a time, a wake each, 30 / 8 a second.
+    krome_set(e, scn, "title", "Another title far too long for its box, stepped by eight");
+    sc.tree.nodes[lng].marquee_step = 8.0f;
+    lp.run(0.1);
+    lp.wakes = 0;
+    lp.run(4.0);
+    KV_CHECK(c, lp.wakes >= 14 && lp.wakes <= 16 && (u32)rec(lng)->off % 8 == 0);
+    // Hidden: no record, no wakes. Shown again, it begins from its rest.
+    sc.tree.set_flag(lng, "hidden", true);
+    e.frame_wanted = true; // as a binding or a behaviour's change asks
+    lp.run(0.2);
+    lp.wakes = 0;
+    lp.run(3.0);
+    KV_CHECK(c, lp.wakes == 0 && !rec(lng));
+    sc.tree.set_flag(lng, "hidden", false);
+    sc.tree.nodes[lng].marquee_step = 0.0f;
+    e.frame_wanted = true;
+    lp.run(0.5);
+    KV_CHECK(c, rec(lng) && rec(lng)->off > 10.0f && rec(lng)->off < 20.0f);
+
+    // Dragged (marquee-drag): held where the pointer leaves it, and on from there when released.
+    sc.tree.flag(lng, "marquee-drag");
+    const rect2& r = sc.tree.nodes[lng].rect;
+    f32 px = r.x + 60.0f, py = r.y + r.h * 0.5f;
+    krome_pointer(s, px, py, false, 0.0f, false);
+    krome_pointer(s, px, py, true, 0.0f, false);
+    f32 held = rec(lng)->off;
+    KV_CHECK(c, rec(lng)->held);
+    KV_CHECK(c, rec(lng)->due == 0.0); // asking for nothing while held
+    krome_pointer(s, px - 25.0f, py, true, 0.0f, false);
+    KV_CHECK(c, rec(lng)->off == held + 25.0f);
+    // (No frame while it is held here: a frame's input pass reads the real pointer, which is up.)
+    krome_pointer(s, px - 25.0f, py, false, 0.0f, false);
+    lp.run(0.5);
+    KV_CHECK(c, !rec(lng)->held && rec(lng)->off > held + 33.0f && rec(lng)->off < held + 42.0f);
+    engine_shutdown(e);
+}
+
+// The mistakes: a marquee on what is not a one-line text.
+void test_marquee_kim(TestCtx& c) {
+    c.begin("krome placed: marquees in .kim");
+    Engine e;
+    KV_CHECK(c, engine_init(e, k_list));
+    krome_viewport(e, 300, 200, 1.0f);
+    krome_clear_errors(e);
+    const char* text =
+        "screen main { box dir=col {\n"
+        "  text \"a long title\" nowrap marquee=30 marquee-mode=bounce marquee-pause=1.5 marquee-step=2 marquee-gap=10 marquee-drag w=40\n"
+        "  text \"wraps\" marquee=30\n"
+        "  box marquee=30\n"
+        "} }\n";
+    Name scn = open_kim(c, e, "t/mq.kim", text, "main");
+    frames(e, 3);
+    KV_CHECK(c, krome_ready(e, scn));
+    KV_CHECK(c, has_error(e, "t/mq.kim:3: marquee= moves a one-line text, and this is a text without nowrap"));
+    KV_CHECK(c, has_error(e, "t/mq.kim:4: marquee= moves a one-line text, and this is not a text"));
+    const KromeTree* t = krome_tree(e, scn);
+    const KromeNode& n = t->nodes[t->nodes[t->root].first];
+    KV_CHECK(c, n.marquee == 30.0f && n.marquee_bounce && n.marquee_pause == 1.5f && n.marquee_step == 2.0f && n.marquee_gap == 10.0f && (n.flags & KROME_MARQUEE_DRAG));
+    engine_shutdown(e);
+}
+
 } // namespace
 
 void test_placed(TestCtx& c) {
@@ -376,4 +510,7 @@ void test_placed(TestCtx& c) {
     test_easing(c);
     test_timers(c);
     test_behaviour_timers(c);
+    test_marquee_offsets(c);
+    test_marquee(c);
+    test_marquee_kim(c);
 }
