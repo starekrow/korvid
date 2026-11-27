@@ -254,8 +254,12 @@ same `build/`, `dist/` and Ninja files. If they do, it is a project of its own:
   `dist/`, and nothing is written into the engine's tree;
 - its own modules are the roots, with their tests, so Ninja's default builds the project
   rather than the engine;
-- engine modules can still be named (`kormake arcfire` builds arcfire into the project's
-  build directory).
+- the engine's public modules can still be named (`kormake sprite` builds sprite into the
+  project's build directory); its private ones (the master file's `modulepath { ...,
+  private = true }`: Korvid's `examples/` and `tools/`) are not there at all, except the
+  program the cook runs, so `goldberg` still cooks the project's assets;
+- a project module may have any name. One with the name of an engine module wins over it,
+  and every module that depends on that name gets the project's.
 
 `build` moves the build directory, for a project or in-tree. It may not be, or hold, the
 config's directory or the engine root, since `clean` removes what kormake writes under it. The engine root is still
@@ -270,7 +274,8 @@ The master file, at the engine root. It runs top to bottom in a sandbox (only `s
 
     project "korvid"
     requires_kormake "1.1"                  -- a major version newer than this binary is an error
-    modulepath { "modules", "examples", "tools" }
+    modulepath { "modules" }                -- public: a project beside the engine builds on these
+    modulepath { "examples", "tools", private = true }   -- the engine's own: hidden from a project
     platforms { "linux", "windows", "macos", "ios", "iossim", "android", "androidemu" }
     configs   { "debug", "dev", "ship" }    -- the first is the default config
     host_config "dev"                       -- what tools build in; the default is dev
@@ -283,7 +288,13 @@ The master file, at the engine root. It runs top to bottom in a sandbox (only `s
 A module path is a directory of module directories. A module is any directory directly
 under a path entry that has a `module.lua`. kormake does not search deeper, and directories
 without one (`tools/kormake`) are ignored. If two modules have the same name,
-that is an error naming both paths, unless an `override` picks one.
+that is an error naming both paths, unless an `override` picks one, or one is a project's
+(see Projects).
+
+A path given `private = true` belongs to the engine. Its modules are seen from inside the
+engine's tree, where a private module with a public one's name is still an error. A
+project of its own sees none of them except the program its cook runs, and a project
+module that names that one in `deps` is an error.
 
 A root's `modules` takes names or `*`/`?` globs, and defaults to the root's own name.
 `paths` limits the root to the modules found in those module paths (relative to the root),

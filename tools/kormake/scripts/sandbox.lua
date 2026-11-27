@@ -182,7 +182,13 @@ function M.eval_master(path, text)
   local m = { modulepaths = {}, platforms = {}, configs = {}, binds = {}, roots = {}, overrides = {} }
   env.project = function(name) m.project = name end
   env.requires_kormake = function(v) m.requires = v end
-  env.modulepath = function(t) for _, p in ipairs(util.as_list(t)) do m.modulepaths[#m.modulepaths + 1] = p end end
+  -- modulepath { "modules" } is public: a project beside the engine sees it. With
+  -- private = true ({ "examples", "tools", private = true }) the paths are the engine's own:
+  -- seen from inside the engine's tree, hidden from a project (collect.lua).
+  env.modulepath = function(t)
+    local private = type(t) == "table" and t.private == true
+    for _, p in ipairs(util.as_list(t)) do m.modulepaths[#m.modulepaths + 1] = { path = p, private = private } end
+  end
   env.platforms = function(t) m.platforms = copy_data(util.as_list(t)) end
   env.configs = function(t) m.configs = copy_data(util.as_list(t)) end
   env.host_config = function(c) if type(c) ~= "string" then util.fail("%s: host_config takes a config name", path) end m.host_config = c end

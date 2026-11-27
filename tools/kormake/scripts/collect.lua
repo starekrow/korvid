@@ -77,25 +77,33 @@ function M.run(found)
 
   -- Module paths: the master file's (relative to the root), the config's (relative to it;
   -- its own directory unless it says otherwise), then KORMAKE_MODULE_PATH. Each directory
-  -- once, by its real path.
+  -- once, by its real path, with its kind: "public" (the master file's modulepath, and the
+  -- environment's), "private" (the master file's modulepath { ..., private = true }: the
+  -- engine's examples and tools), or "project" (the config's, where the master file's do
+  -- not already list them).
   local paths, seen_path = {}, {}
-  local project_paths = {} -- the paths the config adds that the master file does not list
-  local function add(p, base, from_config)
+  local function add(p, base, kind)
     p = util.expand_home(p)
     local full = util.is_abs(p) and p or util.join(base, p)
     local real = kfs.realpath(full)
     if not real or not kfs.isdir(real) then util.fail("module path '%s' is not a directory", p) end
     if seen_path[real] then return end
     seen_path[real] = true
-    paths[#paths + 1] = real
-    if from_config then project_paths[real] = true end
+    paths[#paths + 1] = { dir = real, kind = kind }
   end
-  for _, p in ipairs(master.modulepaths) do add(p, root_dir) end
-  if found.config then for _, p in ipairs(decl.modulepaths or { "." }) do add(p, found.anchor, true) end end
+  for _, p in ipairs(master.modulepaths) do add(p.path, root_dir, p.private and "private" or "public") end
+  if found.config then for _, p in ipairs(decl.modulepaths or { "." }) do add(p, found.anchor, "project") end end
   local envpath = kfs.getenv("KORMAKE_MODULE_PATH")
   -- Entries are separated as in PATH: ':' on POSIX, ';' on Windows (where ':' is a drive's).
   local sep = KORMAKE_HOST == "windows" and ";" or ":"
-  if envpath then for p in envpath:gmatch("[^" .. sep .. "]+") do add(p, root_dir) end end
+  if envpath then for p in envpath:gmatch("[^" .. sep .. "]+") do add(p, root_dir, "public") end end
+  -- A project's view: the config adds paths of its own. Private paths are then hidden,
+  -- all but the program the cook runs (goldberg, in the engine's tools/), which a project
+  -- with assets needs built; inside the engine's tree everything is seen.
+  local project_view = false
+  for _, pth in ipairs(paths) do if pth.kind == "project" then project_view = true end end
+  local cook_text = decl.cook or master.cook or M.DEFAULT_COOK
+  local cook_program = cook_text:match("^%s*(%S+)")
 
   -- What a command line may call a target or a phony: never a module's name.
   local reserved = { host = true, all = true, tests = true, check = true, ["build.ninja"] = true }
@@ -105,8 +113,14 @@ function M.run(found)
     for _, p in ipairs(master.platforms) do reserved[p .. "-" .. cf] = true end
   end
 
-  local modules, by_name = {}, {}
-  for _, full in ipairs(paths) do
+  -- Every module.lua, in path order then name order. Then, per name, the one that wins: a
+  -- project's module over the engine's (a game may call a module anything, and an engine
+  -- module of that name, public or private, steps aside for it); public over private, in
+  -- the engine's own view, is a clash. Two of one kind is a clash.
+  local found_recs, by_rank = {}, {}
+  local rank = { private = 1, public = 2, project = 3 }
+  for _, pth in ipairs(paths) do
+    local full = pth.dir
     local names = kfs.listdir(full)
     table.sort(names)
     for _, name in ipairs(names) do
@@ -115,8 +129,8 @@ function M.run(found)
       if kfs.isdir(dir) and kfs.isfile(mfile) then
         local mtext = kfs.read(mfile)
         local mdecl = sandbox.eval_module(mfile, mtext)
-        local rec = { name = mdecl.name, dir = dir, file = mfile, fields = mdecl.fields, project = project_paths[full],
-                      modulepath = full }
+        local rec = { name = mdecl.name, dir = dir, file = mfile, fields = mdecl.fields, project = pth.kind == "project" or nil,
+                      private = pth.kind == "private" or nil, modulepath = full }
         if reserved[rec.name] then util.fail("%s: a module may not be called '%s' (a target or a build name)", mfile, rec.name) end
         local override = master.overrides[mdecl.name]
         if override and override.path then
@@ -124,16 +138,27 @@ function M.run(found)
           local want = util.is_abs(override.path) and override.path or util.join(root_dir, override.path)
           if kfs.realpath(want) ~= kfs.realpath(dir) then rec = nil end
         end
+        if rec and project_view and rec.private and rec.name ~= cook_program then rec = nil end
         if rec then
-          if by_name[rec.name] then
+          local r = rank[pth.kind]
+          local had = by_rank[rec.name]
+          local clash = had and (had.r == r or (not project_view and had.r + r == 3)) -- same kind; public and private
+          if clash then
             util.fail("module '%s' is declared in both %s and %s; add override \"%s\" { path = ... } to the master file",
-              rec.name, by_name[rec.name].dir, dir, rec.name)
+              rec.name, had.rec.dir, dir, rec.name)
           end
-          convention(rec)
-          by_name[rec.name] = rec
-          modules[#modules + 1] = rec
+          if not had or r > had.r then by_rank[rec.name] = { rec = rec, r = r } end
+          found_recs[#found_recs + 1] = rec
         end
       end
+    end
+  end
+  local modules, by_name = {}, {}
+  for _, rec in ipairs(found_recs) do
+    if by_rank[rec.name].rec == rec then
+      convention(rec)
+      by_name[rec.name] = rec
+      modules[#modules + 1] = rec
     end
   end
   -- Externals defined outside the toolchains: a korvid.config's (external "name" { <platform>

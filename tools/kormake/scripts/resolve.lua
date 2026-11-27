@@ -168,6 +168,9 @@ function M.run(c, platform, config, opts)
 
     for _, dep in ipairs(rec.fields.deps or {}) do
       local drec = by_name[dep]
+      if drec and drec.private and rec.project then
+        util.fail("'%s' depends on '%s', which is the engine's own (%s), not a module a project can use", name, dep, drec.dir)
+      end
       if drec and host_only(drec) and not host_only(rec) then
         util.fail("'%s' links '%s', which is built for the host only; name it in tools instead", name, dep)
       end

@@ -4,6 +4,7 @@
 project "fixture"
 requires_kormake "1.1"
 modulepath { "modules" }
+modulepath { "samples", private = true }
 platforms { "linux", "macos", "windows", "cross" }
 configs   { "dev", "ship" }
 root "all" { modules = { "base", "gfx", "game" }, tests = true }

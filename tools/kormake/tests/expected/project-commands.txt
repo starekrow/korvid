@@ -6,12 +6,11 @@ kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system librarie
 $ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake graph host-dev
 codec@{host}-dev                          lib      deps:   externals: sysaudio ({project}/modules/codec/module.lua)
 base@{host}-dev                           lib      deps:   externals: pkg
+extra@{host}-dev                          lib      deps: base
 player@{host}-dev                         exe      deps: base, codec  externals: fakepw ({project}/modules/player/module.lua), shared ({project}/korvid.config)
 [exit 0]
 
 $ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config FAKE_PKG_MISSING=libfakepw-0.3 kormake check host-dev
-kormake: left out of {host}-dev: extra: external 'missing' (toolchain toolchain.host) is not at {root}/packages/missing.
-Fetch it into packages/missing.
 kormake: cannot build player for {host}-dev: external 'fakepw' ({project}/modules/player/module.lua): pkg-config does not find 'libfakepw-0.3'.
 {fetch}
 kormake: 11 modules, 9 instances for {host}-dev, 1 problem
@@ -30,5 +29,9 @@ kormake: 'codec' needs external 'sysaudio', which toolchain 'toolchain.cross' do
 
 $ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake gen host-dev
 kormake: codec: codegen_sources names 'src/nowhere.cc', which is not one of its sources
+[exit 1]
+
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake gen host-dev
+kormake: module 'demo' is needed by player but does not exist
 [exit 1]
 

@@ -61,6 +61,10 @@ build obj/base/unity.o: cxx_host {project}/build/{host}-dev/gen/base/unity.cc
   includes = -I'{root}/modules/base/include' -I'{project}/build/{host}-dev/gen/base' -isystem'{root}/packages/pkg/include'
   defines = -DBASE=1 -DKV_BIND_GFX_GFX_SOFT=1 -DKV_BIND_GFX_COUNT=1
 build lib/libkv_base.a: ar_host obj/base/unity.o
+build obj/extra/extra.o: cxx_host {project}/modules/extra/src/extra.cc
+  includes = -I'{root}/modules/base/include' -I'{project}/build/{host}-dev/gen/extra'
+  defines = -DKV_BIND_GFX_GFX_SOFT=1 -DKV_BIND_GFX_COUNT=1
+build lib/libkv_extra.a: ar_host obj/extra/extra.o
 build obj/player/unity.o: cxx_host {project}/build/{host}-dev/gen/player/unity.cc
   includes = -I'{root}/modules/base/include' -I'{project}/build/{host}-dev/gen/player' -isystem'/usr/include/fakepw-0.3' -isystem'/usr/include/fakespa-0.2' -isystem'{project}/vendor/shared/include'
   defines = -DKV_BIND_GFX_GFX_SOFT=1 -DKV_BIND_GFX_COUNT=1
@@ -127,15 +131,16 @@ build test/game.ok: run_test bin/game_tests | bin/shaders/sprite.soft bin/pkg.dl
 
 build tests: phony 
 build check: phony 
-build all: phony lib/libkv_codec.a lib/libkv_base.a bin/player tests
+build all: phony lib/libkv_codec.a lib/libkv_base.a lib/libkv_extra.a bin/player tests
 default all
 
 build codec: phony lib/libkv_codec.a
 build base: phony lib/libkv_base.a
+build extra: phony lib/libkv_extra.a
 build player: phony bin/player
 build compiler: phony bin/compiler
 build gfx: phony bin/shaders/sprite.soft
 build gfx-soft: phony lib/libkv_gfx_soft.a
 build packer: phony bin/packer
 build game: phony bin/game
-build build.ninja: regen | {root}/kormake.lua {project}/korvid.config {root}/modules/base/module.lua {root}/modules/compiler/module.lua {root}/modules/extra/module.lua {root}/modules/game/module.lua {root}/modules/gfx/module.lua {root}/modules/gfx-soft/module.lua {root}/modules/packer/module.lua {root}/modules/toolchain-cross/module.lua {root}/modules/toolchain-host/module.lua {project}/modules/codec/module.lua {project}/modules/player/module.lua {project}/pkgs/libfakepw-0.3.pc
+build build.ninja: regen | {root}/kormake.lua {project}/korvid.config {root}/modules/base/module.lua {root}/modules/compiler/module.lua {root}/modules/game/module.lua {root}/modules/gfx/module.lua {root}/modules/gfx-soft/module.lua {root}/modules/packer/module.lua {root}/modules/toolchain-cross/module.lua {root}/modules/toolchain-host/module.lua {project}/modules/codec/module.lua {project}/modules/extra/module.lua {project}/modules/player/module.lua {project}/pkgs/libfakepw-0.3.pc

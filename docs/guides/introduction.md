@@ -20,12 +20,10 @@ describes, and `kormake` on your path. The guide assumes C++ and nothing about t
 engine "../korvid"
 ```
 
-and give your module a name of its own, such as `mygame`. The engine already has a module
-called `hello` (the finished game), and kormake refuses two modules with one name:
-
-```
-kormake: module 'hello' is declared in both /home/you/code/korvid/examples/hello and /home/you/code/mygame/hello; add override "hello" { path = ... } to the master file
-```
+and put the module in `~/code/mygame/hello/`. The engine's own examples are hidden from a
+project like this one, so your `hello` and the finished one in `examples/hello/` never
+meet. Build and run from `~/code/mygame/`; the program lands in `build/linux-debug/bin/`
+there.
 
 The finished files are in `examples/hello/`. The code below is quoted from them, or is an
 earlier stage of them.
@@ -122,8 +120,6 @@ kormake hello
 ```bash
 build/linux-debug/bin/hello
 ```
-
-(From your own directory, the program is in `build/linux-debug/bin/` beside it.)
 
 A window opens, empty:
 

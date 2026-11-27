@@ -5,8 +5,12 @@ project "korvid"
 requires_kormake "1.1"
 
 -- The engine, the examples, the tools. Each of examples/ and tools/ has a korvid.config
--- that points back here, so kormake works from inside them.
-modulepath { "modules", "examples", "tools" }
+-- that points back here, so kormake works from inside them. modules/ is public: a game
+-- beside the engine builds on it. examples/ and tools/ are the engine's own: seen from
+-- inside this tree, and hidden from a project of its own (whose modules may then take any
+-- of their names), all but the cook's program, goldberg.
+modulepath { "modules" }
+modulepath { "examples", "tools", private = true }
 
 platforms { "linux", "windows", "macos", "ios", "iossim", "android", "androidemu" }
 configs   { "debug", "dev", "ship" }

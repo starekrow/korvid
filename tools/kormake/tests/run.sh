@@ -112,6 +112,11 @@ run build extra host-dev
 run KORMAKE_PKG_DIR=nowhere check host-dev
 run KORMAKE_PKG_DIR=nowhere graph host-dev
 run KORMAKE_PKG_DIR=nowhere gen host-dev
+# A private module with a public module's name: in the engine's own view, a clash.
+cp -R "$tmp/fixture/samples/demo" "$tmp/fixture/samples/base"
+sed -e 's|module "demo"|module "base"|' "$tmp/fixture/samples/demo/module.lua" >"$tmp/fixture/samples/base/module.lua"
+run gen host-dev
+rm -rf "$tmp/fixture/samples/base"
 normalize <"$out/commands.txt.raw" >"$out/commands.txt"
 rm "$out/commands.txt.raw"
 
@@ -143,6 +148,12 @@ rm "$out/commands.txt.raw"
   sed -e 's|src/decode.cc|src/nowhere.cc|' "$tmp/codec.keep" >"$codec"
   run $fake gen host-dev
   cp "$tmp/codec.keep" "$codec"
+  # A private module of the engine's is not there for a project to use.
+  player="$tmp/project/modules/player/module.lua"
+  cp "$player" "$tmp/player.keep"
+  sed -e 's|deps      = { "base", "codec" }|deps      = { "base", "codec", "demo" }|' "$tmp/player.keep" >"$player"
+  run $fake gen host-dev
+  cp "$tmp/player.keep" "$player"
   normalize <"$out/$log.raw" >"$out/$log"
   rm "$out/$log.raw"
 }

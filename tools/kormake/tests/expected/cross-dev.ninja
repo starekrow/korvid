@@ -142,6 +142,17 @@ build bin/game: link_cross obj/game/unity.o lib/libkv_gfx_soft.a lib/libkv_base.
   libs = -lpkg -lsys -L'{root}/packages/pkg/lib'
 build bin/game.pak: tool_packer_pack goldberg/game.cooked | host/bin/packer
   assets = '{root}/build/assets/game'
+build obj/codec/codec.o: cxx_cross {root}/samples/codec/src/codec.cc
+  includes = -I'{root}/build/cross-dev/gen/codec'
+  defines = -DKV_BIND_GFX_GFX_SOFT=1 -DKV_BIND_GFX_COUNT=1
+build lib/libkv_codec.a: ar_cross obj/codec/codec.o
+build obj/demo/unity.o: cxx_cross {root}/build/cross-dev/gen/demo/unity.cc
+  includes = -I'{root}/modules/base/include' -I'{root}/build/cross-dev/gen/demo'
+  defines = -DKV_BIND_GFX_GFX_SOFT=1 -DKV_BIND_GFX_COUNT=1
+build goldberg/demo.cooked: cook goldberg/demo.roots | always-cook {root}/copy_assets.sh
+  cmd = '{kormake}' _cook 'goldberg/demo.cook' 'goldberg/demo.cooked'
+build bin/demo: link_cross obj/demo/unity.o lib/libkv_base.a || bin/pkg.dll goldberg/demo.cooked
+  libs = -lpkg -lsys -L'{root}/packages/pkg/lib'
 build obj/base/tests/base_test.o: cxx_cross {root}/modules/base/tests/base_test.cc
   includes = -I'{root}/modules/base/include' -I'{root}/modules/base/tests' -isystem'{root}/packages/pkg/include'
   defines = -DBASE=1 -DKV_BIND_GFX_GFX_SOFT=1 -DKV_BIND_GFX_COUNT=1
@@ -192,4 +203,6 @@ build gfx: phony bin/shaders/sprite.soft
 build gfx-soft: phony lib/libkv_gfx_soft.a
 build packer: phony host/bin/packer
 build game: phony bin/game
-build build.ninja: regen | {root}/kormake.lua {root}/modules/base/module.lua {root}/modules/compiler/module.lua {root}/modules/extra/module.lua {root}/modules/game/module.lua {root}/modules/gfx/module.lua {root}/modules/gfx-soft/module.lua {root}/modules/packer/module.lua {root}/modules/toolchain-cross/module.lua {root}/modules/toolchain-host/module.lua
+build codec: phony lib/libkv_codec.a
+build demo: phony bin/demo
+build build.ninja: regen | {root}/kormake.lua {root}/modules/base/module.lua {root}/modules/compiler/module.lua {root}/modules/extra/module.lua {root}/modules/game/module.lua {root}/modules/gfx/module.lua {root}/modules/gfx-soft/module.lua {root}/modules/packer/module.lua {root}/modules/toolchain-cross/module.lua {root}/modules/toolchain-host/module.lua {root}/samples/codec/module.lua {root}/samples/demo/module.lua
