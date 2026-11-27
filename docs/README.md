@@ -8,12 +8,15 @@ is this" to the exact function you need. Every page links one level deeper.
 
 1. **[The project README](../README.md)**: what the engine is, and how to build it and
    run the examples.
-2. **[Frame loops and scheduling](guides/frame-loop-and-scheduling.md)**: what happens
-   between `main` and the screen, and how the engine decides when your code runs. Read
-   this before writing a system.
-3. **[Modules](concepts/modules.md)**: what a module declares and how to write one: a
+2. **[An introduction to Korvid](guides/introduction.md)**: build a small game step by
+   step, from an empty module to a sprite that answers the keyboard: modules, the window,
+   the frame loop, systems and scheduling, events and timers.
+3. **[Frame loops and scheduling](guides/frame-loop-and-scheduling.md)**: what happens
+   between `main` and the screen, and how the engine decides when your code runs, in
+   depth. Read this before writing a game of your own.
+4. **[Modules](concepts/modules.md)**: what a module declares and how to write one: a
    component, a ktable, a system, a handler, timers and triggers.
-4. **Read a game.** [testbed](../examples/testbed/README.md) is the smallest one that
+5. **Read a game.** [testbed](../examples/testbed/README.md) is the smallest one that
    uses everything once. [rocks](../examples/rocks/README.md) is a whole game written the
    way the engine likes.
 
@@ -126,6 +129,7 @@ them for the target.
 
 | example | shows |
 |---|---|
+| [hello](../examples/hello/README.md) | the game [the introduction](guides/introduction.md) builds: one sprite, steered, that pulses on a key; a system, events, a handler, a timer |
 | [testbed](../examples/testbed/README.md) | the smallest game that uses everything once: a ktable, a view system, a handler, timers, a ticketed spawn, a trigger, assets |
 | [rocks](../examples/rocks/README.md) | an asteroids-like written the way the engine likes: declared sets, handlers, timers, a trigger |
 | [stones](../examples/stones/README.md) | the same game written the other way round, as you might on another engine |

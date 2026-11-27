@@ -7,7 +7,8 @@ the [module catalog](README.md#modules) has everything.
 ## Getting going
 
 - **Build the engine and run an example:** [the project README](../README.md#quick-start), then [kormake](../tools/kormake/README.md)
-- **Start a new game:** [frameloop](../modules/frameloop/README.md#using-it), `FrameLoopConfig`, `frameloop_main`
+- **Learn the engine by building a small game:** [An introduction to Korvid](guides/introduction.md)
+- **Start a new game:** [An introduction to Korvid](guides/introduction.md#1-a-module), `FrameLoopConfig`, `frameloop_main`
 - **Keep my game in its own repository:** [Modules](concepts/modules.md#the-files), `korvid.config`
 - **Write a module:** [Modules](concepts/modules.md#writing-one), `ModuleDesc`, `KV_MODULE_DEFINE`
 - **Write a command-line tool on the engine:** [tool](../modules/tool/README.md), `tool_main`, `tool_finish`

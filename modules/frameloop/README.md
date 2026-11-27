@@ -239,6 +239,8 @@ map). The game owns those, on top of what the loop provides.
 
 ## Seen in
 
+- [hello](../../examples/hello/README.md): the smallest config; `ExitRequested` handled in
+  `on_exit`, without which nothing quits.
 - [rocks](../../examples/rocks/README.md): a config with heaps and a touch layout;
   `ExitRequested` handled in `on_exit`; `--demo` as a declared flag.
 - [arcfire](../../examples/arcfire/README.md): options (`--dial`), `recorded_actions`,
