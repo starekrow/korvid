@@ -173,7 +173,10 @@ each event was made (`GetMessagePos` on Win32, SDL's global state), which is wha
 that moves a window must go by: the pointer's place in the window moves as the window does,
 and a drag that adds it to the window's place runs away. `platform_can_place(e)` is false on
 Wayland, which gives a client no place and takes none, and on a phone; there `position` and
-`move_to` refuse and nothing is sent. Snapping and following are the program's:
+`move_to` refuse and nothing is sent. `position` is the place the OS last said: a move asked
+has not landed by the next line, nor always by the next frame (X11 answers when the server
+has moved it), so a program that moves one window by another's travel keeps the offset
+between them and does not add travel to `position`. Snapping and following are the program's:
 `window --snap` drags two windows by its own hand, snaps the second to the first and moves
 it with it.
 

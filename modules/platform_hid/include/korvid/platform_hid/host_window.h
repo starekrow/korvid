@@ -211,6 +211,7 @@ struct HostWindow {
     // height() are (across displays of different scales they are this window's scale's).
     // The window's top-left there: its client area's, which a frameless window's is. False
     // where the platform gives a program no position (Wayland, a phone): platform_can_place.
+    // It is the place the OS last said, so a move_to just asked is not in it yet.
     bool position(i32* x, i32* y) const;
     // Moves the window's top-left to (x, y). It lands at the window's next turn, and
     // WindowMoved says where. False where the platform does not let a program place it.

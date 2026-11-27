@@ -134,6 +134,8 @@ struct Snap {
     u32         which = 0;
     i32         grab_x = 0, grab_y = 0;     // the pointer on the desktop at the press, less the window's place
     bool        attached = false;           // the follower moves with the leader
+    i32         off_x = 0, off_y = 0;       // where it is from the leader's top-left, attached
+    i32         asked_x = 0, asked_y = 0;   // where the drag last asked its window to be
     i32         leader_x = 0, leader_y = 0; // the leader's place, as last heard
     u32         follows = 0;                // moves the follower made with the leader
 };
@@ -182,9 +184,13 @@ void snap_frame(Snap& sn) {
         sn.which = i;
         sn.grab_x = (i32)m.desktop_x - px0;
         sn.grab_y = (i32)m.desktop_y - py0;
+        sn.asked_x = px0;
+        sn.asked_y = py0;
         sn.w[i]->capture_mouse(true);
     }
-    if (sn.dragging && down) {
+    // The release's frame too: the release carries the pointer's last place, and a drag that
+    // stopped at the last move before it can drop the window a step short (seen on X11).
+    if (sn.dragging && (down || sn.was_down)) {
         HostWindow& w = *sn.w[sn.which];
         i32 wx = 0, wy = 0;
         if (w.position(&wx, &wy)) {
@@ -202,6 +208,8 @@ void snap_frame(Snap& sn) {
                     if (hit) { bool left = false; tx = snap_to(tx, lx, &left); }
                 }
                 sn.attached = hit;
+                sn.off_x = tx - lx;
+                sn.off_y = ty - ly;
             }
             rect2 db;
             if (!hit && platform_display_bounds(*sn.e, &w, &db)) { // the display's work area
@@ -212,14 +220,16 @@ void snap_frame(Snap& sn) {
                 ty = snap_to(ty + wh, (i32)(db.y + db.h), &edge) - wh;
             }
             if (tx != wx || ty != wy) w.move_to(tx, ty);
+            sn.asked_x = tx;
+            sn.asked_y = ty;
         }
     }
     if (!down && sn.was_down && sn.dragging) {
         sn.dragging = false;
         sn.w[sn.which]->capture_mouse(false);
-        i32 x = 0, y = 0;
-        sn.w[sn.which]->position(&x, &y);
-        KV_INFO("window", "snap: window %u dropped at %d, %d%s", sn.w[sn.which]->id(), x, y,
+        // Where it was asked to be: position() is what the OS last said, and the last move
+        // may not have landed yet.
+        KV_INFO("window", "snap: window %u dropped at %d, %d%s", sn.w[sn.which]->id(), sn.asked_x, sn.asked_y,
                 sn.which == 1 ? (sn.attached ? ", snapped to the leader: it follows" : ", on its own") : "");
     }
     sn.was_down = down;
@@ -233,8 +243,10 @@ void on_window_moved(TickContext&, Span<const WindowMoved> evs) {
         sn.leader_x = mv.x;
         sn.leader_y = mv.y;
         if (!sn.attached || (sn.dragging && sn.which == 1) || (!dx && !dy)) continue;
-        i32 fx = 0, fy = 0;
-        if (sn.w[1]->position(&fx, &fy) && sn.w[1]->move_to(fx + dx, fy + dy)) ++sn.follows;
+        // By its offset from the leader, not by its own place plus the leader's travel: a
+        // move asked has not landed by the next one (position() is the place last heard), so
+        // travel added to it loses what is still on its way. Seen on X11: 104 px of 150.
+        if (sn.w[1]->move_to(mv.x + sn.off_x, mv.y + sn.off_y)) ++sn.follows;
     }
 }
 
