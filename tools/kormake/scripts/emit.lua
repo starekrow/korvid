@@ -1025,9 +1025,9 @@ function M.run(c, g, opts)
       -- find it with test_source_path), listed beside the test after the root, for a
       -- runner on a device that has no source tree (ios.lua copies each into the app).
       if m.fields.test_files then
-        local lines = { c.base_dir }
+        local lines = { c.root_dir }
         for _, rel in ipairs(util.as_list(m.fields.test_files)) do
-          local abs = util.join(c.base_dir, rel)
+          local abs = util.join(c.root_dir, rel)
           if not kfs.isfile(abs) and not kfs.isdir(abs) then util.fail("%s: test_files names '%s', which is not in the source tree", m.name, rel) end
           lines[#lines + 1] = rel
         end
