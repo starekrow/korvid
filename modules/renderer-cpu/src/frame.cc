@@ -334,6 +334,12 @@ bool prepare_ui(Renderer* r, const UiView& v, const u8* region, const u8* item, 
                                   0.213f - c * 0.213f - sn * 0.787f, 0.715f - c * 0.715f + sn * 0.715f, 0.072f + c * 0.928f + sn * 0.072f};
                 memcpy(u.hue_m, m, sizeof m);
                 u.sat = float_at(item + 120);
+                u.masked = (head & (1u << 23)) != 0;
+                if (u.masked) {
+                    u.mask = texture_of(r, word_at(item + 124));
+                    u.mask_key = word_at(item + 128);
+                    for (u32 k = 0; k < 4; ++k) u.mask_rect[k] = float_at(item + 132 + 4 * k);
+                }
             }
             // fs_ui's hold: half a texel inside the uv rect.
             f32 hw = 0.5f / (f32)(u.tex.width ? u.tex.width : 1), hh = 0.5f / (f32)(u.tex.height ? u.tex.height : 1);

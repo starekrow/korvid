@@ -427,7 +427,8 @@ struct KromeModule {
     // a shared mask's RGBA (and a palette image's indexes), or an image's own alpha alone for
     // `mask-alpha` (`alpha`). Read as a blob, or from what krome_provide gave; `state` 0 while
     // it loads, 1 ready, 2 failed (said once).
-    struct Mask { Name path; bool alpha; Handle blob; u8 state; u32 w, h; u8* px; u8* index; };
+    // `tex` and `tex_index` are its pixels for the renderer, made when a look first needs them.
+    struct Mask { Name path; bool alpha; Handle blob; u8 state; u32 w, h; u8* px; u8* index; Handle tex, tex_index; };
     Array<Mask>         masks;
     u32                 next_timer = 1;
     u32                 lua_screen = 0; // the screen a behaviour's call (or a timer's) is for, while it runs
@@ -702,6 +703,13 @@ void krome_free_view(KromeModule& s);
 // `alpha`: an image's own alpha, a byte a pixel; else RGBA and, for a palette image, indexes.
 const KromeModule::Mask* krome_mask(KromeModule& s, Name path, bool alpha);
 void krome_masks_pump(KromeModule& s); // what has landed, decoded
+// A shared mask as the renderer's texture, its bytes as they are (a palette's indexes in red,
+// with `index`): made the first time it is asked for. 0 until it has landed, or with no renderer.
+u32 krome_mask_slot(KromeModule& s, Renderer* r, Name path, bool index);
+// A look computed from the pixels confined to where the node's share of the mask above it
+// (`mask`, over `mask_rect`) is its own (KR33): the box's mask words, or no computed look at
+// all while the mask is not in. Nothing for a node that is no share of a mask.
+void krome_confine(KromeModule& s, Renderer* r, Name mask, rect2 mask_rect, const KromeNode& n, UiBox& b);
 void krome_free_masks(KromeModule& s);
 
 // ---- shapes (shapes.cc) ----

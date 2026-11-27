@@ -6,11 +6,13 @@
 //   glyph:  head, slot, color, rect x y w h, uv0, uv1                         (9 words)
 //   box:    head, slot, fill, fill2, border color, shadow color, rect x y w h,
 //           radii tl tr br bl, border, angle, shadow x y, blur, spread, uv0 x y, uv1 x y,
-//           tile x y, gain r g b, hue (radians), saturation  (31 words)
+//           tile x y, gain r g b, hue (radians), saturation, mask slot, mask key,
+//           mask rect x y w h  (37 words)
 //
 // head: bits 0-1 the kind (0 box, 1 glyph), 2-17 the clip, 18 a gradient, 19 textured,
 // 20 sampled nearest (a glyph's too), 21 tiled (the uv rect repeated every `tile` pixels from the rect's
-// top left), 22 adjusted (the texel's hue, saturation and gain, before the fill multiplies it). Colors are RGBA8 sRGB with straight alpha; a glyph's uvs two unorm16s,
+// top left), 22 adjusted (the texel's hue, saturation and gain, before the fill multiplies it), 23 masked (adjusted only where the mask texture,
+// stretched over the mask rect and sampled nearest, is the key: 0xRRGGBB, or with the key's bit 24 its red channel the low byte). Colors are RGBA8 sRGB with straight alpha; a glyph's uvs two unorm16s,
 // a box's floats. Pixels have their origin at
 // the window's top left, y down; the window's size is the push block's screen_cull.zw.
 // The output is premultiplied: the pipeline blends one, one minus source alpha.
@@ -30,7 +32,7 @@ static const float2 kQuad[6] = {
 };
 
 static const uint kKindBox = 0u, kKindGlyph = 1u;
-static const uint kBoxGradient = 1u << 18, kBoxTextured = 1u << 19, kBoxNearest = 1u << 20, kBoxTile = 1u << 21, kBoxAdjust = 1u << 22;
+static const uint kBoxGradient = 1u << 18, kBoxTextured = 1u << 19, kBoxNearest = 1u << 20, kBoxTile = 1u << 21, kBoxAdjust = 1u << 22, kBoxMasked = 1u << 23;
 
 struct UiVaryings {
     float4 pos : SV_Position;
@@ -66,6 +68,19 @@ float3 ui_adjust(float3 c, float3 gain, float hue, float sat) {
     float lum = dot(r, float3(0.213, 0.715, 0.072));
     r = lum + (r - lum) * sat;
     return saturate(r * gain);
+}
+
+// Whether a box's pixel is where its look's mask is its own: the mask's texel there (nearest,
+// stretched over the mask rect) is the key; outside the rect it is not.
+bool ui_in_mask(uint item, float2 px) {
+    float4 mr = ui_float4(item + 132u);
+    float2 at = (px - mr.xy) / max(mr.zw, float2(1e-6, 1e-6));
+    if (at.x < 0.0 || at.y < 0.0 || at.x >= 1.0 || at.y >= 1.0) return false;
+    uint slot = ui_word(item + 124u), key = ui_word(item + 128u);
+    float4 m = gTextures[NonUniformResourceIndex(slot)].Sample(gSamplers[0u], at);
+    uint3 b = uint3(round(saturate(m.rgb) * 255.0));
+    if ((key >> 24) != 0u) return b.r == (key & 255u);
+    return ((b.r << 16) | (b.g << 8) | b.b) == (key & 0xFFFFFFu);
 }
 
 // The signed distance from a rounded rectangle centered at the origin with half size b and
@@ -177,7 +192,9 @@ float4 fs_ui(UiVaryings i) : SV_Target {
         float2 uv = clamp(lerp(uv0, uv1, at), lo, hi);
         uint sampler = (head & kBoxNearest) != 0u ? 0u : 1u;
         float4 t = gTextures[NonUniformResourceIndex(slot)].Sample(gSamplers[sampler], uv);
-        if ((head & kBoxAdjust) != 0u) t.rgb = ui_adjust(t.rgb, float3(ui_float2(i.item + 104u), ui_float(i.item + 112u)), ui_float(i.item + 116u), ui_float(i.item + 120u));
+        bool adjust = (head & kBoxAdjust) != 0u;
+        if (adjust && (head & kBoxMasked) != 0u) adjust = ui_in_mask(i.item, i.px);
+        if (adjust) t.rgb = ui_adjust(t.rgb, float3(ui_float2(i.item + 104u), ui_float(i.item + 112u)), ui_float(i.item + 116u), ui_float(i.item + 120u));
         fill = float4(fill.rgb * t.rgb, fill.a) * t.a;
     }
     float4 edge = ui_color(ui_word(i.item + 16u));

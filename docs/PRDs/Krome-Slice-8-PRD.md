@@ -411,3 +411,31 @@ In review of the draft (Nov 26):
   the same map named twice, one copy; a 4 x 4 round button whose clear corners fall through
   to the box under it, the middle its own; hovered on its shape and not its corner, with its
   `hover { gain=1.2 }`. `image_tests`: the indexes of the 4-bit palette fixture, none for gray.
+
+**Milestone 6, Looks in masks** (Nov 26).
+
+- **The UI item's six words**: the mask's slot, its key (0xRRGGBB, or the low byte with bit 24
+  for the red channel alone) and the rect it is stretched over; a box is 37 words, and head bit
+  23 says a computed look is confined. Only a box with a computed look and a mask sets it;
+  every other box takes the path it took, its six words zero. `ui_in_mask` in `ui.slang`
+  samples the mask nearest where the pixel falls in its rect and compares its bytes (rounded
+  from the UNORM sample); the CPU renderer reads the same texel's bytes (`CpuUi::mask`).
+- **The mask as a texture** (`krome_mask_slot`): RGBA8_UNORM, so it is matched exactly, from the
+  CPU copy M5 already holds; a palette's indexes as a texture of their own, in red. Made the
+  first time a look needs it, destroyed at shutdown.
+- **In Krome**, paint carries the nearest `mask=` and its rect down the tree as the hit test
+  does, and `krome_confine` sets a box's mask words wherever a share's computed look is put on a
+  box (its image, its fit's pieces, a shape). Until the mask has landed the look applies
+  nowhere, not everywhere.
+- **Shown.** The gallery's `ui` scene: the sheet's cell greyed only where a 2x2 mask is red (two
+  quadrants), and only where its red channel is 90 (one). Vulkan and the CPU renderer draw the
+  two boxes alike; their `ui` references are remade, the other nine pictures unchanged, and the
+  two sets differ in the same 33 pixels as before. Render-gate on Linux, Vulkan and CPU: see
+  below.
+- **Tested.** `render_tests`: the words, the red channel's form, none without a computed look.
+  `renderer_cpu_tests`: a box at half its gain over a red-and-green map, halved only on red, and
+  by the red channel the other way about. `krome_tests`: `krome_confine` with the CPU renderer,
+  a colour's texture made once and shared, an index's its own, nothing for a box with no
+  computed look, no look before the mask is in, nothing for a node that is no share.
+- **Not verified:** Metal and D3D12 (their `ui` references were already stale since slice 7).
+

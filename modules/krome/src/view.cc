@@ -395,6 +395,8 @@ struct Paint {
     u32               hovered[KROME_MAX_DEPTH + 1] = {};
     u32               hovered_n = 0;
     u32               pressed = KROME_NONE;
+    Name              mask;        // the nearest mask= above the node being painted (KR33)
+    rect2             mask_rect;   // and the rect it is stretched over, physical pixels
 };
 
 color faded(color c, f32 o) { c.a *= o; return c; }
@@ -602,7 +604,7 @@ color times(color a, color b) { return color{a.r * b.r, a.g * b.g, a.b * b.b, a.
 // A shape image: rasterized at the box's pixels (shapes.cc). One colour: drawn white, the box
 // tinted by the text colour and the tint. Coloured: rasterized in the text colour; while its
 // colour eases, the rasterizations of the two ends cross-faded.
-void computed(UiBox& b, const KromeLook& l);
+void computed(Paint& p, const KromeNode& n, UiBox& b, const KromeLook& l);
 
 void paint_shape(Paint& p, u32 node, const KromeNode& n, const KromeLook& l, rect2 r, KromeImage& ki, const ShapeAsset& shape, u32 clip) {
     UiBox b;
@@ -612,7 +614,7 @@ void paint_shape(Paint& p, u32 node, const KromeNode& n, const KromeLook& l, rec
     if (shape.one_colour) {
         if (!krome_shape_box(p.s, p.r, shape, ki.asset, w, h, color{1, 1, 1, 1}, b)) return;
         b.fill = faded(times(l.text_color, l.tint), l.opacity);
-        computed(b, l); p.list.box(b);
+        computed(p, n, b, l); p.list.box(b);
         return;
     }
     // Coloured: an easing colour is two rasterizations, cross-faded.
@@ -622,20 +624,21 @@ void paint_shape(Paint& p, u32 node, const KromeNode& n, const KromeLook& l, rec
         if (k <= 0.0f || k >= 1.0f || (a.from.text.r == a.to.text.r && a.from.text.g == a.to.text.g && a.from.text.b == a.to.text.b && a.from.text.a == a.to.text.a)) break;
         k = k * k * (3.0f - 2.0f * k);
         UiBox from = b;
-        if (krome_shape_box(p.s, p.r, shape, ki.asset, w, h, a.from.text, from)) { from.fill = faded(l.tint, l.opacity * (1.0f - k)); computed(from, l); p.list.box(from); }
-        if (krome_shape_box(p.s, p.r, shape, ki.asset, w, h, a.to.text, b)) { b.fill = faded(l.tint, l.opacity * k); computed(b, l); p.list.box(b); }
+        if (krome_shape_box(p.s, p.r, shape, ki.asset, w, h, a.from.text, from)) { from.fill = faded(l.tint, l.opacity * (1.0f - k)); computed(p, n, from, l); p.list.box(from); }
+        if (krome_shape_box(p.s, p.r, shape, ki.asset, w, h, a.to.text, b)) { b.fill = faded(l.tint, l.opacity * k); computed(p, n, b, l); p.list.box(b); }
         return;
     }
     if (!krome_shape_box(p.s, p.r, shape, ki.asset, w, h, l.text_color, b)) return;
     b.fill = faded(l.tint, l.opacity);
-    computed(b, l); p.list.box(b);
+    computed(p, n, b, l); p.list.box(b);
 }
 
 // A look computed from the image's pixels (gain, hue, saturation) onto a box that draws it.
-void computed(UiBox& b, const KromeLook& l) {
+void computed(Paint& p, const KromeNode& n, UiBox& b, const KromeLook& l) {
     memcpy(b.gain, l.gain, sizeof b.gain);
     b.hue = l.hue;
     b.saturation = l.saturation;
+    krome_confine(p.s, p.r, p.mask, p.mask_rect, n, b);
 }
 
 // The frame a strip node shows now. Still: the one its look names. Playing (fps > 0): where
@@ -727,7 +730,7 @@ void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u3
             b.uv = pieces.uv[0];
             b.tile = pieces.tile;
             b.nearest = l.pixel;
-            computed(b, l);
+            computed(p, n, b, l);
             if (!fill) b.fill = faded(l.tint, l.opacity);
         }
         b.clip = clip;
@@ -741,7 +744,7 @@ void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u3
                 pb.textured = true;
                 pb.texture = p.r ? renderer_texture_slot(p.r, img->texture) : 0;
                 pb.nearest = l.pixel;
-                computed(pb, l);
+                computed(p, n, pb, l);
                 pb.fill = faded(l.tint, l.opacity);
                 pb.clip = pc;
                 p.list.box(pb);
@@ -757,7 +760,12 @@ void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u3
         clip_rect = intersect(clip_rect, r);
         clip = p.list.clip(clip_rect);
     }
+    Name was_mask = p.mask;
+    rect2 was_mask_rect = p.mask_rect;
+    if (!n.mask.is_null()) { p.mask = n.mask; p.mask_rect = r; }
     for (u32 ch = n.first; ch != KROME_NONE; ch = p.tree.nodes[ch].next) paint_node(p, ch, &l, clip_rect, clip);
+    p.mask = was_mask;
+    p.mask_rect = was_mask_rect;
     // A scroll box's bars, over its content.
     if (!(n.flags & (KROME_SCROLL | KROME_SCROLL_X | KROME_SCROLL_Y))) return;
     const KromeLook& bl = p.tree.looks[n.look];
@@ -961,7 +969,7 @@ void pointer_states(Paint& p) {
 
 void paint_tree(KromeModule& s, KromeScreen& sc, const KromeTree& t, u32 overlay, UiList& list) {
     if (t.root == KROME_NONE) return;
-    Paint p{s, sc, t, list, renderer_get(*s.e), overlay, {}, 0, KROME_NONE};
+    Paint p{s, sc, t, list, renderer_get(*s.e), overlay, {}, 0, KROME_NONE, Name{}, rect2{}};
     pointer_states(p);
     for (KromeModule::Play& pl : s.plays) if (pl.screen == sc.id && pl.overlay == overlay) pl.seen = false;
     for (KromeModule::Marquee& m : s.marquees) if (m.screen == sc.id && m.overlay == overlay) m.seen = false;
@@ -2145,7 +2153,7 @@ const KromeModule::Mask* krome_mask(KromeModule& s, Name path, bool alpha) {
     if (path.is_null() || !name_str(path)[0]) return nullptr;
     for (KromeModule::Mask& m : s.masks) if (m.path == path && m.alpha == alpha) return m.state == 1 ? &m : nullptr;
     s.masks.alloc = s.general;
-    s.masks.push(KromeModule::Mask{path, alpha, Handle{}, 0, 0, 0, nullptr, nullptr});
+    s.masks.push(KromeModule::Mask{path, alpha, Handle{}, 0, 0, 0, nullptr, nullptr, Handle{}, Handle{}});
     krome_masks_pump(s); // given from memory, or already read: at once
     KromeModule::Mask& m = s.masks.last();
     return m.state == 1 ? &m : nullptr;
@@ -2169,8 +2177,58 @@ void krome_masks_pump(KromeModule& s) {
     }
 }
 
+u32 krome_mask_slot(KromeModule& s, Renderer* r, Name path, bool index) {
+    if (!r) return 0;
+    const KromeModule::Mask* found = krome_mask(s, path, false);
+    if (!found) return 0;
+    KromeModule::Mask& m = const_cast<KromeModule::Mask&>(*found);
+    if (index && !m.index) return 0; // not a palette image: no index matches
+    Handle& h = index ? m.tex_index : m.tex;
+    if (h.is_null()) {
+        TextureDesc d;
+        d.format = TextureFormat::RGBA8_UNORM; // its bytes as they are, to be matched exactly
+        d.name = name_str(m.path);
+        h = renderer_texture_create(r, d);
+        if (h.is_null()) return 0;
+        usize n = (usize)m.w * m.h;
+        if (index) {
+            // The indexes in red, as a value's mask has its numbers.
+            MemScope scope;
+            u8* px = (u8*)alloc_in(mem_scratch(), n * 4, 4);
+            for (usize i = 0; i < n; ++i) { px[i * 4] = m.index[i]; px[i * 4 + 1] = px[i * 4 + 2] = 0; px[i * 4 + 3] = 255; }
+            renderer_texture_upload(r, h, m.w, m.h, px, n * 4);
+        } else {
+            renderer_texture_upload(r, h, m.w, m.h, m.px, n * 4);
+        }
+    }
+    return renderer_texture_slot(r, h);
+}
+
+void krome_confine(KromeModule& s, Renderer* r, Name mask, rect2 mask_rect, const KromeNode& n, UiBox& b) {
+    if (n.mask_match == KromeMaskMatch::None) return;
+    bool adjust = b.gain[0] != 1.0f || b.gain[1] != 1.0f || b.gain[2] != 1.0f || b.hue != 0.0f || b.saturation != 1.0f;
+    if (!adjust) return;
+    u32 slot = mask.is_null() ? 0 : krome_mask_slot(s, r, mask, n.mask_match == KromeMaskMatch::Index);
+    if (!slot) {
+        // Nowhere its own until the mask is in (or never, with no renderer to hold it).
+        b.gain[0] = b.gain[1] = b.gain[2] = 1.0f;
+        b.hue = 0.0f;
+        b.saturation = 1.0f;
+        return;
+    }
+    b.mask = slot;
+    b.mask_rect = mask_rect;
+    b.mask_key = n.mask_key;
+    b.mask_red = n.mask_match != KromeMaskMatch::Color;
+}
+
 void krome_free_masks(KromeModule& s) {
-    for (KromeModule::Mask& m : s.masks) free_mask(s, m);
+    Renderer* r = s.e ? renderer_get(*s.e) : nullptr;
+    for (KromeModule::Mask& m : s.masks) {
+        if (r && !m.tex.is_null()) renderer_texture_destroy(r, m.tex);
+        if (r && !m.tex_index.is_null()) renderer_texture_destroy(r, m.tex_index);
+        free_mask(s, m);
+    }
     s.masks.free();
 }
 

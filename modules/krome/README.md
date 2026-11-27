@@ -383,6 +383,12 @@ rect and a mask's share is nowhere. A share with no `mask=` above it, and `mask-
 what is not an image, are errors. Capture, the release and Tab follow the node as before;
 the window's grips still see rects.
 
+A share's computed look (`gain`, `hue`, `saturation`: `hover { gain=1.2 }` on a masked
+button) applies only where the mask is its own: Krome uploads the mask once as the renderer's
+texture, its bytes as they are (a palette's indexes in red), and the box carries its slot, its
+rect and the key (`UiBox::mask`). The texel drawn elsewhere is as it was; while the mask is
+not in, the look applies nowhere.
+
 **Images and shapes.** `image="hero.png"` draws a texture. A path ending `.svg` (or
 `.kshape`) draws a shape: the svg module's cook of it, rasterized by patherizer at the node's
 pixel size (logical size times the scale), measured at its view box unless `w` or `h` says

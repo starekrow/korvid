@@ -224,6 +224,40 @@ void test_region(TestCtx& c) {
     KV_CHECK(c, twice[2] == 255 && twice[1] == 0 && twice[0] == 0);
     if (!(grey[2] > 100 && grey[2] < 140) || !(half[2] >= 186 && half[2] <= 189))
         KV_ERROR("test", "grey %u %u %u, turned %u %u %u, half %u, twice %u", grey[2], grey[1], grey[0], turned[2], turned[1], turned[0], half[2], twice[2]);
+    // Confined to a mask (Krome slice 8, KR33): a 2 x 1 map, red then green, its bytes as they
+    // are (UNORM), over an 8 x 6 box at half its gain: halved where the map is red, the left
+    // half; as drawn where it is green; and by the red channel alone, the other way about.
+    {
+        const u8 map[8] = {255, 0, 0, 255, 0, 255, 0, 255};
+        TextureDesc md;
+        md.format = TextureFormat::RGBA8_UNORM;
+        md.name = "test.mask";
+        Handle mt = rb_cpu::renderer_texture_create(r, md);
+        KV_CHECK(c, rb_cpu::renderer_texture_upload(r, mt, 2, 1, map, sizeof map));
+        KV_CHECK(c, rb_cpu::renderer_render(r, v)); // the upload lands
+        ui.clear();
+        for (u32 i = 0; i < 2; ++i) {
+            UiBox mb;
+            mb.rect = rect2{(f32)(i * 16), 8, 8, 6};
+            mb.fill = color{1, 1, 1, 1};
+            mb.textured = true;
+            mb.texture = rb_cpu::renderer_texture_slot(r, t);
+            mb.uv = rect2{4.0f / 12.0f, 0, 4.0f / 12.0f, 1};
+            mb.gain[0] = mb.gain[1] = mb.gain[2] = 0.5f;
+            mb.mask = rb_cpu::renderer_texture_slot(r, mt);
+            mb.mask_rect = mb.rect;
+            mb.mask_key = i == 0 ? 0xFF0000u : 0x00u; // the second: red channel 0, the green texel
+            mb.mask_red = i == 1;
+            ui.box(mb);
+        }
+        rb_cpu::renderer_ui_set(r, 0, ui);
+        KV_CHECK(c, rb_cpu::renderer_render(r, v));
+        auto red_at = [&](u32 x) { return r->headless.data[(10 * 64 + x) * 4 + 2]; };
+        KV_CHECK(c, red_at(1) >= 186 && red_at(1) <= 189 && red_at(6) == 255);
+        KV_CHECK(c, red_at(17) == 255 && red_at(22) >= 186 && red_at(22) <= 189);
+        if (!(red_at(1) <= 189 && red_at(6) == 255 && red_at(17) == 255 && red_at(22) <= 189))
+            KV_ERROR("test", "masked: %u %u, by red: %u %u", red_at(1), red_at(6), red_at(17), red_at(22));
+    }
     ui.free();
     rb_cpu::renderer_destroy(r);
     engine_shutdown(e);

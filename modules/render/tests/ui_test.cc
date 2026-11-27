@@ -45,7 +45,7 @@ void test_ui_lists(kv::TestCtx& c) {
     g.clip = 99; // no such clip: none
     g.nearest = true;
     list.glyph(g);
-    KV_CHECK(c, list.count() == 2 && list.words.len == 31 + 9 && list.offsets[1] == 31);
+    KV_CHECK(c, list.count() == 2 && list.words.len == 37 + 9 && list.offsets[1] == 37);
 
     RenderWorld w;
     KV_CHECK(c, rw_init(w, mem_general()));
@@ -57,7 +57,7 @@ void test_ui_lists(kv::TestCtx& c) {
     u32 clips_at = word(l, 8);
     KV_CHECK(c, word(l, 0) == 2 && word(l, 4) == 2 && clips_at % 16 == 0 && clips_at >= 16 + 8);
     u32 box = word(l, 16), glyph = word(l, 20);
-    KV_CHECK(c, box == clips_at + 32 && glyph == box + 124);
+    KV_CHECK(c, box == clips_at + 32 && glyph == box + 148);
     KV_CHECK(c, fword(l, clips_at + 16) == 10.0f && fword(l, clips_at + 28) == 200.0f);
     u32 head = word(l, box);
     KV_CHECK(c, (head & 3) == 0 && ((head >> 2) & 0xFFFF) == 1 && (head & (1u << 18)) && !(head & (1u << 19)));
@@ -85,6 +85,29 @@ void test_ui_lists(kv::TestCtx& c) {
         memcpy(&g0, &t.words[26], 4); memcpy(&g2, &t.words[28], 4); memcpy(&sat, &t.words[30], 4);
         KV_CHECK(c, (t.words[0] & (1u << 22)) && g0 == 1.5f && g2 == 0.5f && h > 3.1415f && h < 3.1417f && sat == 0.25f);
         KV_CHECK(c, !(t.words[t.offsets[1]] & (1u << 22)));
+        // No mask: no bit 23, and the mask's words empty.
+        KV_CHECK(c, !(t.words[0] & (1u << 23)) && t.words[31] == 0 && t.words[32] == 0);
+        // Confined to a mask (slice 8): bit 23, its slot, its key, its rect; with the red
+        // channel alone, bit 24 and the key's low byte. Without a computed look, none of it.
+        UiBox mb = tb;
+        mb.mask = 9;
+        mb.mask_key = 0xFF8000u;
+        mb.mask_rect = rect2{4, 6, 40, 20};
+        t.box(mb);
+        mb.mask_red = true;
+        mb.mask_key = 0x123456u;
+        t.box(mb);
+        UiBox flat;
+        flat.textured = true;
+        flat.mask = 9;
+        t.box(flat);
+        const u32* m0 = &t.words[t.offsets[2]];
+        const u32* m1 = &t.words[t.offsets[3]];
+        f32 mx, mw;
+        memcpy(&mx, &m0[33], 4); memcpy(&mw, &m0[35], 4);
+        KV_CHECK(c, (m0[0] & (1u << 23)) && m0[31] == 9 && m0[32] == 0xFF8000u && mx == 4.0f && mw == 40.0f);
+        KV_CHECK(c, (m1[0] & (1u << 23)) && m1[32] == (0x56u | 1u << 24));
+        KV_CHECK(c, !(t.words[t.offsets[4]] & (1u << 23)) && t.words[t.offsets[4] + 31] == 0);
         t.free();
     }
     KV_CHECK(c, (head & (1u << 20)) && fword(l, box + 80) == 0.25f && fword(l, box + 84) == 0.5f && fword(l, box + 88) == 0.375f && fword(l, box + 92) == 0.75f);

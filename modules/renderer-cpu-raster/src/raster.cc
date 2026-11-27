@@ -396,7 +396,20 @@ inline void box_color(const CpuUi& u, const CpuLuts& lut, f32 x, f32 y, f32 out[
         sample(u.tex, u.nearest ? 0 : 1, lut, su, sv, t);
         f32 ta = (f32)t[3] / 65535.0f;
         f32 tc[3] = {(f32)t[0] / 65535.0f, (f32)t[1] / 65535.0f, (f32)t[2] / 65535.0f};
-        if (u.adjust) {
+        bool adjust = u.adjust != 0;
+        if (adjust && u.masked) {
+            // ui_in_mask: the mask's texel under the pixel, nearest, its bytes as they are.
+            f32 mx = (x - u.mask_rect[0]) / max_f(u.mask_rect[2], 1e-6f), my = (y - u.mask_rect[1]) / max_f(u.mask_rect[3], 1e-6f);
+            adjust = false;
+            if (mx >= 0.0f && my >= 0.0f && mx < 1.0f && my < 1.0f && u.mask.pixels && u.mask.width && u.mask.height) {
+                u32 tx = (u32)floor_i(mx * (f32)u.mask.width), ty = (u32)floor_i(my * (f32)u.mask.height);
+                if (tx >= u.mask.width) tx = u.mask.width - 1;
+                if (ty >= u.mask.height) ty = u.mask.height - 1;
+                const u8* m = u.mask.pixels + ((usize)ty * u.mask.width + tx) * 4;
+                adjust = (u.mask_key >> 24) ? m[0] == (u.mask_key & 255u) : ((u32)m[0] << 16 | (u32)m[1] << 8 | m[2]) == (u.mask_key & 0xFFFFFFu);
+            }
+        }
+        if (adjust) {
             // ui_adjust: the hue's turn, the saturation, the gain, held to [0, 1].
             f32 r[3];
             for (u32 k = 0; k < 3; ++k) r[k] = tc[0] * u.hue_m[k * 3] + tc[1] * u.hue_m[k * 3 + 1] + tc[2] * u.hue_m[k * 3 + 2];

@@ -54,6 +54,15 @@ struct UiBox {
     f32   gain[3] = {1, 1, 1};
     f32   hue = 0.0f;
     f32   saturation = 1.0f;
+    // That computed look only where a mask is the box's own (Krome's mask-color, -value and
+    // -index, slice 8): `mask` the bindless slot of an RGBA8_UNORM texture stretched over
+    // `mask_rect` (pixels, sampled nearest); a pixel takes the look where the mask's texel
+    // there is `mask_key` (0xRRGGBB), or with `mask_red` where its red channel is (the key's
+    // low byte); elsewhere the texel as it is. 0: the look everywhere.
+    u32   mask = 0;
+    rect2 mask_rect;
+    u32   mask_key = 0;
+    bool  mask_red = false;
     u32   clip = 0;             // UiList::clip's index; 0 is no clip
 };
 

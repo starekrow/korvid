@@ -13,6 +13,8 @@
 #include "../../image/tests/png_data.h" // k_png_pal4: a palette image whose indexes are known
 #include "korvid/platform/module.h"
 #include "korvid/platform_hid/module.h"
+#include "korvid/render/renderer.h"
+#include "korvid/renderer-cpu/module.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -624,6 +626,61 @@ void test_masks_kim(TestCtx& c) {
     engine_shutdown(e);
 }
 
+// A look inside a mask (KR33): the box's mask words, with a renderer to hold the mask.
+void test_mask_looks(TestCtx& c) {
+    c.begin("krome placed: looks in masks");
+    const ModuleDesc* const list[] = {&platform_module, &platform_hid_module, &asset_module, &renderer_cpu_module, &krome_module};
+    Engine e;
+    KV_CHECK(c, engine_init(e, list));
+    RendererDesc rd;
+    rd.backend = RendererBackend::Cpu;
+    rd.width = 64;
+    rd.height = 32;
+    Renderer* r = renderer_create(e, rd);
+    KV_CHECK(c, r != nullptr);
+    KromeModule& s = *krome_state(e);
+    const u8 map[8] = {255, 0, 0, 255, 0, 255, 0, 255};
+    provide_png(e, "t/m2.png", map, 2, 1);
+    krome_provide(e, "t/pal.png", k_png_pal4, sizeof k_png_pal4);
+    KromeNode n;
+    n.mask_match = KromeMaskMatch::Color;
+    n.mask_key = 0x00FF00u;
+    UiBox b;
+    b.gain[0] = b.gain[1] = b.gain[2] = 1.2f;
+    rect2 mr{10, 20, 40, 20};
+    // A colour: the texture made once, the key whole, the rect the mask's.
+    krome_confine(s, r, name_intern("t/m2.png"), mr, n, b);
+    KV_CHECK(c, b.mask != 0 && b.mask_key == 0x00FF00u && !b.mask_red && b.mask_rect.x == 10.0f && b.mask_rect.w == 40.0f && b.gain[0] == 1.2f);
+    u32 slot = b.mask;
+    UiBox b2;
+    b2.hue = 30.0f;
+    krome_confine(s, r, name_intern("t/m2.png"), mr, n, b2);
+    KV_CHECK(c, b2.mask == slot);
+    // An index: the palette's indexes as a texture of their own, the red channel matched.
+    n.mask_match = KromeMaskMatch::Index;
+    n.mask_key = 5;
+    UiBox b3;
+    b3.gain[0] = 2.0f;
+    krome_confine(s, r, name_intern("t/pal.png"), mr, n, b3);
+    KV_CHECK(c, b3.mask != 0 && b3.mask != slot && b3.mask_red && b3.mask_key == 5);
+    // No computed look: nothing to confine. A mask not in (or no renderer): no look at all.
+    UiBox plain;
+    krome_confine(s, r, name_intern("t/m2.png"), mr, n, plain);
+    KV_CHECK(c, plain.mask == 0);
+    UiBox early;
+    early.gain[1] = 1.5f;
+    krome_confine(s, nullptr, name_intern("t/m2.png"), mr, n, early);
+    KV_CHECK(c, early.mask == 0 && early.gain[1] == 1.0f);
+    // A node that is no share of a mask is left as it was.
+    KromeNode free_node;
+    UiBox own;
+    own.gain[0] = 1.2f;
+    krome_confine(s, r, name_intern("t/m2.png"), mr, free_node, own);
+    KV_CHECK(c, own.mask == 0 && own.gain[0] == 1.2f);
+    if (r) renderer_destroy(r);
+    engine_shutdown(e);
+}
+
 } // namespace
 
 void test_placed(TestCtx& c) {
@@ -636,4 +693,5 @@ void test_placed(TestCtx& c) {
     test_marquee_kim(c);
     test_masks(c);
     test_masks_kim(c);
+    test_mask_looks(c);
 }

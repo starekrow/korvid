@@ -40,7 +40,7 @@ struct Gallery {
     HostWindow* window = nullptr;
     Renderer*   r = nullptr;
     const char* out = ".";
-    Handle checker, disc, glyph, sheet;  // textures
+    Handle checker, disc, glyph, sheet, mask;  // textures
     Handle gear[3], badge;               // shapes, rasterized by patherizer (the ui scene)
     Handle opaque_checker, linear_checker, alpha_disc, add_disc, alpha_glyph, tinted_disc, rings; // materials
     Array<SpriteDelta> deltas;
@@ -160,6 +160,10 @@ void make_textures(Gallery& g) {
             p[0] = mid ? 230 : 30; p[1] = mid ? (a ? 210 : 40) : 60; p[2] = mid ? 40 : 230; p[3] = 255;
         }
     g.sheet = make_texture(g, "gallery.sheet", 12, 4, sheet);
+    // A 2x2 mask, its bytes as they are: red at the top left and bottom right, green and
+    // (90, 0, 0) at the others, for a look confined to where a mask is a box's own.
+    const u8 mask[2 * 2 * 4] = {255, 0, 0, 255, 0, 255, 0, 255, 90, 0, 0, 255, 255, 0, 0, 255};
+    g.mask = make_texture(g, "gallery.mask", 2, 2, mask, TextureFormat::RGBA8_UNORM);
     // A 64x64 disc: white, alpha falling off toward the rim, for blending and linear filtering.
     static u8 disc[64 * 64 * 4];
     for (u32 y = 0; y < 64; ++y)
@@ -576,6 +580,19 @@ void scene_ui(Gallery& g, UiList& l) {
         ab.uv = rect2{4.0f / 12.0f, 0, 4.0f / 12.0f, 1};
         ab.gain[0] = ab.gain[1] = ab.gain[2] = adjust[i][0]; ab.hue = adjust[i][1]; ab.saturation = adjust[i][2];
         l.box(ab);
+    }
+    // Confined to a mask (Krome slice 8): the cell greyed only where the 2x2 mask is red, and
+    // only where its red channel is 90.
+    for (u32 i = 0; i < 2; ++i) {
+        UiBox mb = ui_box(384.0f + 28.0f * (f32)(4 + i), 486, 24, 24, white);
+        mb.textured = true; mb.nearest = true; mb.texture = renderer_texture_slot(g.r, g.sheet);
+        mb.uv = rect2{4.0f / 12.0f, 0, 4.0f / 12.0f, 1};
+        mb.saturation = 0.0f;
+        mb.mask = renderer_texture_slot(g.r, g.mask);
+        mb.mask_rect = mb.rect;
+        mb.mask_key = i == 0 ? 0xFF0000u : 90u;
+        mb.mask_red = i == 1;
+        l.box(mb);
     }
     UiBox badge = ui_box(800, 280, 120, 120, white);
     badge.textured = true; badge.texture = renderer_texture_slot(g.r, g.badge); badge.uv = rect2{0, 0, 1, 1};

@@ -62,6 +62,7 @@ struct CpuUi {
     u8  nearest;             // a box's image, or a glyph, sampled nearest
     u8  tiled;               // and repeated every tile[0] x tile[1] pixels from its rect's top left
     u8  adjust;              // its texel's hue, saturation and gain computed (ui.slang's ui_adjust)
+    u8  masked;              // and only where `mask`'s texel (nearest, over mask_rect) is mask_key (ui_in_mask)
     u8  gamma;               // a glyph's coverage curve, one of 64 (by its ink's luminance)
     i32 x0, y0, x1, y1;      // the window pixels it may touch, [x0, x1) x [y0, y1)
     f32 l0x, l0y, ldx_x, ldx_y, ldy_x, ldy_y;
@@ -78,6 +79,9 @@ struct CpuUi {
     f32 tile[2];
     f32 hue_m[9];            // the hue's turn as a matrix (rows), made with the engine's math
     f32 gain[3], sat;
+    CpuTexture mask;
+    f32 mask_rect[4];
+    u32 mask_key;            // 0xRRGGBB, or with bit 24 the red channel alone
     f32 fill[4], fill2[4], edge[4], shade[4]; // a glyph's color is `fill`
     u32 flat[4];             // `fill` as 16-bit premultiplied
     CpuTexture tex;
