@@ -324,9 +324,44 @@ through SDL, written at milestones 1 and 2; no Mac is to hand, so it is not trie
   their styles. Not tried: whether the region cuts a D3D12 window's picture (no program
   here gives a D3D12 window a shape yet), and a person's own drag.
 
+**Milestone 4, a second window in the platform (KR40): built Nov 26, 2026.** As above, and:
+
+- **The list.** `HidState::windows`, `KV_WINDOWS` (8) by id; the first opened is the main one
+  (id 0, `platform_window`, the `platform_hid.window` resource) and closes with the module.
+  `platform_close_window` closes another, `platform_window_by_id` finds one by an event's id.
+  The backend says how many it opens (`hid_backend_windows`: 1 on a phone).
+- **Ids on the events**, a `window` field last with a default of 0, so a program with one
+  window builds and runs as it did: `WindowResized`, `FocusChanged`, `CloseRequested`,
+  `WindowVisibility`, and the mouse's four too, since a Krome screen will need to know which
+  window a press is in (milestone 6). `MouseState::window` is the pointer's; a move into
+  another window has no travel. Recordings keep actions, not events, and nothing hashes
+  `Input`, so neither changes.
+- **One pump.** The main window's pump takes every window's events in the order they came and
+  gives each to its window: on SDL by the event's window id (an event of a window already
+  closed is dropped); on Win32 each window keeps its own thread and they share one queue,
+  each message saying its window. The loop's wait is on that queue, so any window ends it.
+  Win32's global is `g_wins[KV_WINDOWS]` and a shared queue; a closed window's unpumped
+  messages are dropped, since its id may be another's by the next pump.
+- **`show(on)`**: SDL's hide and show, Win32's `SW_HIDE` and `SW_SHOWNA`; nothing on a phone.
+  A new reason to be hidden, the program's, which `WindowVisibility` gives as `Hidden`.
+- **What is the main one's, and what follows the focus**: the clipboard is the main
+  window's; the cursor and capture the pointer's window's; the input method's area the
+  focused window's; text input is turned on for every open window. The frame loop quits on
+  the main window's `CloseRequested` only.
+- **`examples/window --two`** opens a second window; H hides it and shows it again, and closing
+  it hides it. `--two-script` hides it at 1 s, shows it at 2 s and fails unless each took.
+- **Measured** on Windows 11: with the two side by side and clicks from synthesized input,
+  the pointer was reported in window 0 at (720, 388), then window 1 at (360, 223), each in its
+  own pixels; focus moved with ids each time; `--two-script` passed, the window 720 x 480
+  after it came back; a close sent to the second hid it and the program went on. SDL's half
+  (Linux, macOS), Android's and iOS's are written and not built here; nine windows at once
+  is not tried.
+
 **Verified for milestones 1 and 2** (Nov 25): `kormake test` on linux-debug, linux-dev and
 linux-ship; `platform_hid` and `krome` under `--sanitize address,undefined` and `thread`
 (`frameloop` has no tests of its own); `tools/determinism-check.sh` (rocks in every
 configuration, arcfire's two recordings) unchanged; `tools/doccheck.sh` reports nothing
 new. Windows and macOS are not built here. Milestone 3 (Nov 26): `kormake test ./modules
-windows-dev`, 36 test programs, every check passed.
+windows-dev`, 36 test programs, every check passed. Milestone 4 (Nov 26): the same, passed.
+`tools/doccheck.sh` reports one error, `asset_render`'s, which was there before slice 13's
+milestone 3.
