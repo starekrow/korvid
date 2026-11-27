@@ -1,6 +1,6 @@
 # asset
 
-Files that become engine resources: TrueType fonts, WAV or Ogg sounds and streams, cooked
+Files that become engine resources: TrueType and bitmap fonts, WAV or Ogg sounds and streams, cooked
 SVG shapes, and blobs (a file's bytes, for a module that parses a format of its own). You
 ask for a path and get a handle back at once, the file loads in the background through the
 platform's I/O queue, and an event tells you when it is real. Nothing in a game waits for a
@@ -50,6 +50,18 @@ subpixel positioning. Kerning is read for the Latin set. The pages are drawn thr
 `AssetFontPages` (`korvid/asset/font.h`), which asset_render sets: with it each page has a
 renderer texture and material and `asset.fonts_flush` uploads what changed before the frame
 draws; without it (a tool) the pages stay in memory and the handles are null.
+
+**Bitmap fonts** (Krome slice 7). A font that is a picture: a `.kbf`, a small text file beside
+its PNG (`image "digits.png"`, `cell 9 13`, `chars "0123456789:- "`, optional `missing " "`
+and `advance 8`; `#` comments), loaded by `asset_load_font` as any font, or the same
+description given in code (`asset_load_bitmap_font`, Krome's for a font written inline in a
+`.kim`). Its strike's size is the cell's height: 26 px draws a 13-pixel cell twice its size.
+The .kbf is read, then the image, and the cells (left to right, then down) are copied into
+one page, a clear pixel round each so linear sampling never reaches the next cell, their
+colours made linear as a page's are; each glyph is a cell on the baseline, `missing` the
+replacement (left out, a character the font lacks draws nothing and takes no room), no
+kerning. The glyphs are the record's table (`codepoints`, `glyphs`), as one built by hand is.
+Every cell is the same size; more characters than the image has cells is an error.
 ## Reload
 
 A file already loaded can be read again (`korvid/asset/reload.h`): `asset_reload(e, path)`, or
@@ -169,10 +181,10 @@ Header `korvid/asset/font.h`:
 
 | name | kind | what |
 |---|---|---|
-| `FontAsset` | record | `path`, `state`, `error`, `texture`, `material` (the first page's), `px`, `ascent`, `descent`, `line_height` (whole pixels), `strike` (the glyph cache), `kern_pairs`/`kern_values` (sorted); for a table built by hand, `codepoints`/`glyphs`, `ascii`, `replacement` |
+| `FontAsset` | record | `path`, `state`, `error`, `texture`, `material` (the first page's), `px`, `ascent`, `descent`, `line_height` (whole pixels), `strike` (the glyph cache), `bitmap` (a bitmap font's), `kern_pairs`/`kern_values` (sorted); for a table built by hand or a bitmap font, `codepoints`/`glyphs`, `ascii`, `replacement` |
 | `Glyph` | record | `uv`, `size`, `offset`, `advance`, and its page's `texture` and `material` |
 | `FontDesc`, `FontRange` | records | `px`; `ranges` made at load (none by default); `fallback`, faces after this one by asset path |
-| `asset_load_font(e, path, px)`, `asset_load_font(e, path, desc[, scope])` | functions | handle at once; px in [4, 256]; a file is read once for every size of it |
+| `asset_load_font(e, path, px)`, `asset_load_font(e, path, desc[, scope])` | functions | handle at once; px in [4, 256]; a file is read once for every size of it (a `.kbf` once a size) |
 | `asset_set_font_fallback(e, paths)` | function | the fallback list for fonts loaded from now on with none of their own |
 | `asset_font(e, h)` | function | the record, or null if stale |
 | `font_glyph(font, cp)`, `font_glyph_or_replacement(font, cp)`, `font_glyph_at(font, cp, quarter)` | functions | the glyph, made on the first ask (from any thread), from the first face that has it; a quarter-pixel copy for subpixel positioning |
@@ -180,6 +192,8 @@ Header `korvid/asset/font.h`:
 | `font_generation(font)`, `font_counts(font, &glyphs, &pages)` | functions | grows when a fallback lands (lay text out again); what has been made |
 | `font_index(font)` | function | fills the ASCII index and U+FFFD from `codepoints`, for a table built by hand |
 | `AssetFontPages`, `asset_font_pages(e, pages)` | record, function | how pages are drawn: `create`, `upload`, `destroy`; asset_render sets it |
+| `BitmapFontDesc`, `kbf_parse(text, len, strings, desc, &why, &line)` | record, function | a bitmap font's description (`image`, `cell_w`, `cell_h`, `chars`, `missing`, `advance`), and a `.kbf`'s text read into one |
+| `asset_load_bitmap_font(e, name, desc, px)` | function | a bitmap font described in code, keyed by `name` as a path is |
 
 Header `korvid/asset/sound.h`:
 

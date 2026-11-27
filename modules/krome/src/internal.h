@@ -192,6 +192,11 @@ struct KromeFont { Name path; u32 px; Handle asset; bool ready; };
 // An image node's asset: a texture, or a shape (a path to an .svg or a .kshape), which is
 // rasterized at the size it is drawn (shapes.cc).
 struct KromeImage { Name path; Handle asset; bool ready; bool shape = false; };
+struct KromeModule;
+// A `font=` value naming an inline font of the scope: its key, registered (the font block's
+// file, its name, and a hash of what it says, so a reload that changes it makes a new font).
+const char* krome_inline_font(KromeModule& s, const KimbFound& found, const char* name);
+
 // The part of a w x h image (the file's pixels) a look draws: its region, else the whole;
 // of a strip (KromeLook::frames), frame `frame` of it, down or `across`. False when the
 // region reaches outside the file.
@@ -308,6 +313,10 @@ struct KromeModule {
     f32                 win_w = 0.0f, win_h = 0.0f, scale = 1.0f;
     bool                viewport_fixed = false;
     Array<KromeFont>    fonts;
+    // Bitmap fonts written inline in a .kim (`font digits { ... }`), by the key the builder
+    // gave the node's font ("kim:FILE#NAME~HASH"): what asset_load_bitmap_font is given.
+    struct InlineFont { Name key; char* image; char* chars; char* missing; u32 cell_w, cell_h, advance; };
+    Array<InlineFont>   inline_fonts;
     Array<KromeImage>   images;
     Array<u64>          image_errors; // the images whose region was found outside their file, said once each
     Array<KromeShapePage>  shape_pages;

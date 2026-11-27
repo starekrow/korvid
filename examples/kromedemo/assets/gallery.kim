@@ -5,6 +5,10 @@
 use "krome/std"
 script "kromedemo/gallery.lua"
 
+// A pixel font written inline (Krome slice 7): pixfont.png's 5 x 7 capitals and digits. It
+// has no '.', and no `missing`: a title with one lays out without it.
+font caps { image="kromedemo/pixfont.png" cell=6,8 chars="0123456789:- ABCDEFGHIJKLMNOPQRSTUVWXYZ" }
+
 style nav-item {
     pad=10,4 radius=4 color=muted cursor=hand border=1 border-color=clear
     hover { color=ink }
@@ -173,6 +177,14 @@ screen gallery {
                                 slider id=dial @dial 0..1 step=0.02 w=160
                                 image "kromedemo/spinner.png" id=spinner frames=12 across fps=@spin_fps loops=2 w=32 h=32 -> spun
                                 button "Spin" id=spin -> spin
+                            }
+                            // Bitmap fonts: a time display from digits.kbf, three times its
+                            // size and recoloured; a title in the inline font.
+                            row gap=16 middle pixel {
+                                box bg=#05080c pad=8,6 radius=3 border=1 border-color=edge {
+                                    text "{clock}" id=clock font="kromedemo/digits.kbf" size=24 color=#7cfc8a
+                                }
+                                text "SKIN DEMO V1.0" id=skin_title font=caps size=16 color=accent
                             }
                         }
                     }

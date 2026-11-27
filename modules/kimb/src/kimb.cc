@@ -78,6 +78,7 @@ bool kimb_from_doc(JsonDoc& doc, KimbFile& f, KimErrors& errors, const char* nam
     f.defs    = section(doc, "defs", JsonType::Object);
     f.styles  = section(doc, "styles", JsonType::Object);
     f.themes  = section(doc, "themes", JsonType::Object);
+    f.fonts   = section(doc, "fonts", JsonType::Object);
     const JsonValue* lines = section(doc, "lines", JsonType::Array);
     f.lines = lines != nullptr;
     if (!lines) return true;
@@ -108,6 +109,7 @@ bool kimb_from_doc(JsonDoc& doc, KimbFile& f, KimErrors& errors, const char* nam
             l.take(*t);
             l.each(t);
         }
+    l.each(f.fonts);
     return true;
 }
 
@@ -166,6 +168,7 @@ bool kimb_scope(KimbScope& scope, const KimbFile& f, KimbFindUse find, void* use
 
 bool kimb_find_def(const KimbScope& s, const char* name, KimbFound* out) { return find_in(s, &KimbFile::defs, name, out); }
 bool kimb_find_style(const KimbScope& s, const char* name, KimbFound* out) { return find_in(s, &KimbFile::styles, name, out); }
+bool kimb_find_font(const KimbScope& s, const char* name, KimbFound* out) { return find_in(s, &KimbFile::fonts, name, out); }
 
 bool kimb_find_token(const KimbScope& s, const char* theme, const char* token, KimbFound* out) {
     if (!theme) return false;
@@ -611,7 +614,35 @@ struct Checker {
         return false;
     }
 
+    // An inline bitmap font: image, cell and chars said, each of its kind; missing one
+    // character; advance a number.
+    void font(const JsonValue& fo) {
+        u32 line = fo.line;
+        if (!fo.is_object()) { err(line, "font %s: not a block of name=value", fo.key); return; }
+        bool image = false, cell = false, chars = false;
+        for (const JsonValue* v = json_first(f.doc, fo); v; v = json_next(f.doc, *v)) {
+            const char* k = v->key;
+            if (!strcmp(k, "image")) { image = true; if (!v->str() || !*v->str()) err(line, "font %s: image takes an asset path", fo.key); }
+            else if (!strcmp(k, "chars")) { chars = true; if (!v->str() || !*v->str()) err(line, "font %s: chars takes the characters, in a string", fo.key); }
+            else if (!strcmp(k, "missing")) {
+                const char* m = v->str();
+                u32 n = 0;
+                if (m) for (const char* p = m; *p; ++p) if ((*p & 0xC0) != 0x80) ++n;
+                if (n != 1) err(line, "font %s: missing takes one character, in a string", fo.key);
+            } else if (!strcmp(k, "advance")) { if (!v->is_number() || v->number() < 0) err(line, "font %s: advance takes a number of pixels", fo.key); }
+            else if (!strcmp(k, "cell")) {
+                cell = true;
+                const JsonValue* w = v->is_array() ? json_first(f.doc, *v) : nullptr;
+                const JsonValue* h = w ? json_next(f.doc, *w) : nullptr;
+                if (!w || !h || json_next(f.doc, *h) || !w->is_number() || !h->is_number() || w->number() < 1 || h->number() < 1)
+                    err(line, "font %s: cell takes a width and a height (cell=9,13)", fo.key);
+            } else err(line, "font %s: '%s' is not a font's word (image, cell, chars, missing, advance)", fo.key, k);
+        }
+        if (!image || !cell || !chars) err(line, "font %s needs image, cell and chars", fo.key);
+    }
+
     void run() {
+        if (f.fonts) for (const JsonValue* fo = json_first(f.doc, *f.fonts); fo; fo = json_next(f.doc, *fo)) font(*fo);
         if (f.props)
             for (const JsonValue* p = json_first(f.doc, *f.props); p; p = json_next(f.doc, *p)) {
                 KimbType t;

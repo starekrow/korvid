@@ -55,6 +55,7 @@ struct KimbFile {
     const JsonValue* defs    = nullptr;
     const JsonValue* styles  = nullptr;
     const JsonValue* themes  = nullptr;
+    const JsonValue* fonts   = nullptr; // bitmap fonts inline: {NAME: {image, cell, chars, missing, advance}}
     bool             lines   = false;
 };
 
@@ -83,6 +84,8 @@ struct KimbFound {
 };
 bool kimb_find_def(const KimbScope& s, const char* name, KimbFound* out);
 bool kimb_find_style(const KimbScope& s, const char* name, KimbFound* out);
+// A bitmap font written inline (`font digits { ... }`), by name, the first file's that has it.
+bool kimb_find_font(const KimbScope& s, const char* name, KimbFound* out);
 bool kimb_find_token(const KimbScope& s, const char* theme, const char* token, KimbFound* out);
 bool kimb_find_prop(const KimbScope& s, const char* name, KimbFound* out); // a `prop` declaration: {name, type}
 bool kimb_has_theme(const KimbScope& s, const char* theme);

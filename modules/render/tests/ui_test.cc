@@ -42,6 +42,7 @@ void test_ui_lists(kv::TestCtx& c) {
     g.texture = 7;
     g.tint = color{1, 1, 1, 1};
     g.clip = 99; // no such clip: none
+    g.nearest = true;
     list.glyph(g);
     KV_CHECK(c, list.count() == 2 && list.words.len == 26 + 9 && list.offsets[1] == 26);
 
@@ -65,7 +66,7 @@ void test_ui_lists(kv::TestCtx& c) {
     // Nearest sampling, and the uv rect as floats, its corners.
     KV_CHECK(c, !(head & (1u << 21)) && fword(l, box + 96) == 0.0f); // untextured: no tile, whatever it says
     KV_CHECK(c, (head & (1u << 20)) && fword(l, box + 80) == 0.25f && fword(l, box + 84) == 0.5f && fword(l, box + 88) == 0.375f && fword(l, box + 92) == 0.75f);
-    KV_CHECK(c, word(l, glyph) == 1u && word(l, glyph + 4) == 7 && fword(l, glyph + 12) == 12.0f);
+    KV_CHECK(c, word(l, glyph) == (1u | 1u << 20) && word(l, glyph + 4) == 7 && fword(l, glyph + 12) == 12.0f);
     KV_CHECK(c, word(l, glyph + 28) == (32768u | 16384u << 16) && word(l, glyph + 32) == (40959u | 24576u << 16));
 
     // Layers stay in order with their bases packed; clearing repacks.

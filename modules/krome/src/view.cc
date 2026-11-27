@@ -12,6 +12,7 @@
 #include "korvid/core/log.h"
 #include "korvid/core/time.h"
 #include "korvid/core/format.h"
+#include "korvid/core/hash.h"
 #include "korvid/core/utf8.h"
 #include "korvid/math/scalar.h"
 #include "korvid/platform_hid/host_window.h"
@@ -32,7 +33,21 @@ KromeFont* font_for(KromeModule& s, Name path, f32 size) {
     if (px < 4) px = 4;
     if (px > 256) px = 256;
     for (KromeFont& f : s.fonts) if (f.path == path && f.px == (u32)px) return &f;
-    KromeFont f{path, (u32)px, asset_load_font(*s.e, name_str(path), (f32)px), false};
+    Handle h;
+    // An inline bitmap font (krome_inline_font's key), or a file: a .ttf, or a .kbf.
+    const char* ps = name_str(path);
+    if (!strncmp(ps, "kim:", 4)) {
+        for (const KromeModule::InlineFont& i : s.inline_fonts)
+            if (i.key == path) {
+                BitmapFontDesc d;
+                d.image = i.image; d.chars = i.chars; d.missing = i.missing;
+                d.cell_w = i.cell_w; d.cell_h = i.cell_h; d.advance = i.advance;
+                h = asset_load_bitmap_font(*s.e, ps, d, (f32)px);
+            }
+    } else {
+        h = asset_load_font(*s.e, ps, (f32)px);
+    }
+    KromeFont f{path, (u32)px, h, false};
     s.fonts.push(f);
     return &s.fonts.last();
 }
@@ -42,6 +57,41 @@ const FontAsset* ready_font(KromeModule& s, KromeFont* f) {
     const FontAsset* fa = asset_font(*s.e, f->asset);
     return fa && fa->state == AssetState::Ready ? fa : nullptr;
 }
+
+} // namespace
+
+const char* krome_inline_font(KromeModule& s, const KimbFound& found, const char* name) {
+    const JsonDoc& doc = found.file->doc;
+    const JsonValue& v = *found.value;
+    const char* image = json_string(json_get(doc, v, "image"), "");
+    const char* chars = json_string(json_get(doc, v, "chars"), "");
+    const char* missing = json_string(json_get(doc, v, "missing"), nullptr);
+    u32 cw = 0, ch = 0;
+    if (const JsonValue* cell = json_get(doc, v, "cell"))
+        if (const JsonValue* w = json_first(doc, *cell)) {
+            cw = (u32)json_u64(w, 0);
+            if (const JsonValue* hh = json_next(doc, *w)) ch = (u32)json_u64(hh, 0);
+        }
+    u32 adv = (u32)json_u64(json_get(doc, v, "advance"), 0);
+    char text[1024];
+    format(text, sizeof text, "%s|%u|%u|%u|%s|%s", image, cw, ch, adv, missing ? missing : "", chars);
+    char key[KV_ASSET_PATH_MAX];
+    format(key, sizeof key, "kim:%s#%s~%08llx", found.file->file, name, (unsigned long long)(hash_bytes(text, strlen(text)) & 0xffffffffull));
+    Name k = name_intern(key);
+    for (const KromeModule::InlineFont& i : s.inline_fonts) if (i.key == k) return name_str(k);
+    auto copy = [&](const char* str) -> char* {
+        if (!str) return nullptr;
+        usize n = strlen(str) + 1;
+        char* c = (char*)alloc_in(s.general, n, 1);
+        memcpy(c, str, n);
+        return c;
+    };
+    s.inline_fonts.alloc = s.general;
+    s.inline_fonts.push(KromeModule::InlineFont{k, copy(image), copy(chars), copy(missing), cw, ch, adv});
+    return name_str(k);
+}
+
+namespace {
 
 bool shape_path(const char* p) {
     usize n = strlen(p);
@@ -427,6 +477,7 @@ void paint_text(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect
             gl.texture = g->texture.is_null() ? slot : renderer_texture_slot(p.r, g->texture);
             gl.tint = c;
             gl.clip = clip;
+            gl.nearest = l.pixel; // a bitmap font under `pixel` stays square
             p.list.glyph(gl);
         }
         return;
@@ -463,6 +514,7 @@ void paint_text(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect
             gl.texture = g->texture.is_null() ? slot : renderer_texture_slot(p.r, g->texture);
             gl.tint = c;
             gl.clip = clip;
+            gl.nearest = l.pixel; // a bitmap font under `pixel` stays square
             p.list.glyph(gl);
         }
         x += g->advance;
@@ -777,6 +829,7 @@ void paint_edit(Paint& p, const KromeNode& n, u32 node, const KromeLook& l, rect
         gl.texture = g->texture.is_null() ? slot : renderer_texture_slot(p.r, g->texture);
         gl.tint = c;
         gl.clip = clip;
+        gl.nearest = l.pixel; // a bitmap font under `pixel` stays square
         p.list.glyph(gl);
     }
     if (!focused) return;
@@ -1678,6 +1731,11 @@ void krome_free_view(KromeModule& s) {
     s.fonts.free();
     s.images.free();
     s.image_errors.free();
+    for (KromeModule::InlineFont& i : s.inline_fonts) {
+        char* strs[3] = {i.image, i.chars, i.missing};
+        for (char* str : strs) if (str) free_in(s.general, str, strlen(str) + 1);
+    }
+    s.inline_fonts.free();
     s.layers.free();
     s.list.free();
     s.grips.free();

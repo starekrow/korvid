@@ -380,6 +380,16 @@ painted so, or when what it plays changes (the image, the rate, the loops, its s
 frame), and is forgotten when the node is not painted (hidden) or its tree is built again.
 `krome_settled` waits for a strip that plays a number of times to rest.
 
+**Bitmap fonts.** `font="skin/digits.kbf"` is a font that is a picture (the asset module's
+`.kbf`: an image of cells of one size, a character each), measured and drawn by a text node
+as any font is, `{name}` filled. Its size is the cell's height, so `size=26` draws a 13-pixel
+cell twice its size; under `pixel` its glyphs are sampled nearest. A text's `color`
+multiplies it: a white font takes the theme's colours, a coloured one is drawn under
+`color=white`. A `.kim` may write one inline, `font digits { image="skin/digits.png"
+cell=9,13 chars="0123456789:" missing=" " advance=8 }`, and a node names it `font=digits`
+(a font of the scope wins over a path spelled the same; a theme's token is resolved first).
+Without `missing` a character the font lacks draws nothing and takes no room.
+
 **Icons** (`krome/icons/<name>.svg`): Material Symbols, Outlined, weight 400, 20 px (Apache
 2.0, `icons/LICENSE`; the list and the pinned commit in `icons/README.md`): `check`,
 `remove`, `expand_more`, `expand_less`, `chevron_left`, `chevron_right`, `arrow_drop_down`,

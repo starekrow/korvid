@@ -5,12 +5,14 @@
 void test_sound(kv::TestCtx&);
 void test_font(kv::TestCtx&);
 void test_reload(kv::TestCtx&);
+void test_bitmap_font(kv::TestCtx&);
 
 int main() {
     kv::TestCtx c;
     test_sound(c);
     test_font(c);
     test_reload(c);
+    test_bitmap_font(c);
     int rc = kv::test_report(c, "asset_tests");
     kv::names_shutdown();
     kv::mem_shutdown();

@@ -287,6 +287,7 @@ bool prepare_ui(Renderer* r, const UiView& v, const u8* region, const u8* item, 
         u.uvd[0] = uv1[0] - u.uv0[0];
         u.uvd[1] = uv1[1] - u.uv0[1];
         u.tex = texture_of(r, word_at(item + 4));
+        u.nearest = (head & (1u << 20)) != 0;
         f32 a = u.fill[3] > 1e-4f ? u.fill[3] : 1e-4f;
         f32 lum = (u.fill[0] * 0.2126f + u.fill[1] * 0.7152f + u.fill[2] * 0.0722f) / a;
         lum = lum > 0.0f ? (lum < 1.0f ? lum : 1.0f) : 0.0f;

@@ -8,7 +8,7 @@ compiler) and Krome (the loader) both link it, so a mistake is found by the same
 ## How it works
 
 **Reading.** `kimb_read` is `kbor_parse` and a look at the shape: the version (1), the
-sections (`uses`, `scripts`, `props`, `screens`, `defs`, `styles`, `themes`), and the lines
+sections (`uses`, `scripts`, `props`, `screens`, `defs`, `styles`, `themes`, `fonts`), and the lines
 sidecar moved onto the values (`JsonValue::line`) in the walk `korvid/kim/kim.h` gives, so
 whoever reports a mistake asks the value where it was written. `kimb_from_doc` does the
 same for a document already in memory (`kim_parse`'s).
@@ -32,7 +32,10 @@ that are neither the kernel's nor a definition, styles and tokens that are not t
 token must be in every theme the scope has, since a theme can be switched to), properties
 a node does not take and values of the wrong type, a definition given more strings than it
 has parameters, a property it does not take, or children it has no slot for; looks that
-set layout, states that are not, styles that start from themselves. In a sparse `each`
+set layout, states that are not, styles that start from themselves; a node's own looks (its
+`"looks"`, written among its children in `.kim`) as a style's; an inline bitmap font's words
+(`image`, `cell`, `chars`, `missing`, `advance`), and the three it needs (`kimb_find_font`
+finds one in scope by name, as a definition is found). In a sparse `each`
 (one with `count=` or `from=`) a child `placeholder { ... }` is the block for rows the model
 does not hold: its children are checked as the row's are, and it takes nothing else. A
 second one, or a `placeholder` anywhere else, is a mistake, unless a definition of that

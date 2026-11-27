@@ -6,7 +6,12 @@
 #include "korvid/asset/module.h"
 #include "korvid/core/engine.h"
 #include "korvid/core/test.h"
+#include "korvid/core/format.h"
+#include "korvid/core/time.h"
+#include "korvid/image/png.h"
 #include "korvid/kim/kim.h"
+#include "korvid/platform/io.h"
+#include "korvid/render/ui.h"
 #include "korvid/platform/module.h"
 #include "korvid/platform_hid/module.h"
 #include <string.h>
@@ -345,6 +350,110 @@ void test_frames_playing(TestCtx& c) {
     engine_shutdown(e);
 }
 
+// Bitmap fonts (KR32): a .kbf, and one written inline, laid out and painted by a text node
+// as any font is; a character one lacks; `pixel` glyphs. 3 x 5 cells, drawn at size 10.
+bool write_digits(const char* dir) {
+    u8 px[15 * 15 * 4] = {};
+    for (u32 y = 0; y < 15; ++y)
+        for (u32 x = 0; x < 15; ++x) {
+            u32 cell = (y / 5) * 5 + x / 3;
+            u8* p = px + (y * 15 + x) * 4;
+            if (cell < 13) { p[0] = p[1] = p[2] = 255; p[3] = (x + y) & 1 ? 255 : 0; }
+        }
+    Array<u8> out{};
+    out.alloc = mem_general();
+    const char* why = nullptr;
+    char path[600];
+    format(path, sizeof path, "%s/bm/digits.png", dir);
+    bool ok = png_encode(px, 15, 15, 4, out, &why) && io_write_file(path, out.data, out.len);
+    out.free();
+    const char* kbf = "image \"digits.png\"\ncell 3 5\nchars \"0123456789:- \"\nmissing \" \"\n";
+    format(path, sizeof path, "%s/bm/digits.kbf", dir);
+    return ok && io_write_file(path, kbf, strlen(kbf));
+}
+
+void test_bitmap_fonts(TestCtx& c) {
+    c.begin("krome pictures: bitmap fonts");
+    char dir[400], sub[500];
+    KV_CHECK(c, io_make_temp_dir("kv-krome-bitmap", dir, sizeof dir));
+    format(sub, sizeof sub, "%s/bm", dir);
+    io_make_dirs(sub);
+    KV_CHECK(c, write_digits(dir));
+    const char* text =
+        "script \"t/f.lua\"\n"
+        "font digits { image=\"bm/digits.png\" cell=3,5 chars=\"0123456789:\" }\n"
+        "screen main { box dir=col {\n"
+        "  text \"{time}\" id=time font=\"bm/digits.kbf\" size=10\n"
+        "  text \"12a34\" id=lacks font=\"bm/digits.kbf\" size=10\n"
+        "  text \"12:34\" id=inline font=digits size=10\n"
+        "  text \"12a34\" id=nothing font=digits size=10\n"
+        "  box pixel { text \"1\" id=square font=digits size=20 }\n"
+        "} }\n";
+    const char* script = "return { model = { time = '12:34' }, on = {} }";
+    Array<u8> k{};
+    KimErrors errs;
+    KV_CHECK(c, kim_compile(text, strlen(text), "t/f.kim", k, errs) && errs.count == 0);
+    {
+        // The check: a font's words, and what it needs.
+        const char* bad = "font a { image=\"x.png\" cell=3 chars=\"0\" size=4 }\nfont b { image=\"x.png\" }\nscreen s { box }\n";
+        JsonDoc doc;
+        KimErrors e2;
+        KimbFile f;
+        KimbScope scope;
+        KV_CHECK(c, kim_parse(bad, strlen(bad), "t/bad.kim", mem_scratch(), doc, e2) && kimb_from_doc(doc, f, e2, "t/bad.kim"));
+        KV_CHECK(c, kimb_scope(scope, f, [](void*, const char*) -> const KimbFile* { return nullptr; }, nullptr, e2) && !kimb_check(scope, e2));
+        char line[300];
+        bool cell = false, word = false, needs = false;
+        for (u32 i = 0; i < e2.count; ++i) {
+            e2.format_one(i, line, sizeof line);
+            if (strstr(line, "t/bad.kim:1: font a: cell takes a width and a height")) cell = true;
+            if (strstr(line, "t/bad.kim:1: font a: 'size' is not a font's word")) word = true;
+            if (strstr(line, "t/bad.kim:2: font b needs image, cell and chars")) needs = true;
+        }
+        KV_CHECK(c, cell && word && needs);
+    }
+
+    const ModuleDesc* const list[] = {&platform_module, &platform_hid_module, &asset_module, &krome_module};
+    Engine e;
+    KV_CHECK(c, engine_init(e, list));
+    KV_CHECK(c, platform_io(e)->mount_dir(dir));
+    KromeModule& s = *krome_state(e);
+    krome_viewport(e, 400, 300, 1.0f);
+    krome_provide(e, "t/f.kimb", k.data, k.len);
+    krome_provide(e, "t/f.lua", script, strlen(script));
+    Name scn = krome_open(e, "t/f.kimb", "main");
+    for (u32 i = 0; i < 2000 && !(krome_ready(e, scn) && krome_settled(e)); ++i) { frames(e, 1); time_sleep(0.001); }
+    KV_CHECK(c, krome_ready(e, scn) && krome_settled(e));
+    KromeScreen& sc = *krome_screen(s, scn);
+    auto rect_of = [&](const char* id) { u32 n = krome_find(sc.tree, name_intern(id)); return n == KROME_NONE ? rect2{} : sc.tree.nodes[n].rect; };
+    // A 5-pixel cell at 10: 6 x 10 a character; {time} filled; 'a' drawn as `missing`, a space.
+    KV_CHECK(c, rect_is(rect_of("time"), 0, 0, 30, 10) && rect_is(rect_of("lacks"), 0, 10, 30, 10));
+    // Inline: the same; one with no `missing` lays out without what it lacks.
+    KV_CHECK(c, rect_is(rect_of("inline"), 0, 20, 30, 10) && rect_is(rect_of("nothing"), 0, 30, 24, 10));
+    KV_CHECK(c, rect_is(rect_of("square"), 0, 40, 6 * 2, 20));
+    // Painted: glyphs of the cell's size times two, nearest under `pixel`, linear elsewhere.
+    UiList l;
+    l.init(mem_general());
+    krome_paint_screen(s, sc, l);
+    u32 glyphs = 0, nearest = 0, big = 0;
+    for (u32 i = 0; i < l.count(); ++i) {
+        const u32* w = l.words.data + l.offsets[i];
+        if ((w[0] & 3u) != 1u) continue;
+        ++glyphs;
+        f32 gw, gh;
+        memcpy(&gw, &w[5], 4);
+        memcpy(&gh, &w[6], 4);
+        if (w[0] & (1u << 20)) { ++nearest; if (gw == 12.0f && gh == 20.0f) ++big; }
+    }
+    // Five each but `nothing`'s four (its 'a' is not drawn; `lacks`' is the space's cell), and
+    // the one under `pixel`, 12 x 20.
+    KV_CHECK(c, glyphs == 5 + 5 + 5 + 4 + 1 && nearest == 1 && big == 1);
+    l.free();
+    k.free();
+    engine_shutdown(e);
+    io_remove_tree(dir);
+}
+
 } // namespace
 
 void test_pictures(kv::TestCtx& c) {
@@ -353,4 +462,5 @@ void test_pictures(kv::TestCtx& c) {
     test_fit(c);
     test_frames(c);
     test_frames_playing(c);
+    test_bitmap_fonts(c);
 }

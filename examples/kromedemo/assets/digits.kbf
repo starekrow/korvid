@@ -1,0 +1,5 @@
+# kromedemo's time display: the digits of pixfont.png, a 5 x 7 pixel font in 6 x 8 cells.
+image "pixfont.png"
+cell 6 8
+chars "0123456789:- "
+missing " "

@@ -272,6 +272,10 @@ void prop(Build& b, const KromeFrame* fr, u32 node, const KimbFile& f, u32 line,
     }
     KromeValue kv;
     if (!to_value(*rdoc, *r, &kv)) { error(b, fr, f.file, line, "%s takes %s", name, kimb_type_name(k->type)); return; }
+    // `font=digits`: a bitmap font written inline in the scope, by its key.
+    KimbFound inline_font;
+    if (!strcmp(name, "font") && kv.kind == KromeValue::String && kimb_find_font(*b.scope, kv.s, &inline_font))
+        kv = KromeValue::str(krome_inline_font(b.s, inline_font, kv.s));
     if (const char* bad = b.tree.set(node, name, kv, state)) {
         if (state == KromeState::Base) error(b, fr, f.file, line, "%s: %s", name, bad);
         else error(b, fr, f.file, line, "%s.%s: %s", krome_state_name(state), name, bad);

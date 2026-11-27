@@ -10,6 +10,7 @@
 //   prop size number                     a typed parameter for definitions
 //   style button [base] { bg=panel2 pad=8,4  hover { bg=panel3 } }
 //   theme dark { panel2=#202430 accent=#2f6fed }
+//   font digits { image="skin/digits.png" cell=9,13 chars="0123456789:" missing=" " }
 //   def field label value { row { text "{label}" slot } }
 //   screen form { col [page] gap=8 { button "Save" -> save } }
 //
@@ -32,7 +33,7 @@
 //   { "kim": 1, "file": F, "uses": [..], "scripts": [..], "props": [{"name","type"}..],
 //     "styles": {NAME: {"s": [..], "f": [..], "p": {..}, "looks": {STATE: {..}}}},
 //     "themes": {NAME: {TOKEN: value}}, "defs": {NAME: {"params": [..], "body": node}},
-//     "screens": {NAME: node}, "lines": [..] }
+//     "screens": {NAME: node}, "fonts": {NAME: {props}}, "lines": [..] }
 //
 //   node: { "w", "id", "f": [flags], "p": {props}, "s": [styles], "t": text, "a": [more
 //           strings], "r": [min, max] (null for an open end), "b": binding, "bv": the value of
@@ -40,7 +41,7 @@
 //           "v" and "in" (each), "on" (if), "looks": {STATE: {props}}, "c": [children] },
 //           each key only when present.
 //
-// Canonical: maps in name order (properties, styles, themes, definitions, screens, a
+// Canonical: maps in name order (properties, styles, themes, fonts, definitions, screens, a
 // style's or a node's looks, a theme's tokens); a repeated property or token takes its last value;
 // flags, styles, strings, uses and scripts in the order written; empty sections left out.
 //
@@ -48,7 +49,8 @@
 // prop; each screen by name (its own line, then its nodes depth first); each definition by
 // name (its line, then its body's nodes; a node's looks have none: they are its line's);
 // each style by name (its line, then each look);
-// each theme by name (its line, then each token). Leaving it out (KV_KIM_NO_LINES)
+// each theme by name (its line, then each token); each font by name (its line). Leaving it
+// out (KV_KIM_NO_LINES)
 // changes no other byte.
 #pragma once
 #include "korvid/core/array.h"

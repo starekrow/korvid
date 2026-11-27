@@ -9,7 +9,7 @@
 //           tile x y  (26 words)
 //
 // head: bits 0-1 the kind (0 box, 1 glyph), 2-17 the clip, 18 a gradient, 19 textured,
-// 20 sampled nearest, 21 tiled (the uv rect repeated every `tile` pixels from the rect's
+// 20 sampled nearest (a glyph's too), 21 tiled (the uv rect repeated every `tile` pixels from the rect's
 // top left). Colors are RGBA8 sRGB with straight alpha; a glyph's uvs two unorm16s,
 // a box's floats. Pixels have their origin at
 // the window's top left, y down; the window's size is the push block's screen_cull.zw.
@@ -121,7 +121,7 @@ float4 fs_ui(UiVaryings i) : SV_Target {
     if ((head & 3u) == kKindGlyph) {
         uint slot = ui_word(i.item + 4u);
         float4 c = ui_color(ui_word(i.item + 8u));
-        float4 t = gTextures[NonUniformResourceIndex(slot)].Sample(gSamplers[1], i.uv);
+        float4 t = gTextures[NonUniformResourceIndex(slot)].Sample(gSamplers[(head & kBoxNearest) != 0u ? 0u : 1u], i.uv);
         // Coverage blended in linear light (the swapchain is sRGB) makes light text on a dark
         // ground heavier, and dark text on a light one thinner, than the same coverage blended
         // as the platform's text is. A curve on the coverage by the ink's own luminance leans

@@ -59,7 +59,7 @@ struct CpuQuad {
 struct CpuUi {
     u8  kind;                // 0 a box, 1 a glyph
     u8  gradient, textured, shadow;
-    u8  nearest;             // a box's image sampled nearest
+    u8  nearest;             // a box's image, or a glyph, sampled nearest
     u8  tiled;               // and repeated every tile[0] x tile[1] pixels from its rect's top left
     u8  gamma;               // a glyph's coverage curve, one of 64 (by its ink's luminance)
     i32 x0, y0, x1, y1;      // the window pixels it may touch, [x0, x1) x [y0, y1)

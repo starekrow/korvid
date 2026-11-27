@@ -90,12 +90,12 @@ struct Parser {
     bool        broken = false; // a structural error: stop
 
     Array<Entry> uses{}, scripts{}, props{};
-    Array<Named> screens{}, defs{}, styles{}, themes{};
+    Array<Named> screens{}, defs{}, styles{}, themes{}, fonts{};
     u32          order = 0;
 
     Parser(const char* t, usize n, const char* f, Allocator* a, KimErrors& e) : text(t), len(n), file(f), alloc(a), b(a), errors(e) {
         uses.alloc = scripts.alloc = props.alloc = a;
-        screens.alloc = defs.alloc = styles.alloc = themes.alloc = a;
+        screens.alloc = defs.alloc = styles.alloc = themes.alloc = fonts.alloc = a;
     }
 
     template <class T> T* make() {
@@ -675,6 +675,26 @@ struct Parser {
         add_named(themes, "theme", name, l, th);
     }
 
+    // A bitmap font inline (Krome slice 7): `font digits { image="skin/digits.png" cell=9,13
+    // chars="0123456789" }`. Its words are kimb's to check.
+    void font(const char* name, u32 l) {
+        Theme* fo = make<Theme>();
+        if (!fo) { broken = true; return; }
+        owned(fo->tokens); owned(fo->lines);
+        blanks();
+        if (peek() != '{') { err(col(), "font %s needs a block", name); skip_line(); return; }
+        u32 open_line = line;
+        ++at;
+        for (;;) {
+            space();
+            if (end()) { err_at(open_line, "this block is never closed"); broken = true; return; }
+            if (peek() == '}') { ++at; break; }
+            const char* w = pairs(fo->tokens, nullptr, &fo->lines);
+            if (w) { err(col(), "a font holds name=value"); skip_block(); }
+        }
+        add_named(fonts, "font", name, l, fo);
+    }
+
     void def(const char* name, u32 l) {
         Def* d = make<Def>();
         if (!d) { broken = true; return; }
@@ -739,11 +759,12 @@ struct Parser {
                 if (!name) { err(col(), "%s needs a name", w); skip_line(); if (peek() == '{') skip_block(); continue; }
                 if (!strcmp(w, "style")) style(name, l);
                 else if (!strcmp(w, "theme")) theme(name, l);
+                else if (!strcmp(w, "font")) font(name, l);
                 else if (!strcmp(w, "def")) def(name, l);
                 else if (!strcmp(w, "screen")) {
                     Node* root = one_node("screen", name, l);
                     if (root) add_named(screens, "screen", name, l, root);
-                } else { err(c0, "'%s' is not use, script, prop, style, theme, def or screen", w); skip_line(); if (peek() == '{') skip_block(); continue; }
+                } else { err(c0, "'%s' is not use, script, prop, style, theme, font, def or screen", w); skip_line(); if (peek() == '{') skip_block(); continue; }
             }
             if (!broken && !at_line_end()) { err(col(), "unexpected text after %s", w); skip_line(); }
         }
@@ -945,6 +966,16 @@ struct Parser {
                 b.set(o, themes[i].name, to);
             }
             b.set(root, "themes", o);
+        }
+        if (fonts.len) {
+            JsonRef o = b.object();
+            idx = Array<u32>{};
+            by_name(fonts, idx);
+            for (u32 i : idx) {
+                mark(fonts[i].line);
+                b.set(o, fonts[i].name, prop_map(((Theme*)fonts[i].what)->tokens));
+            }
+            b.set(root, "fonts", o);
         }
         if (keep_lines) b.set(root, "lines", lines);
         return root;

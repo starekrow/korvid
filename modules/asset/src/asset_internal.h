@@ -133,6 +133,13 @@ void asset_cmd_reload(CliContext& ctx, Span<const char* const> args); // the CLI
 
 // ---- the kinds: load without a scope (refs untouched), retire at zero ----
 Handle font_load(Engine& e, AssetState_& s, const char* path, const FontDesc& desc);
+// Bitmap fonts (bitmap_font.cc): a .kbf at `path` read (desc null), or the description given,
+// as a font at px keyed `key`; an I/O completion of one taken (true when it was one's); its
+// page uploaded once; its memory freed. A completion taken is reaped.
+Handle bitmap_font_load(Engine& e, AssetState_& s, const char* path, const BitmapFontDesc* desc, f32 px, Name key);
+bool   bitmap_font_take(Engine& e, AssetState_& s, IoCompletion& c);
+void   bitmap_font_flush(AssetState_& s, FontAsset& f);
+void   bitmap_font_free(Engine& e, AssetState_& s, FontAsset& f);
 Handle sound_load(Engine& e, AssetState_& s, const char* path);
 Handle blob_load(Engine& e, AssetState_& s, const char* path);
 Handle shape_load(Engine& e, AssetState_& s, const char* path);

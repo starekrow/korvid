@@ -47,7 +47,7 @@ return {
   model = { level = 40, done = "40%", mode = "fast", wrap = true, kind = "texture", name = "", secret = "",
             tab = "tree", nodes = flatten(), rows = rows, rows_count = #rows, picked_row = "none picked",
             widths = { name = 200, size = 90, kind = 110 }, split = 240, rename = "", renamed = "not renamed",
-            last = "", icons = icons, dial = 0.3, spin_fps = 0 },
+            last = "", icons = icons, dial = 0.3, spin_fps = 0, clock = "12:34" },
 
   on = {
     nav = function() end, -- the game opens the page

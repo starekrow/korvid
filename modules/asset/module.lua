@@ -4,7 +4,7 @@
 -- sounds and streams are here, with the scopes that hold every kind; nothing here draws, so
 -- a tool links it without a renderer. Textures and materials are asset_render's.
 module "asset" {
-  deps     = { "core", "platform", "math", "truetype", "patherizer" },
+  deps     = { "core", "platform", "math", "truetype", "patherizer", "image" }, -- image: a bitmap font's PNG
   engine_module = true,
   test_files = { "modules/dejavu/assets/DejaVuSans.ttf", "examples/arcfire/assets/font/PublicPixel.ttf" }, -- the font test's two faces
 }

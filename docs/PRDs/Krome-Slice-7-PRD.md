@@ -318,3 +318,42 @@ In review of the draft (Nov 26):
   strip played at 10 a second, twice, is 24 paints over 2.4 seconds of 60 frames, a frame
   asked on every frame while it plays and on none after, its event once, and nothing more
   in a second at rest.
+
+**Milestone 4, Bitmap fonts** (Nov 26).
+
+- **In the asset module, on the font table's path.** A bitmap font is a `FontAsset` with no
+  strike: its glyphs are the record's table (`codepoints`, `glyphs`, `replacement`), as a
+  font built by hand is, so everything above the asset module (`typeset`, Krome's measure
+  and paint, `font_measure`) takes it unchanged. `bitmap_font.cc` reads the `.kbf`, then the
+  image beside it (`asset` now links `image` for the PNG), and copies the cells into one
+  square page with a clear pixel round each, so linear sampling never reaches the next cell
+  and no glyph needs the half-texel hold. The page is linear RGBA8 as every glyph page is, so
+  a coloured font's texels are made linear as they are copied. `missing` is the table's
+  replacement.
+- **Inline, as decided.** `font NAME { image=... cell=9,13 chars="..." missing=" " advance=8 }`
+  at the top of a `.kim` is the document's `"fonts"` (kim, its line in the sidecar after the
+  themes'); kimb checks its words and finds it in scope (`kimb_find_font`). Krome's builder
+  turns `font=NAME` into a key (`kim:FILE#NAME~HASH`, the hash of what it says, so a reload
+  that changes it is a new font) and the view loads it with `asset_load_bitmap_font`, the
+  same description a `.kbf` is read into (`BitmapFontDesc`, `kbf_parse`). An inline font's
+  `image` is an asset path, as every path in a `.kim` is; a `.kbf`'s is beside it.
+- **`UiGlyph::nearest`** (head bit 20, as a box's): Krome sets it from `pixel`, so a bitmap
+  font drawn larger stays square. TrueType glyphs under `pixel` sample nearest too, at their
+  own size, which draws them the same.
+- **goldberg** passes `.kbf` through as a runtime font (`conventions.berg`), its image as a
+  texture.
+- **Shown.** kromedemo's Skin tab: `{clock}` (`12:34`) from `digits.kbf` at three times its
+  size in green, and a title in the inline `caps` (`pixfont.png`, 5 x 7 capitals and digits)
+  that lacks the `.` of `V1.0` and lays out without it.
+- **Tested.** `asset_tests`: the `.kbf`'s words and its mistakes by line; a 3 x 5 font at 10
+  and 26 pixels (metrics, the glyph's size, step and place, its cell's uv in the page with
+  the gutters, a measured string), `missing`, none, `advance`, an image too small for its
+  characters, an image that is not there, a word that is not, and the same font described
+  in code. `krome_tests`: a `.kbf` and an inline font laid out by text nodes, `{time}`
+  filled, a character lacking with and without `missing`, the glyphs painted and the one
+  under `pixel` nearest; the inline font's check.
+- **Not done:** a bitmap font is not reloaded when its `.kbf` or image changes (the asset
+  module reloads no font yet); an inline one is, as a new font, when its `.kim` is.
+- **Seen on the way:** goldberg's `watch` test failed once (26 checks) in a full parallel
+  `kormake test dev` and passed alone and in the next full run: its timing under load, not
+  looked at further here.

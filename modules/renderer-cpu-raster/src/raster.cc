@@ -423,7 +423,7 @@ void draw_ui(const CpuUi& u, const CpuLuts& lut, u16* pixels, u32 tx, u32 ty, u3
                 // A glyph: its coverage curved by its ink, scaling the ink and the texel.
                 f32 ax = (px - u.rx) / u.rw, ay = (py - u.ry) / u.rh;
                 u32 t[4];
-                sample(u.tex, 1, lut, u.uv0[0] + u.uvd[0] * ax, u.uv0[1] + u.uvd[1] * ay, t);
+                sample(u.tex, u.nearest ? 0 : 1, lut, u.uv0[0] + u.uvd[0] * ax, u.uv0[1] + u.uvd[1] * ay, t);
                 u32 at = (t[3] * 256u * 256u + 32767u) / 65535u; // 0 to 65536: the table's place in 8.8
                 u32 i = at >> 8, w = at & 255u;
                 const u16* c = lut.cover[u.gamma];

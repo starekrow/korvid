@@ -25,6 +25,7 @@
 // Strings are UTF-8. FontDesc::ranges, when given, are made at load rather than on demand.
 #pragma once
 #include "korvid/asset/asset.h"
+#include "korvid/core/memory.h"
 #include "korvid/math/rect2.h"
 
 namespace kv {
@@ -83,6 +84,38 @@ struct AssetFontPages {
 void asset_font_pages(Engine& e, const AssetFontPages* pages);
 
 struct FontStrike; // the glyph cache of a font read from a file (the asset module's)
+struct FontBitmap; // a bitmap font's cells and page (the asset module's)
+
+// A bitmap font (docs/PRDs/Krome-Slice-7-PRD.md, KR32): a font that is a picture, cells of
+// one size cut from an image left to right and then down, a character each. As a .kbf, a
+// small text file beside its image:
+//
+//   image  "digits.png"            the picture, beside the .kbf
+//   cell   9 13                    a cell's width and height, pixels
+//   chars  "0123456789:- "         the cells' characters, in order (UTF-8)
+//   missing " "                    drawn for a character the font lacks; left out, such a
+//                                  character draws nothing and takes no room
+//   advance 8                      the pen's step, when it is not the cell's width
+//
+// (a line starting with # is a comment). asset_load_font on a .kbf gives a strike like any
+// other: its size is the cell's height, so 26 px draws a 13-pixel cell twice its size; its
+// page is the image (each cell copied with a clear pixel round it, colours made linear), each
+// glyph a cell sitting on the baseline, no kerning. Every cell is one size.
+struct BitmapFontDesc {
+    const char* image   = nullptr; // an asset path (in a .kbf, beside the .kbf's own)
+    u32         cell_w  = 0, cell_h = 0;
+    const char* chars   = nullptr; // UTF-8
+    const char* missing = nullptr; // one character, or null
+    u32         advance = 0;       // 0: the cell's width
+};
+// A .kbf's text into `out`, its strings copied from `strings`, paths as written. False with
+// a reason (static) and the line it was found on.
+bool kbf_parse(const char* text, usize len, Allocator* strings, BitmapFontDesc& out, const char** why, u32* line);
+// A bitmap font described in code (an inline font of a .kim) as a font asset at `px`:
+// what asset_load_font gives for a .kbf saying the same. `name` is its key, as a path is:
+// the same name and size give the same handle, and its description is read only the first
+// time. In the global scope.
+Handle asset_load_bitmap_font(Engine& e, const char* name, const BitmapFontDesc& desc, f32 px);
 
 struct FontAsset {
     char       path[KV_ASSET_PATH_MAX];      // as given to asset_load_font
@@ -95,6 +128,7 @@ struct FontAsset {
     f32        ascent = 0.0f, descent = 0.0f, line_height = 0.0f; // pixels, once Ready; descent is negative
     u32        atlas_width = 0, atlas_height = 0; // a page's
     FontStrike* strike = nullptr;            // a font from a file: glyphs made as asked. Null: the table below
+    FontBitmap* bitmap = nullptr;            // a bitmap font: its files' reads and its page; its glyphs are the table below
     // A table built by hand (tests, a font made in code): glyphs[i] is code point
     // codepoints[i], ascending.
     u32        glyph_count = 0;
@@ -113,7 +147,8 @@ struct FontAsset {
     f64        build_seconds = 0.0;          // what the rasterization cost, for the log
 };
 
-// Starts loading <exe dir>/assets/<path> as a TrueType font. Null if the module or the
+// Starts loading <exe dir>/assets/<path> as a TrueType font, or a bitmap font when it ends
+// .kbf (above: px is then the cell height's multiple, any size). Null if the module or the
 // platform is not up, the path is too long, the tables are full, for px outside [4, 256], or
 // for an empty set. The
 // scope takes a reference; without one, the global scope does.

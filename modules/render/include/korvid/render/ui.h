@@ -57,6 +57,7 @@ struct UiGlyph {
     rect2 uv;
     u32   texture = 0;          // a bindless slot
     color tint{1, 1, 1, 1};
+    bool  nearest = false;      // sampled nearest (a bitmap font's glyph drawn larger)
     u32   clip = 0;
 };
 

@@ -37,6 +37,7 @@
     { "match": "*.ogg",           "meta": { "type": "sound" } },
     { "match": "*.wav",           "meta": { "type": "sound" } },
     { "match": "*.ttf",           "meta": { "type": "font" } },
+    { "match": "*.kbf",           "meta": { "type": "font" } },
 
     { "match": "*.txt",           "meta": { "type": "text" } },
     { "match": "*.md",            "meta": { "type": "text" } },

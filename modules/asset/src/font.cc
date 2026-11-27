@@ -362,6 +362,7 @@ void asset_fonts_shutdown(Engine& e, AssetState_& s) {
         FontAsset& f = s.fonts.items[i];
         if (io && !f.io.is_null()) io->cancel(f.io);
         free_strike(e, s, f);
+        bitmap_font_free(e, s, f);
         free_in(s.general, f.ranges, sizeof(FontRange) * f.range_count);
     }
     while (s.faces.len) { s.faces[0]->refs = 1; face_release(e, s, s.faces[0]); }
@@ -387,7 +388,11 @@ void asset_fonts_pump(TickContext& ctx) {
         IoCompletion c = io->completions(asset_io_owner(s.font_kind))[i];
         FontFace* face = nullptr;
         for (FontFace* f : s.faces) if (!f->io.is_null() && f->io == c.request) face = f;
-        if (!face) { ++i; continue; }
+        if (!face) {
+            IoCompletion taken = c;
+            if (!bitmap_font_take(e, s, taken)) ++i; // a bitmap font's .kbf or image, or an orphan
+            continue;
+        }
         io->reap(c.request);
         if (c.status != IoStatus::Done) {
             face->io = Handle{};
@@ -452,6 +457,7 @@ void asset_fonts_flush(TickContext& ctx) {
     if (!up.upload) return;
     for (u32 i = 0; i < s.fonts.len; ++i) {
         if (!s.fonts.is_alive(i)) continue;
+        bitmap_font_flush(s, s.fonts.items[i]);
         FontStrike* st = s.fonts.items[i].strike;
         if (!st) continue;
         os_mutex_lock(&st->lock);
@@ -508,6 +514,7 @@ void font_retire(Engine& e, AssetState_& s, Handle h) {
     IoQueue* io = platform_io(e);
     if (io && !f->io.is_null()) io->cancel(f->io);
     free_strike(e, s, *f);
+    bitmap_font_free(e, s, *f);
     free_in(s.general, f->ranges, sizeof(FontRange) * f->range_count);
     for (u32 i = 0; i < s.font_by_key.len(); ++i)
         if (s.font_by_key.values[i] == h) { s.font_by_key.remove(s.font_by_key.keys[i]); break; }
@@ -522,6 +529,13 @@ Handle font_load(Engine& e, AssetState_& st, const char* path, const FontDesc& d
     if (!io || !path) { KV_ERROR("asset", "cannot load font '%s': asset and platform must be up", path ? path : "?"); return Handle{}; }
     if (strlen(path) >= KV_ASSET_PATH_MAX) { KV_ERROR("asset", "path too long: '%s'", path); return Handle{}; }
     if (!(px >= 4.0f && px <= 256.0f)) { KV_ERROR("asset", "font '%s': size %g is outside [4, 256]", path, px); return Handle{}; }
+    // A bitmap font: its .kbf read, then its image (bitmap_font.cc). Its key is a strike's.
+    usize plen = strlen(path);
+    if (plen > 4 && !strcmp(path + plen - 4, ".kbf")) {
+        char bkey[KV_ASSET_PATH_MAX + 32];
+        format(bkey, sizeof bkey, "%s@%g", path, px);
+        return bitmap_font_load(e, *s, path, nullptr, px, name_intern(bkey));
+    }
 
     // What is made at load, merged: sorted by first, overlapping and adjacent ranges joined.
     MemScope scope;

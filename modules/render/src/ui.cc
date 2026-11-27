@@ -97,7 +97,7 @@ void UiList::box(const UiBox& b) {
 
 void UiList::glyph(const UiGlyph& g) {
     offsets.push(words.len);
-    words.push(k_kind_glyph | clip_of(*this, g.clip) << 2);
+    words.push(k_kind_glyph | clip_of(*this, g.clip) << 2 | (g.nearest ? k_box_nearest : 0));
     words.push(g.texture);
     words.push(rgba8(g.tint));
     push_rect(words, g.rect);
