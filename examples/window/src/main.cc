@@ -45,6 +45,7 @@ struct Round {
     bool on = false, grips = false;
     u32  drawn_w = 0, drawn_h = 0; // the size last drawn and shaped
     Array<u8> mask;
+    Array<u8> kept; // the picture as drawn, where each frame is a new buffer (SoftwareFrame::rotates)
 };
 
 // The handle: a square at the lower right, inside the window, its size a tenth of the side.
@@ -107,8 +108,12 @@ void round_draw(Round& rd, HostWindow& win) {
             if (!win.grips(g, 2)) KV_WARN("window", "the window takes no grips here");
         }
         KV_INFO("window", "drew the round picture at %ux%u px, %s", f.width, f.height, f.alpha ? "with alpha" : "opaque");
+        rd.kept.clear();
+        if (f.rotates) memcpy(rd.kept.push_n((u32)(f.pitch * f.height)), f.pixels, (usize)f.pitch * f.height);
         rd.drawn_w = f.width;
         rd.drawn_h = f.height;
+    } else if (f.rotates && rd.kept.len == f.pitch * f.height) {
+        memcpy(f.pixels, rd.kept.data, rd.kept.len); // last frame's buffer is not this one (iOS)
     }
     win.present_software();
 }

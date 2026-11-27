@@ -391,7 +391,7 @@ void HostWindow::present_software() {
         [v.layer addSublayer:g_soft.layer];
     }
     g_soft.layer.frame = v.layer.bounds;
-    g_soft.layer.contents = (id)image;
+    g_soft.layer.contents = (__bridge ::id)image; // ::id: inside HostWindow, id alone is HostWindow::id()
     [CATransaction commit];
     CGImageRelease(image);
 }

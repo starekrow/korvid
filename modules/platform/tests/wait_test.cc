@@ -130,13 +130,15 @@ void test_wait(kv::TestCtx& c) {
         KV_CHECK(c, !os_handle_open(none) && os_handle_kind(none) == OsKind::None);
         KV_CHECK(c, os_handle_open(file) && os_handle_kind(file) == OsKind::File && file != server.fd);
         KV_CHECK(c, os_handle_kind(server.fd) == OsKind::Socket && os_handle_kind(l.fd) == OsKind::Socket);
+        // No child where the OS starts none (iOS, process_supported): its parts are left out.
+        const bool kids = process_supported();
         Process child;
 #if defined(_WIN32)
         KV_CHECK(c, child.shell("ping -n 3 127.0.0.1 >nul"));
 #else
-        KV_CHECK(c, child.shell("sleep 2"));
+        if (kids) KV_CHECK(c, child.shell("sleep 2"));
 #endif
-        KV_CHECK(c, os_handle_kind(child.out_fd) == OsKind::Pipe && os_handle_kind(child.err_fd) == OsKind::Pipe);
+        if (kids) KV_CHECK(c, os_handle_kind(child.out_fd) == OsKind::Pipe && os_handle_kind(child.err_fd) == OsKind::Pipe);
         {
             PlatformWatch pw(e);
             pw.add(none);                                  // nothing: nothing asked
@@ -148,7 +150,7 @@ void test_wait(kv::TestCtx& c) {
 #if defined(_WIN32)
             KV_CHECK(c, pw.count == 1 && pw.due > 0.0);    // the exit; the pipes soon
 #else
-            KV_CHECK(c, pw.due == 0.0 && (pw.count == 3 || (pw.count == 2 && !os_handle_open(child.process)))); // no exit handle: a kernel before 5.3
+            KV_CHECK(c, !kids ? pw.count == 0 : pw.due == 0.0 && (pw.count == 3 || (pw.count == 2 && !os_handle_open(child.process)))); // no exit handle: a kernel before 5.3
 #endif
             KV_CHECK(c, pw.due == 0.0 || (pw.due >= before && pw.due <= time_now() + kPlatformSoon));
             pw.at(100.0);
@@ -229,7 +231,7 @@ void test_wait(kv::TestCtx& c) {
 #if defined(_WIN32)
         KV_CHECK(c, quiet.shell("ping -n 2 127.0.0.1 >nul")); // about a second
 #else
-        KV_CHECK(c, quiet.shell("sleep 0.3"));
+        if (kids) KV_CHECK(c, quiet.shell("sleep 0.3"));
 #endif
         if (os_handle_open(quiet.process) && os_handle_kind(quiet.process) == OsKind::Process) {
             {
@@ -247,7 +249,7 @@ void test_wait(kv::TestCtx& c) {
             KV_CHECK(c, platform_wait(e, 0.1) == PlatformWoken::Time);
             KV_INFO("test", "a child's exit ended the wait %.3f s in", heard);
         } else {
-            KV_INFO("test", "this OS gives no handle for a child's exit: not watched");
+            KV_INFO("test", "%s", kids ? "this OS gives no handle for a child's exit: not watched" : "this OS starts no child: not watched");
         }
         platform_unwatch(e, &owner);
         quiet.close();
