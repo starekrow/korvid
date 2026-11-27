@@ -124,8 +124,11 @@ constexpr u32 KROME_MOD_CMD   = 1u << 3; // Command on a Mac, the Windows key on
 enum class KromeCursor : u8 { Unset, Arrow, IBeam, Hand, Move, ResizeEW, ResizeNS, Forbidden };
 // What a node is to the window it is in (`grip`): the part that moves it, or an edge or a
 // corner that resizes it, by the OS's own move and resize (HostWindow::grips). In the order
-// of platform_hid's WindowGrip, one up: None is a node that is no grip.
-enum class KromeGrip : u8 { None, Move, N, NE, E, SE, S, SW, W, NW };
+// of platform_hid's WindowGrip, one up: None is a node that is no grip. Drag (`grip=drag`,
+// slice 13's KR42) is the program's own move: a press on it is Krome's, and the pointer's
+// travel on the desktop is sent as KromeDragged, for the program to move the window by (and
+// snap it). Where a program cannot place a window (platform_can_place), it is a Move.
+enum class KromeGrip : u8 { None, Move, N, NE, E, SE, S, SW, W, NW, Drag };
 
 struct KromeNode {
     KromeType  type = KromeType::Box;

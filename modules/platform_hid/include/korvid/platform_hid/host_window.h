@@ -205,6 +205,20 @@ struct HostWindow {
     // bound. Kept, and given again as the scale changes.
     void bounds(u32 min_w, u32 min_h, u32 max_w, u32 max_h);
 
+    // ---- where the window is (docs/PRDs/Engine-Slice-13-PRD.md, KR42) -----------------
+    // Positions are desktop pixels: physical pixels on Win32; elsewhere SDL's screen
+    // coordinates times this window's pixel_scale, so they are in the units width() and
+    // height() are (across displays of different scales they are this window's scale's).
+    // The window's top-left there: its client area's, which a frameless window's is. False
+    // where the platform gives a program no position (Wayland, a phone): platform_can_place.
+    bool position(i32* x, i32* y) const;
+    // Moves the window's top-left to (x, y). It lands at the window's next turn, and
+    // WindowMoved says where. False where the platform does not let a program place it.
+    bool move_to(i32 x, i32 y);
+    // The usable rect of the display the window is most on: its work area, without a taskbar
+    // or a dock. False where it is not known.
+    bool display_bounds(rect2* out) const;
+
     // Some OSes take the window's surface away while the program runs and give another
     // later (Android, whenever the app leaves the screen). fn(ctx, null) is called from
     // inside pump before the old surface is gone: whoever draws to it lets go there, since

@@ -17,6 +17,10 @@
 // window, the pointer's moves between them are logged, H hides the second and shows it again
 // (HostWindow::show), and closing it hides it; closing the main one quits. --two-script
 // also hides it at 1 s and shows it at 2 s, and checks what it says it is.
+//
+// --snap (KR42): a leader and a follower, frameless, each dragged by its darker band by the
+// program (position, move_to): the follower snaps to the leader's top or bottom edge within
+// 10 pixels and then moves with it (WindowMoved); either snaps to its display's work area.
 #include "korvid/window/module.h"
 #include "korvid/core/os_error.h"
 #include "korvid/platform/module.h"
@@ -112,6 +116,128 @@ void round_draw(Round& rd, HostWindow& win) {
 // --two's second window, while it is open.
 HostWindow* g_second = nullptr;
 
+// ---- two windows that snap and follow (--snap) -------------------------------------------
+
+// The leader (the main window) and the follower, each dragged by its top band by the
+// program's own hand (KR42): the window goes where the pointer is on the desktop
+// (MouseState::desktop_x), less where it was in the window at the press. Its place in the
+// window will not do: the window moves under it. The
+// follower snaps to the leader's top or bottom edge within 10 pixels (and to its left edge
+// then), and either to its display's work area (platform_display_bounds); snapped to the
+// leader, it follows it, on the leader's WindowMoved.
+struct Snap {
+    bool        on = false;
+    Engine*     e = nullptr;
+    HostWindow* w[2] = {};
+    u32         drawn_w[2] = {}, drawn_h[2] = {};
+    bool        dragging = false, was_down = false;
+    u32         which = 0;
+    i32         grab_x = 0, grab_y = 0;     // the pointer on the desktop at the press, less the window's place
+    bool        attached = false;           // the follower moves with the leader
+    i32         leader_x = 0, leader_y = 0; // the leader's place, as last heard
+    u32         follows = 0;                // moves the follower made with the leader
+};
+Snap g_snap;
+constexpr i32 k_snap_px = 10;
+
+// A flat colour, its band a shade darker; drawn at a new size, presented every frame.
+void snap_draw(Snap& sn, u32 i) {
+    HostWindow::SoftwareFrame f;
+    if (!sn.w[i] || !sn.w[i]->software_frame(&f)) return;
+    if (f.width != sn.drawn_w[i] || f.height != sn.drawn_h[i]) {
+        u32 band = (u32)(32.0f * sn.w[i]->pixel_scale());
+        u8 base[3] = {i ? (u8)60 : (u8)200, i ? (u8)120 : (u8)110, i ? (u8)200 : (u8)40};
+        for (u32 y = 0; y < f.height; ++y) {
+            u8* row = f.pixels + (usize)y * f.pitch;
+            f32 k = y < band ? 0.6f : 1.0f;
+            u8 R = (u8)(base[0] * k), G = (u8)(base[1] * k), B = (u8)(base[2] * k);
+            for (u32 x = 0; x < f.width; ++x) {
+                u8* p = row + x * 4;
+                p[0] = f.rgba ? R : B; p[1] = G; p[2] = f.rgba ? B : R; p[3] = 255;
+            }
+        }
+        sn.drawn_w[i] = f.width;
+        sn.drawn_h[i] = f.height;
+    }
+    sn.w[i]->present_software();
+}
+
+// `v` held to `edge` when within the snap distance of it.
+i32 snap_to(i32 v, i32 edge, bool* hit) {
+    if (v - edge <= k_snap_px && edge - v <= k_snap_px) { *hit = true; return edge; }
+    return v;
+}
+
+// A frame: a press on a band starts a drag, the pointer's moves move the window (snapped),
+// the release ends it.
+void snap_frame(Snap& sn) {
+    Input* in = platform_input(*sn.e);
+    if (!in || !sn.w[0] || !sn.w[1]) return;
+    const MouseState& m = in->raw.mouse;
+    bool down = m.down(MouseButton::Left);
+    u32 i = m.window == sn.w[1]->id() ? 1 : 0;
+    i32 px0 = 0, py0 = 0;
+    if (down && !sn.was_down && m.desktop && m.y < 32.0f * sn.w[i]->pixel_scale() && sn.w[i]->position(&px0, &py0)) {
+        sn.dragging = true;
+        sn.which = i;
+        sn.grab_x = (i32)m.desktop_x - px0;
+        sn.grab_y = (i32)m.desktop_y - py0;
+        sn.w[i]->capture_mouse(true);
+    }
+    if (sn.dragging && down) {
+        HostWindow& w = *sn.w[sn.which];
+        i32 wx = 0, wy = 0;
+        if (w.position(&wx, &wy)) {
+            i32 tx = (i32)m.desktop_x - sn.grab_x, ty = (i32)m.desktop_y - sn.grab_y;
+            i32 ww = (i32)w.width(), wh = (i32)w.height();
+            bool hit = false;
+            if (sn.which == 1) { // the follower, to the leader's edges
+                i32 lx = 0, ly = 0;
+                sn.w[0]->position(&lx, &ly);
+                i32 lw = (i32)sn.w[0]->width(), lh = (i32)sn.w[0]->height();
+                bool across = tx < lx + lw && tx + ww > lx;
+                if (across) {
+                    ty = snap_to(ty, ly + lh, &hit);       // below it
+                    if (!hit) ty = snap_to(ty + wh, ly, &hit) - wh; // above it
+                    if (hit) { bool left = false; tx = snap_to(tx, lx, &left); }
+                }
+                sn.attached = hit;
+            }
+            rect2 db;
+            if (!hit && platform_display_bounds(*sn.e, &w, &db)) { // the display's work area
+                bool edge = false;
+                tx = snap_to(tx, (i32)db.x, &edge);
+                tx = snap_to(tx + ww, (i32)(db.x + db.w), &edge) - ww;
+                ty = snap_to(ty, (i32)db.y, &edge);
+                ty = snap_to(ty + wh, (i32)(db.y + db.h), &edge) - wh;
+            }
+            if (tx != wx || ty != wy) w.move_to(tx, ty);
+        }
+    }
+    if (!down && sn.was_down && sn.dragging) {
+        sn.dragging = false;
+        sn.w[sn.which]->capture_mouse(false);
+        i32 x = 0, y = 0;
+        sn.w[sn.which]->position(&x, &y);
+        KV_INFO("window", "snap: window %u dropped at %d, %d%s", sn.w[sn.which]->id(), x, y,
+                sn.which == 1 ? (sn.attached ? ", snapped to the leader: it follows" : ", on its own") : "");
+    }
+    sn.was_down = down;
+}
+
+void on_window_moved(TickContext&, Span<const WindowMoved> evs) {
+    Snap& sn = g_snap;
+    for (const WindowMoved& mv : evs) {
+        if (!sn.on || !sn.w[0] || mv.window != sn.w[0]->id()) continue;
+        i32 dx = mv.x - sn.leader_x, dy = mv.y - sn.leader_y;
+        sn.leader_x = mv.x;
+        sn.leader_y = mv.y;
+        if (!sn.attached || (sn.dragging && sn.which == 1) || (!dx && !dy)) continue;
+        i32 fx = 0, fy = 0;
+        if (sn.w[1]->position(&fx, &fy) && sn.w[1]->move_to(fx + dx, fy + dy)) ++sn.follows;
+    }
+}
+
 void on_close(TickContext& ctx, Span<const CloseRequested> evs) {
     for (const CloseRequested& c : evs) {
         if (c.window != 0 && g_second && c.window == g_second->id()) {
@@ -175,6 +301,7 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_button", KV_ON(MouseButtonDown, on_button), .phase = Phase::Input},
     {.name = ".on_wheel", KV_ON(MouseWheel, on_wheel), .phase = Phase::Input},
     {.name = ".on_moved", KV_ON(MouseMoved, on_moved), .phase = Phase::Input},
+    {.name = ".on_window_moved", KV_ON(WindowMoved, on_window_moved), .phase = Phase::Input},
 };
 
 // The loop's health and one frame of it, shared by the loop and by the frames run from
@@ -228,7 +355,8 @@ int run(int argc, char** argv) {
         else if (strcmp(argv[i], "--grips") == 0) round.on = round.grips = true;
         else if (strcmp(argv[i], "--two") == 0) two = true;
         else if (strcmp(argv[i], "--two-script") == 0) two = two_script = true;
-        else { KV_ERROR("window", "unknown option '%s' (--run-seconds N, --hitch-ms N, --borderless, --round, --grips, --two, --two-script, --bundled NAME, --asset PATH, --text)", argv[i]); return 2; }
+        else if (strcmp(argv[i], "--snap") == 0) g_snap.on = true;
+        else { KV_ERROR("window", "unknown option '%s' (--run-seconds N, --hitch-ms N, --borderless, --round, --grips, --two, --two-script, --snap, --bundled NAME, --asset PATH, --text)", argv[i]); return 2; }
     }
     Engine e;
     if (!engine_init(e, kv_module_list())) return 1;
@@ -236,7 +364,8 @@ int run(int argc, char** argv) {
     d.title = "korvid window";
     d.width = 960;
     d.height = 540;
-    d.borderless = borderless;
+    d.borderless = borderless || g_snap.on;
+    if (g_snap.on) { d.title = "korvid snap leader"; d.width = 360; d.height = 200; }
     if (round.on) {
         d.width = d.height = 360;
         d.transparent = true;
@@ -256,6 +385,20 @@ int run(int argc, char** argv) {
             KV_INFO("window", "a second window, id %u, %ux%u px; the main one is id %u", g_second->id(), g_second->width(), g_second->height(), win->id());
             g_second->present_blank();
         }
+    }
+    if (win && g_snap.on) {
+        WindowDesc d2;
+        d2.title = "korvid snap follower";
+        d2.width = 360;
+        d2.height = 240;
+        d2.borderless = true;
+        g_snap.e = &e;
+        g_snap.w[0] = win;
+        g_snap.w[1] = platform_open_window(e, d2);
+        if (!g_snap.w[1]) { KV_ERROR("window", "snap: the follower did not open"); rc = 1; }
+        win->position(&g_snap.leader_x, &g_snap.leader_y);
+        KV_INFO("window", "snap: %s", platform_can_place(e) ? "drag either by its band; the follower snaps to the leader within 10 px and follows it"
+                                                         : "this platform does not let a program place a window: nothing snaps");
     }
     u32 script_step = 0, script_bad = 0;
     // Where a platform keeps a program's files, shown: a bundled file read now
@@ -301,6 +444,7 @@ int run(int argc, char** argv) {
             }
         }
         if (round.on && win) round_draw(round, *win);
+        if (g_snap.on && g_snap.w[1]) { snap_frame(g_snap); snap_draw(g_snap, 0); snap_draw(g_snap, 1); }
         // --two-script: hide the second window at 1 s, show it at 2 s, and say whether each
         // took, as visible() has it once a pump has passed.
         if (two_script && g_second) {
@@ -330,6 +474,8 @@ int run(int argc, char** argv) {
         if (script_step < 4 || script_bad) rc = rc ? rc : 1;
     }
     g_second = nullptr;
+    if (g_snap.on) KV_INFO("window", "snap: the follower moved with the leader %u times", g_snap.follows);
+    g_snap = Snap{};
     round.mask.free();
     engine_shutdown(e);
     names_shutdown();

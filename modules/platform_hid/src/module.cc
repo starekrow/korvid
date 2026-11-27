@@ -104,6 +104,7 @@ void input_sample(TickContext& ctx) {
         m.x = s.pointer_x;
         m.y = s.pointer_y;
         m.window = s.pointer_window;
+        m.desktop = false; // put there by a script, not the mouse: no place on the desktop to go by
         m.buttons = s.pointer_buttons;
         m.wheel += s.pointer_wheel;
         for (u32 b = 0; b < (u32)MouseButton::Count; ++b) {
@@ -152,6 +153,7 @@ constinit const EventTypeDesc k_events[] = {
     KV_EVENT(FocusChanged),
     KV_EVENT(CloseRequested),
     KV_EVENT(WindowVisibility),
+    KV_EVENT(WindowMoved),
     KV_EVENT(KeyDown),
     KV_EVENT(KeyUp),
     KV_EVENT(MouseMoved),
@@ -271,6 +273,13 @@ bool platform_video_up(Engine&) { return hid_video_up(); }
 HostWindow* platform_window(Engine& e) {
     HidState* s = state(e);
     return s && s->windows[0].is_open() ? &s->windows[0] : nullptr;
+}
+
+bool platform_can_place(Engine&) { return hid_backend_can_place(); }
+
+bool platform_display_bounds(Engine& e, const HostWindow* window, rect2* out) {
+    const HostWindow* w = window ? window : platform_window(e);
+    return w && w->is_open() && out && w->display_bounds(out);
 }
 
 bool platform_window_visible(Engine& e) {

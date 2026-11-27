@@ -74,6 +74,13 @@ bool        platform_video_up(Engine& e);
 HostWindow* platform_window(Engine& e);
 // Whether the main window is seen (HostWindow::visible); true with no window.
 bool        platform_window_visible(Engine& e);
+// Whether a program may place its windows here (KR42): HostWindow::position, move_to and
+// WindowMoved work. False on Wayland, which gives a client no position and takes none, and
+// on a phone. Where it is false, Krome's grip=drag is the OS's move, and nothing snaps.
+bool        platform_can_place(Engine& e);
+// The usable rect of the display a window is on (HostWindow::display_bounds), the main one
+// when null. False where it is not known.
+bool        platform_display_bounds(Engine& e, const HostWindow* window, rect2* out);
 // Asks the OS for typed text (InputState::text) while on; a text field turns it on while it
 // has the focus. Counted: on twice needs off twice.
 void platform_text_input(Engine& e, bool on);

@@ -33,6 +33,13 @@ struct Engine;
 // event (0 for the rest).
 struct KromeEvent { u64 screen; u64 node; u64 event; f64 value; f32 x = 0.0f, y = 0.0f; };
 
+// Out: a `grip=drag` node pressed and dragged (slice 13, KR42): its screen and id, the window
+// it is in, and the pointer's travel since the press in desktop pixels (HostWindow::position's
+// units), which stays true while the program moves the window under the pointer. `phase`:
+// 0 the press, 1 a move, 2 the release. The program moves the window to where it was at the
+// press plus (dx, dy), snapping as it likes.
+struct KromeDragged { u64 screen; u64 node; f32 dx, dy; u8 window; u8 phase; };
+
 // Out: which rows a sparse each (`each row in rows height=24 count=@total from=@first ->
 // view`) has built, when that changes: rows [first, first + count) of `total`, those in view
 // and a screenful each side. The screen's owner puts those rows in the model (the list and

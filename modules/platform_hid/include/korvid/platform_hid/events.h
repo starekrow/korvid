@@ -18,6 +18,10 @@ struct CloseRequested { u8 window = 0; };
 // the hidden and shown events arrive together when it comes back.
 enum class WindowHidden : u8 { None, Minimized, Occluded, Hidden };
 struct WindowVisibility { bool visible; WindowHidden why; u8 window = 0; };
+// The window moved, by the OS (a drag, a tile) or by HostWindow::move_to: its top-left, in
+// desktop pixels (HostWindow::position). Where the platform gives no position (Wayland, a
+// phone), never sent.
+struct WindowMoved { i32 x, y; u8 window = 0; };
 
 struct KeyDown { Key key; u8 device; bool repeat; };
 struct KeyUp   { Key key; u8 device; };

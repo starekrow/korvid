@@ -57,6 +57,14 @@ window's bounds (`HostWindow::bounds`), in pixels at the window's scale. A press
 is the OS's: the node and its ancestors take none. Open the window with
 `WindowDesc::borderless` or `transparent`, or the desktop's frame is there as well.
 
+`grip=drag` (KR42) is the program's own move, for a window that snaps or that others follow.
+A press on it is Krome's, and Krome sends `KromeDragged{screen, node, dx, dy, window, phase}`:
+the pointer's travel on the desktop since the press (`MouseState::desktop_x`), which holds
+while the window moves under it; phase 0 the press, 1 a move, 2 the release, and no click.
+The program moves the window to where it was at the press plus the travel
+(`HostWindow::move_to`), snapping as it likes. Where a program may not place a window
+(`platform_can_place` false: Wayland), it is `grip=move`.
+
 **More than one window** (slice 13, KR40). `krome_open(e, file, screen, layer, window)` opens a
 screen in another window, by its id (`HostWindow::id`; the main one, 0, when left out),
 which `frameloop_open_window` opened. Each window has its own view: its size and scale, the
@@ -301,6 +309,7 @@ Header `korvid/krome/krome.h`:
 | `krome_viewport(e, w, h, scale)` | function | the view's size without a window |
 | `krome_stats(e)` | function | layouts, paints, lists handed over, events, errors, regions and nodes rebuilt |
 | `KromeEvent`, `KromeSet` | events | out and in |
+| `KromeDragged` | event | out: a `grip=drag` node dragged, the pointer's travel on the desktop (slice 13, KR42) |
 | `KromeView` | event | out: which rows a sparse each built (`first`, `count`, `total`) |
 | `krome.pump`, `krome.input`, `krome.paint` (Frame) | systems | documents, scripts, rebuilds and model values; the pointer; layout and paint |
 | `/krome` | CLI mount | `ls` screens and named nodes, `print` a tree or a node, `patch NODE PROPERTY VALUE...` |

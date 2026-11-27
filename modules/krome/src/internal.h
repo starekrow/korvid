@@ -323,6 +323,12 @@ struct KromeModule {
     };
     WindowView          views[KV_WINDOWS];
     u8                  cur_window = 0;
+    // A grip=drag node being dragged (KR42): it, its window, and the pointer on the desktop at
+    // the press; what the last KromeDragged said.
+    struct Drag { KromeTarget node; u8 window = 0; i32 sx = 0, sy = 0; f32 dx = 0.0f, dy = 0.0f; bool on = false; };
+    Drag                drag;
+    f32                 desk_x = 0.0f, desk_y = 0.0f; // the pointer on the desktop this input pass, where told
+    bool                desk_ok = false;
     u64                 paints = 0, layouts = 0, submits = 0;
     u32                 input_id = 0; // input.state's resource id in this engine
     // A scrollbar the pointer pressed: its box, which way, where on the thumb it was taken
@@ -441,6 +447,7 @@ void krome_fire_named(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 node
 // A sparse each's built rows changed (KromeView, and the screen's on.<event>).
 void krome_fire_view(KromeModule& s, KromeScreen& sc, Name event, u32 first, u32 count, u32 total);
 void krome_emit_view(KromeModule& s, const KromeView& ev);
+void krome_emit_dragged(KromeModule& s, const KromeDragged& ev);
 // Says, for each sparse each whose built rows changed since it last said, which they are.
 void krome_send_views(KromeModule& s, KromeScreen& sc);
 // Builds again the sparse eaches whose keys changed since the last frame.

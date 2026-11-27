@@ -749,9 +749,11 @@ KromeTarget pressable(KromeModule& s, KromeTarget t) {
     KromeTree* tree = krome_target_tree(s, t, &sc);
     if (!tree || t.node == KROME_NONE) return KromeTarget{};
     u32 found = KROME_NONE;
+    bool place = s.e && platform_can_place(*s.e);
     for (u32 n = t.node; n != KROME_NONE; n = tree->nodes[n].parent) {
         const KromeNode& node = tree->nodes[n];
         if (node.flags & KROME_DISABLED) return KromeTarget{};
+        if (found == KROME_NONE && node.grip == KromeGrip::Drag && place) found = n; // the program's move: Krome takes the press
         if (found == KROME_NONE && node.grip != KromeGrip::None) return KromeTarget{}; // the OS's: it moves or resizes the window
         if (found == KROME_NONE && (!node.event.is_null() || !node.binding.is_null() || !node.behave.is_null() || node.type == KromeType::Hit || node.type == KromeType::Edit)) found = n;
     }
@@ -961,16 +963,19 @@ bool takes_press(const KromeNode& n) {
 // A tree's grips, and the nodes that take a press of their own (as None: the program's),
 // in paint order, physical pixels, clipped as the pointer is: so a button inside a title
 // bar that moves the window is still the button's.
-void tree_grips(const KromeTree& t, u32 node, f32 scale, rect2 clip, Array<WindowGripRect>& out) {
+// A grip=drag node is the program's where it may place the window (`place`), the OS's move
+// where it may not.
+void tree_grips(const KromeTree& t, u32 node, f32 scale, rect2 clip, Array<WindowGripRect>& out, bool place) {
     const KromeNode& n = t.nodes[node];
     if (n.flags & KROME_HIDDEN) return;
     rect2 r = intersect(clip, krome_pixel_rect(n.rect, scale));
     if (r.w > 0.0f && r.h > 0.0f) {
-        if (n.grip != KromeGrip::None) out.push(WindowGripRect{r, (WindowGrip)((u8)n.grip - 1)});
+        if (n.grip == KromeGrip::Drag) out.push(WindowGripRect{r, place ? WindowGrip::None : WindowGrip::Move});
+        else if (n.grip != KromeGrip::None) out.push(WindowGripRect{r, (WindowGrip)((u8)n.grip - 1)});
         else if (takes_press(n)) out.push(WindowGripRect{r, WindowGrip::None});
     }
     rect2 inner = (n.flags & (KROME_CLIP | KROME_SCROLL)) ? intersect(clip, krome_pixel_rect(n.rect, scale)) : clip;
-    for (u32 ch = n.first; ch != KROME_NONE; ch = t.nodes[ch].next) tree_grips(t, ch, scale, inner, out);
+    for (u32 ch = n.first; ch != KROME_NONE; ch = t.nodes[ch].next) tree_grips(t, ch, scale, inner, out, place);
 }
 
 bool overlaps(const rect2& a, const rect2& b) {
@@ -991,6 +996,7 @@ u32 range_px(f32 v, f32 scale, bool up) {
 // screen's overlays over it, and its bounds, the size range on the lowest screen's root
 // that has one (`w=275..800 h=116..600`).
 void krome_window_parts(KromeModule& s, Array<WindowGripRect>& out, u32 bounds[4]) {
+    bool place = s.e && platform_can_place(*s.e);
     KromeScreen* order[k_max_screens];
     u32 n = 0;
     screens_top_first(s, order, &n);
@@ -1000,7 +1006,7 @@ void krome_window_parts(KromeModule& s, Array<WindowGripRect>& out, u32 bounds[4
     for (u32 i = n; i-- > 0;) {
         KromeScreen& sc = *order[i];
         if (sc.tree.root != KROME_NONE) {
-            tree_grips(sc.tree, sc.tree.root, s.scale, k_everywhere, out);
+            tree_grips(sc.tree, sc.tree.root, s.scale, k_everywhere, out, place);
             const KromeNode& root = sc.tree.nodes[sc.tree.root];
             bool ranged = root.w.lo > 0.0f || root.h.lo > 0.0f || root.w.hi != __builtin_huge_valf() || root.h.hi != __builtin_huge_valf();
             if (ranged && !bounded) {
@@ -1017,7 +1023,7 @@ void krome_window_parts(KromeModule& s, Array<WindowGripRect>& out, u32 bounds[4
             // grip under it.
             rect2 at = o->modal ? rect2{0, 0, s.win_w, s.win_h} : krome_pixel_rect(o->tree.nodes[o->tree.root].rect, s.scale);
             out.push(WindowGripRect{at, WindowGrip::None});
-            tree_grips(o->tree, o->tree.root, s.scale, k_everywhere, out);
+            tree_grips(o->tree, o->tree.root, s.scale, k_everywhere, out, place);
         }
     }
     // A rect of the program's matters only over a grip before it: the rest are dropped, and
@@ -1259,6 +1265,36 @@ void krome_view_frame(KromeModule& s) {
     if (s.animating) engine_want_frame(*s.e);
 }
 
+namespace {
+
+// grip=drag (KR42): whether a target is such a node; the pointer on the desktop, from the
+// current window's place; the node's KromeDragged.
+bool is_drag(KromeModule& s, KromeTarget t) {
+    KromeTree* tree = t.node != KROME_NONE ? krome_target_tree(s, t, nullptr) : nullptr;
+    return tree && t.node < tree->nodes.len && tree->nodes[t.node].grip == KromeGrip::Drag;
+}
+
+// The platform's own (MouseState::desktop_x, as of this input pass) where it tells it: the
+// pointer's place in the window is not to be trusted while the window moves under it.
+bool desktop_point(KromeModule& s, f32 x, f32 y, i32* ox, i32* oy) {
+    if (s.desk_ok) { *ox = (i32)s.desk_x; *oy = (i32)s.desk_y; return true; }
+    HostWindow* w = s.e ? platform_window_by_id(*s.e, s.cur_window) : nullptr;
+    i32 wx = 0, wy = 0;
+    if (!w || !w->position(&wx, &wy)) return false;
+    *ox = wx + (i32)x;
+    *oy = wy + (i32)y;
+    return true;
+}
+
+void drag_send(KromeModule& s, u8 phase) {
+    KromeScreen* sc = krome_screen_by_id(s, s.drag.node.screen);
+    KromeTree* t = krome_target_tree(s, s.drag.node, nullptr);
+    u64 id = t && s.drag.node.node < t->nodes.len ? t->nodes[s.drag.node.node].id.hash : 0;
+    krome_emit_dragged(s, KromeDragged{sc ? sc->name.hash : 0, id, s.drag.dx, s.drag.dy, s.drag.window, phase});
+}
+
+} // namespace
+
 void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool escape) {
     s.px = x;
     s.py = y;
@@ -1319,7 +1355,30 @@ void krome_pointer(KromeModule& s, f32 x, f32 y, bool down, f32 wheel, bool esca
             krome_behave(s, s.captured, KromeCall::Press, a);
             s.drag_at = vec2{x, y};
         }
+        // A grip=drag node: where the pointer is on the desktop at the press, and the press told.
+        i32 px = 0, py = 0;
+        if (is_drag(s, s.captured) && desktop_point(s, x, y, &px, &py)) {
+            s.drag = KromeModule::Drag{s.captured, s.cur_window, px, py, 0.0f, 0.0f, true};
+            drag_send(s, 0);
+        }
         repaint(s, s.captured);
+    } else if (!down && s.down && s.drag.on) {
+        // A drag's release: told, and no click: the node moved a window, it was not pressed.
+        drag_send(s, 2);
+        s.drag.on = false;
+        repaint(s, s.captured);
+        s.captured = KromeTarget{};
+    } else if (down && s.drag.on) {
+        // The travel on the desktop, which holds while the program moves the window under it.
+        i32 px = 0, py = 0;
+        if (desktop_point(s, x, y, &px, &py)) {
+            f32 dx = (f32)(px - s.drag.sx), dy = (f32)(py - s.drag.sy);
+            if (dx != s.drag.dx || dy != s.drag.dy) {
+                s.drag.dx = dx;
+                s.drag.dy = dy;
+                drag_send(s, 1);
+            }
+        }
     } else if (!down && s.down && s.bar.active) {
         repaint(s, s.bar.box);
         s.bar = KromeModule::Bar{};

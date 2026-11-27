@@ -35,6 +35,11 @@ void krome_emit(KromeModule& s, const KromeEvent& ev) {
     else s.e->events.emit(ev);
 }
 
+void krome_emit_dragged(KromeModule& s, const KromeDragged& ev) {
+    if (s.ctx) s.ctx->emit(ev);
+    else s.e->events.emit(ev);
+}
+
 void krome_emit_view(KromeModule& s, const KromeView& ev) {
     if (s.ctx) s.ctx->emit(ev);
     else s.e->events.emit(ev);
@@ -222,6 +227,8 @@ void krome_input(TickContext& ctx) {
     if (!s.input_id) s.input_id = ctx.resource_id("input.state"); // per engine: a static would outlive it
     const Input* in = ctx.resource<const Input>(s.input_id);
     s.ctx = &ctx;
+    s.desk_ok = in && in->raw.mouse.desktop;
+    if (s.desk_ok) { s.desk_x = in->raw.mouse.desktop_x; s.desk_y = in->raw.mouse.desktop_y; }
     // The left button's changes in order: from up, down first; from down, up first.
     Span<const MouseButtonDown> downs = ctx.received<MouseButtonDown>();
     Span<const MouseButtonUp> ups = ctx.received<MouseButtonUp>();
@@ -486,7 +493,7 @@ constinit const FieldDesc k_event_fields[] = {KV_FIELDS(KromeEvent, screen, node
 constinit const FieldDesc k_set_fields[] = {KV_FIELDS(KromeSet, screen, key, number, kind, pad, text)};
 constinit const FieldDesc k_view_fields[] = {KV_FIELDS(KromeView, screen, event, first, count, total, pad)};
 constinit const EventTypeDesc k_events[] = {KV_EVENT_EX(KromeEvent, k_event_fields, 0), KV_EVENT_EX(KromeSet, k_set_fields, 0),
-                                            KV_EVENT_EX(KromeView, k_view_fields, 0)};
+                                            KV_EVENT_EX(KromeView, k_view_fields, 0), KV_EVENT(KromeDragged)};
 // A document's blob landed or reloaded (in PreSim): a frame, so the pump takes it.
 void on_asset_ready(TickContext& ctx, Span<const AssetReady>) { engine_want_frame(*ctx.engine); }
 void on_asset_reloaded(TickContext& ctx, Span<const AssetReloaded>) { engine_want_frame(*ctx.engine); }
@@ -500,7 +507,7 @@ constinit const SystemDesc k_systems[] = {
     // The Frame cycle (docs/design/cycles.md): once before each frame drawn, never in a tick.
     {.name = ".pump", .phase = Phase::Frame, .fn = krome_pump, .reads = "KromeSet", .emits = "KromeEvent", .main_thread = true},
     {.name = ".input", .phase = Phase::Frame, .fn = krome_input,
-     .reads = "input.state, MouseButtonDown, MouseButtonUp, MouseWheel, KeyDown, TextTyped, TextComposing, FocusChanged", .emits = "KromeEvent",
+     .reads = "input.state, MouseButtonDown, MouseButtonUp, MouseWheel, KeyDown, TextTyped, TextComposing, FocusChanged", .emits = "KromeEvent, KromeDragged",
      .after = ".pump", .main_thread = true},
     {.name = ".paint", .phase = Phase::Frame, .fn = krome_paint, .after = ".input", .main_thread = true},
 };

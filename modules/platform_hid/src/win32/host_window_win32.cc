@@ -47,7 +47,7 @@ namespace kv {
 
 namespace {
 
-enum class WinMsgType : u8 { Close, Size, Focus, Key, Move, Button, Wheel, Char, Compose, Minimized };
+enum class WinMsgType : u8 { Close, Size, Focus, Key, Move, Button, Wheel, Char, Compose, Minimized, Moved };
 
 // What the window thread saw, in the order it saw it.
 struct WinMsg {
@@ -55,10 +55,11 @@ struct WinMsg {
     bool       on;      // Focus: focused; Key, Button: down; Minimized: minimized
     bool       repeat;  // Key: auto-repeat
     u8         button;  // Button: a MouseButton
-    u32        a, b;    // Size: width, height in pixels; Key: scancode; Char: a code point;
+    u32        a, b;    // Size: width, height in pixels; Key: scancode; Char: a code point; Move, Button: the
+                        // pointer on the desktop then (GetMessagePos), as i32s;
                         // Compose: its UTF-8 in the texts queue, at a, b bytes long
     u32        c, d;    // Compose: the caret and the selection's length, in bytes
-    f32        x, y;    // Move, Button: position in pixels; Wheel: dx, dy in notches
+    f32        x, y;    // Move, Button: position in pixels; Wheel: dx, dy in notches; Moved: the client area's top-left on the desktop
     f64        at;      // time_now() as the window thread queued it: input_delay()'s start
     u8         win;     // the window it came from: its HostWindow's id
 };
@@ -264,6 +265,9 @@ void post_button(HWND h, MouseButton b, bool down, LPARAM lp) {
     m.button = (u8)b;
     m.x = (f32)GET_X_LPARAM(lp);
     m.y = (f32)GET_Y_LPARAM(lp);
+    DWORD at = GetMessagePos(); // the cursor on the desktop when the message was made
+    m.a = (u32)GET_X_LPARAM(at);
+    m.b = (u32)GET_Y_LPARAM(at);
     post(m);
 }
 
@@ -339,6 +343,14 @@ LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         post(m);
         return 0;
     }
+    case WM_MOVE: { // the client area's top-left on the desktop (KR42)
+        WinMsg m{};
+        m.type = WinMsgType::Moved;
+        m.x = (f32)GET_X_LPARAM(lp);
+        m.y = (f32)GET_Y_LPARAM(lp);
+        post(m);
+        return 0;
+    }
     case WM_DPICHANGED: {
         atomic_store(&W.dpi, (u32)HIWORD(wp), MO_RELEASE);
         const RECT* r = (const RECT*)lp; // the size Windows suggests at the new DPI
@@ -408,6 +420,9 @@ LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         m.type = WinMsgType::Move;
         m.x = (f32)GET_X_LPARAM(lp);
         m.y = (f32)GET_Y_LPARAM(lp);
+        DWORD at = GetMessagePos();
+        m.a = (u32)GET_X_LPARAM(at);
+        m.b = (u32)GET_Y_LPARAM(at);
         post(m);
         return 0;
     }
@@ -934,6 +949,9 @@ void HostWindow::pump(EventBus& bus, Input& input) {
         case WinMsgType::Minimized:
             w.set_hidden(bus, HiddenMinimized, m.on);
             break;
+        case WinMsgType::Moved:
+            bus.emit(WindowMoved{(i32)m.x, (i32)m.y, id});
+            break;
         case WinMsgType::Focus:
             if (m.on == w.focused_) break;
             w.focused_ = m.on;
@@ -967,6 +985,9 @@ void HostWindow::pump(EventBus& bus, Input& input) {
             break;
         }
         case WinMsgType::Move:
+            mouse.desktop_x = (f32)(i32)m.a;
+            mouse.desktop_y = (f32)(i32)m.b;
+            mouse.desktop = true;
             if (mouse.window != id) { // into another window: its pixels, so no travel
                 mouse.window = id;
                 bus.emit(MouseMoved{m.x, m.y, 0.0f, 0.0f, id});
@@ -982,6 +1003,9 @@ void HostWindow::pump(EventBus& bus, Input& input) {
             mouse.window = id;
             mouse.x = m.x;
             mouse.y = m.y;
+            mouse.desktop_x = (f32)(i32)m.a;
+            mouse.desktop_y = (f32)(i32)m.b;
+            mouse.desktop = true;
             mouse.set(b, m.on);
             if (m.on) bus.emit(MouseButtonDown{b, m.x, m.y, id});
             else      bus.emit(MouseButtonUp{b, m.x, m.y, id});
@@ -1025,6 +1049,41 @@ void HostWindow::on_modal(void (*fn)(void* ctx), void* ctx) {
 
 bool hid_backend_holds_unfocused() { return false; }
 u32  hid_backend_windows() { return KV_WINDOWS; }
+bool hid_backend_can_place() { return true; }
+
+// Desktop pixels are physical pixels here (per-monitor DPI aware): the client area's origin
+// on the desktop, asked of the window as it is now, from any thread.
+bool HostWindow::position(i32* x, i32* y) const {
+    if (!native_) return false;
+    POINT p{0, 0};
+    if (!ClientToScreen((HWND)native_, &p)) return false;
+    *x = p.x;
+    *y = p.y;
+    return true;
+}
+
+// The window's own rect is placed so its client area lands at (x, y); the move is posted to
+// the window's thread (SWP_ASYNCWINDOWPOS), which may be in a modal loop of its own.
+bool HostWindow::move_to(i32 x, i32 y) {
+    HWND h = (HWND)native_;
+    if (!h) return false;
+    RECT wr;
+    POINT c{0, 0};
+    if (!GetWindowRect(h, &wr) || !ClientToScreen(h, &c)) return false;
+    return SetWindowPos(h, nullptr, x - (c.x - wr.left), y - (c.y - wr.top), 0, 0,
+                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS) != 0;
+}
+
+// The work area of the monitor the window is most on.
+bool HostWindow::display_bounds(rect2* out) const {
+    if (!native_) return false;
+    MONITORINFO mi{};
+    mi.cbSize = sizeof mi;
+    if (!GetMonitorInfoW(MonitorFromWindow((HWND)native_, MONITOR_DEFAULTTONEAREST), &mi)) return false;
+    const RECT& r = mi.rcWork;
+    *out = rect2{(f32)r.left, (f32)r.top, (f32)(r.right - r.left), (f32)(r.bottom - r.top)};
+    return true;
+}
 
 // The window's thread shows it or hides it; shown, it does not take the focus. Seen or not
 // is the program's reason, given now and sent at the next pump.

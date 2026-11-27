@@ -619,6 +619,18 @@ HostWindow* event_window(HostWindow& main, const SDL_Event& e) {
     return nullptr;
 }
 
+// The pointer on the desktop, where a program may know it (KR42): SDL's global state at the
+// pointer's own events, in the window's pixels.
+void desktop_pointer(const HostWindow& w, MouseState& m) {
+    m.desktop = hid_backend_can_place();
+    if (!m.desktop) return;
+    f32 gx = 0.0f, gy = 0.0f;
+    SDL_GetGlobalMouseState(&gx, &gy);
+    f32 k = w.pixel_scale();
+    m.desktop_x = gx * k;
+    m.desktop_y = gy * k;
+}
+
 // One OS event into bus events and raw input: pump's and drain's, always on the main
 // window, whose queue is every window's.
 void translate(HostWindow& main, const SDL_Event& e, EventBus& bus, Input& input) {
@@ -676,6 +688,12 @@ void translate(HostWindow& main, const SDL_Event& e, EventBus& bus, Input& input
 
         // Seen or not (KR21). Wayland has no minimized state to report; GNOME and KDE say a
         // surface is suspended, which SDL gives as occluded.
+        case SDL_EVENT_WINDOW_MOVED: // KR42: in desktop pixels, where a client is told its position
+            if (hid_backend_can_place()) {
+                f32 k = w.pixel_scale();
+                bus.emit(WindowMoved{(i32)((f32)e.window.data1 * k), (i32)((f32)e.window.data2 * k), id});
+            }
+            break;
         case SDL_EVENT_WINDOW_MINIMIZED: w.set_hidden(bus, HostWindow::HiddenMinimized, true); break;
         case SDL_EVENT_WINDOW_RESTORED:
         case SDL_EVENT_WINDOW_MAXIMIZED: w.set_hidden(bus, HostWindow::HiddenMinimized, false); break;
@@ -740,6 +758,7 @@ void translate(HostWindow& main, const SDL_Event& e, EventBus& bus, Input& input
             bus.emit(MouseMoved{nx, ny, into ? 0.0f : e.motion.xrel * s, into ? 0.0f : e.motion.yrel * s, id});
             m.window = id;
             m.x = nx; m.y = ny;
+            desktop_pointer(w, m);
             break;
         }
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -758,6 +777,7 @@ void translate(HostWindow& main, const SDL_Event& e, EventBus& bus, Input& input
                 MouseState& m = input.raw.mouse;
                 m.window = id;
                 m.x = e.button.x * s; m.y = e.button.y * s;
+                desktop_pointer(w, m);
                 bool down = e.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
                 m.set(b, down);
                 if (down) bus.emit(MouseButtonDown{b, m.x, m.y, id});
@@ -815,6 +835,39 @@ void HostWindow::on_modal(void (*fn)(void* ctx), void* ctx) {
 
 bool hid_backend_holds_unfocused() { return false; }
 u32  hid_backend_windows() { return KV_WINDOWS; }
+
+// Wayland gives a client no position and takes none (KR42); X11 and macOS do.
+bool hid_backend_can_place() {
+    const char* driver = SDL_GetCurrentVideoDriver();
+    return !driver || strcmp(driver, "wayland") != 0;
+}
+
+// SDL's screen coordinates, in this window's pixels: its pixel_scale times them.
+bool HostWindow::position(i32* x, i32* y) const {
+    SDL_Window* w = (SDL_Window*)native_;
+    int px = 0, py = 0;
+    if (!w || !hid_backend_can_place() || !SDL_GetWindowPosition(w, &px, &py)) return false;
+    f32 k = pixel_scale();
+    *x = (i32)((f32)px * k);
+    *y = (i32)((f32)py * k);
+    return true;
+}
+
+bool HostWindow::move_to(i32 x, i32 y) {
+    SDL_Window* w = (SDL_Window*)native_;
+    if (!w || !hid_backend_can_place()) return false;
+    f32 k = pixel_scale();
+    return SDL_SetWindowPosition(w, (int)((f32)x / k), (int)((f32)y / k));
+}
+
+bool HostWindow::display_bounds(rect2* out) const {
+    SDL_Window* w = (SDL_Window*)native_;
+    SDL_Rect r;
+    if (!w || !SDL_GetDisplayUsableBounds(SDL_GetDisplayForWindow(w), &r)) return false;
+    f32 k = pixel_scale();
+    *out = rect2{(f32)r.x * k, (f32)r.y * k, (f32)r.w * k, (f32)r.h * k};
+    return true;
+}
 
 // SDL's hide and show; SDL then says WINDOW_HIDDEN and _SHOWN, which mark it unmapped too.
 void HostWindow::show(bool on) {

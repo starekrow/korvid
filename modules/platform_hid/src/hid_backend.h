@@ -20,6 +20,8 @@ void hid_video_down();
 bool hid_backend_holds_unfocused();
 // How many windows the backend opens at once: KV_WINDOWS on the desktop, 1 on a phone.
 u32  hid_backend_windows();
+// Whether HostWindow::position and move_to work here (platform_can_place).
+bool hid_backend_can_place();
 
 // The module's windows, KV_WINDOWS of them by id, open or not (window_parts.cc keeps the
 // pointer): the main window's pump gives each event to the one it is for. Null before the

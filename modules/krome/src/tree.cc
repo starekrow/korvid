@@ -347,10 +347,10 @@ const char* KromeTree::set(u32 node, const char* prop, const KromeValue& v, Krom
             return "cursor takes arrow, ibeam, hand, move, resize-ew, resize-ns or forbidden";
         }
         if (!strcmp(prop, "grip")) {
-            static const char* const names[] = {"none", "move", "n", "ne", "e", "se", "s", "sw", "w", "nw"};
-            for (u8 i = 0; i < 10; ++i)
+            static const char* const names[] = {"none", "move", "n", "ne", "e", "se", "s", "sw", "w", "nw", "drag"};
+            for (u8 i = 0; i < 11; ++i)
                 if (v.kind == KromeValue::String && !strcmp(v.s, names[i])) { n.grip = (KromeGrip)i; return nullptr; }
-            return "grip takes move, n, ne, e, se, s, sw, w, nw or none";
+            return "grip takes move, drag, n, ne, e, se, s, sw, w, nw or none";
         }
     }
     // A look's property, in the state's look (made on first use).

@@ -62,6 +62,11 @@ struct MouseState {
     f32 wheel = 0.0f;
     u8  buttons = 0;
     u8  window = 0; // the window the pointer was last in (HostWindow::id), whose pixels x and y are
+    // The pointer on the desktop, in desktop pixels (HostWindow::position's), as of the last
+    // event that moved it, where the platform tells it (`desktop`: not Wayland, not a phone). A
+    // drag that moves a window goes by these: the window's own x and y move under the pointer.
+    f32  desktop_x = 0.0f, desktop_y = 0.0f;
+    bool desktop = false;
     bool down(MouseButton b) const { return (buttons >> (u32)b) & 1u; }
     void set(MouseButton b, bool on) { u8 m = (u8)(1u << (u32)b); if (on) buttons |= m; else buttons &= (u8)~m; }
 };

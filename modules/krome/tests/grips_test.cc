@@ -98,6 +98,43 @@ void test_grips(kv::TestCtx& c) {
     krome_window_parts(s, g, bounds);
     KV_CHECK(c, g.len >= 1 && grip_is(g[0], WindowGrip::Move, 0, 0, 800, 40));
     KV_CHECK(c, bounds[0] == 550 && bounds[1] == 232 && bounds[2] == 1600 && bounds[3] == 1200);
+
+    // grip=drag (KR42): the program's own move where it may place a window, so the band is no
+    // grip (and with none, the list is empty: the window's input is its own) and Krome takes
+    // its press; the OS's move where it may not.
+    // The travel is the pointer's on the desktop (set here as the platform would), and a
+    // drag is no click.
+    krome_close(e, skin);
+    krome_viewport(e, 400, 300, 1.0f);
+    Name drag = krome_open_source(e, "kv/drag", R"lua(
+return {
+  model = { clicks = 0 },
+  on = { clicked = function() model.clicks = model.clicks + 1 end },
+  root = col { w = "fill", h = "fill",
+    row { id = "band", grip = "drag", event = "clicked", h = 20, w = "fill", bg = "#203040" },
+  },
+}
+)lua");
+    frames(e, 2);
+    KV_CHECK(c, krome_ready(e, drag));
+    bool place = platform_can_place(e);
+    krome_window_parts(s, g, bounds);
+    KV_CHECK(c, place ? g.len == 0 : g.len == 1 && grip_is(g[0], WindowGrip::Move, 0, 0, 400, 20));
+    if (place) {
+        s.desk_ok = true;
+        s.desk_x = 500.0f;
+        s.desk_y = 300.0f;
+        krome_pointer(s, 100, 10, true, 0, false);
+        KV_CHECK(c, s.drag.on && s.drag.dx == 0.0f && s.drag.dy == 0.0f);
+        s.desk_x = 530.0f;
+        s.desk_y = 290.0f;
+        krome_pointer(s, 130, 0, true, 0, false);
+        KV_CHECK(c, s.drag.on && s.drag.dx == 30.0f && s.drag.dy == -10.0f);
+        krome_pointer(s, 130, 0, false, 0, false);
+        KV_CHECK(c, !s.drag.on);
+        KV_CHECK(c, strcmp(krome_model_text(e, drag, "clicks"), "0") == 0);
+        s.desk_ok = false;
+    }
     g.free();
     engine_shutdown(e);
 }

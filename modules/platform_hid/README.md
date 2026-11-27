@@ -164,6 +164,19 @@ hold any resize, in pixels, 0 for none, and follow a change of scale. Krome give
 from a screen's `grip=` nodes and its root's size range
 ([krome](../krome/README.md#behaviour-worth-knowing)).
 
+**Placing a window** (slice 13, KR42). `HostWindow::position(&x, &y)` is its top-left on the
+desktop, `move_to(x, y)` puts it there (at the window's next turn; `WindowMoved` says where,
+as it does for the OS's own moves), and `display_bounds` is its display's work area. All in
+desktop pixels: physical pixels on Win32, SDL's screen coordinates times the window's
+`pixel_scale` elsewhere. `MouseState::desktop_x` is the pointer there, from the platform as
+each event was made (`GetMessagePos` on Win32, SDL's global state), which is what a drag
+that moves a window must go by: the pointer's place in the window moves as the window does,
+and a drag that adds it to the window's place runs away. `platform_can_place(e)` is false on
+Wayland, which gives a client no place and takes none, and on a phone; there `position` and
+`move_to` refuse and nothing is sent. Snapping and following are the program's:
+`window --snap` drags two windows by its own hand, snaps the second to the first and moves
+it with it.
+
 **What each platform does**, as found on SDL 3.4.2 and Windows 11:
 
 | platform | alpha | input through the clear parts | grips, bounds |
@@ -195,7 +208,7 @@ Header `korvid/platform_hid/host_window.h`:
 | name | kind | what |
 |---|---|---|
 | `WindowDesc` | record | `title`, `width`, `height`, `vsync` (a preference the renderer reads), `surface` (`Software`, `Vulkan`, `Metal`, `D3D12`), `borderless`, `transparent` |
-| `HostWindow` | record | `open(desc)`, `close()`, `is_open()`, `id()`, `show(on)`, `width()`, `height()`, `vsync()`, `focused()`, `visible()`, `hidden_why()`, `minimize(on)`, `pump(bus, input)`, `wait(seconds)`, `wake()`, `input_delay()`, `present_blank()`, `native_handle()`; `transparent()`, `shape(alpha, w, h)`, `grips(list, count)`, `grip_at(x, y)`, `bounds(min_w, min_h, max_w, max_h)` |
+| `HostWindow` | record | `open(desc)`, `close()`, `is_open()`, `id()`, `show(on)`, `position(&x, &y)`, `move_to(x, y)`, `display_bounds(&rect)`, `width()`, `height()`, `vsync()`, `focused()`, `visible()`, `hidden_why()`, `minimize(on)`, `pump(bus, input)`, `wait(seconds)`, `wake()`, `input_delay()`, `present_blank()`, `native_handle()`; `transparent()`, `shape(alpha, w, h)`, `grips(list, count)`, `grip_at(x, y)`, `bounds(min_w, min_h, max_w, max_h)` |
 | `KV_WINDOWS` | constant | 8: the most windows open at once |
 | `WindowGrip`, `WindowGripRect`, `KV_WINDOW_GRIPS` | enum, record, constant | `Move`, `N` ... `NW` by compass point, `None` (the program's); a rect in framebuffer pixels and its grip; 64 kept |
 
@@ -206,7 +219,7 @@ Header `korvid/platform_hid/input.h`:
 | `Key` | enum | letters, digits, F keys, `Escape`, `Space`, `Enter`, `Tab`, `Backspace`, arrows, modifiers; `key_name` |
 | `PadButton`, `PadAxis` | enums | the standard layout; `pad_button_name`, `pad_axis_name` |
 | `GamepadState` | record | `buttons` (bits), `axes`, `connected`, `id`; `down(b)`, `axis(a)` |
-| `MouseButton`, `MouseState` | enum, record | `x`, `y` in framebuffer pixels (origin top-left) of `window`, the one the pointer was last in, `wheel` (the scroll since the last sample), `buttons`; `down(b)`; `mouse_button_name` |
+| `MouseButton`, `MouseState` | enum, record | `x`, `y` in framebuffer pixels (origin top-left) of `window`, the one the pointer was last in; `desktop_x`, `desktop_y` on the desktop where `desktop`, `wheel` (the scroll since the last sample), `buttons`; `down(b)`; `mouse_button_name` |
 | `mouse_screen(x, y, w, h, &sx, &sy)` | function | window pixels to screen space: center origin, +y up, what screen-space sprites use |
 | `InputState` | record | `down(key)`, `set(key, on)`, `clear()`, `pads[KV_MAX_GAMEPADS]`, `pad()` (the first connected), `mouse` |
 | `Input` | record | `raw`, `sampled`, `sample()` |
@@ -214,7 +227,7 @@ Header `korvid/platform_hid/input.h`:
 | `KV_MAX_GAMEPADS`, `KV_PAD_DEAD_ZONE` | constants | 4; 0.15 |
 
 Header `korvid/platform_hid/events.h`: `WindowResized{width, height, window}`, `FocusChanged{focused, window}`,
-`CloseRequested{window}`, `WindowVisibility{visible, why, window}` (`WindowHidden`: `None`, `Minimized`, `Occluded`, `Hidden`), `KeyDown{key, device, repeat}`, `KeyUp{key, device}`,
+`CloseRequested{window}`, `WindowVisibility{visible, why, window}`, `WindowMoved{x, y, window}` (`WindowHidden`: `None`, `Minimized`, `Occluded`, `Hidden`), `KeyDown{key, device, repeat}`, `KeyUp{key, device}`,
 `MouseMoved{x, y, dx, dy, window}`, `MouseButtonDown{button, x, y, window}`, `MouseButtonUp{button, x, y, window}`,
 `MouseWheel{dx, dy, window}`, `GamepadConnected{pad}`, `GamepadDisconnected{pad}`,
 `PadButtonDown{button, pad}`, `PadButtonUp{button, pad}`.
@@ -232,6 +245,7 @@ Header `korvid/platform_hid/module.h`:
 | `HidState` | record | `input`, `windows` (by id, `[0]` the main one), `actions`: the module's state, for code outside the schedule |
 | `platform_open_window(engine, desc)`, `platform_window(engine)` | functions | a window, the main one first; null with `KV_WINDOWS` open, a second on a phone, or refused. The main window |
 | `platform_close_window(engine, window)`, `platform_window_by_id(engine, id)` | functions | closes a window other than the main one; the open window with an event's id |
+| `platform_can_place(engine)`, `platform_display_bounds(engine, window, &rect)` | functions | whether a program may place its windows here (not Wayland, not a phone); the usable rect of a window's display |
 | `platform_window_visible(engine)` | function | whether the main window is seen; true with no window |
 | `platform_video_up(engine)` | function | SDL video and gamepads, once; false without a video driver |
 | `platform_input(engine)` | function | the input, for code outside the schedule |
@@ -269,8 +283,8 @@ What the module registers with the engine:
 
 ## Not in this module
 
-Touch, drawing in more than one window (slice 13's KR40, its later milestones), placing a window and the display's bounds
-(KR42), controller rumble.
+Touch; drawing in the windows (the renderer's surfaces, `render`); snapping and following,
+which are the program's (KR42); controller rumble.
 
 ## Android
 

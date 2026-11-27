@@ -419,6 +419,38 @@ through SDL, written at milestones 1 and 2; no Mac is to hand, so it is not trie
 - **Verified** (Nov 26): `kormake test ./modules` and `./examples` on windows-dev; kromedemo's
   `--demo` passed on D3D12 and the CPU renderer.
 
+**Milestone 7, placing (KR42): built Nov 26, 2026.** As above, and:
+
+- **The platform.** `HostWindow::position`, `move_to` and `display_bounds` (the work area),
+  `WindowMoved{x, y, window}`, `platform_can_place` and `platform_display_bounds`, in desktop
+  pixels: physical on Win32, SDL's screen coordinates times the window's `pixel_scale`
+  elsewhere. Win32: the client area's origin (`ClientToScreen`), a move posted to the
+  window's thread (`SWP_ASYNCWINDOWPOS`), `WM_MOVE`, the monitor's `rcWork`. SDL: its
+  position, `SDL_EVENT_WINDOW_MOVED` and usable bounds, none of it on Wayland. Phones refuse.
+- **The pointer on the desktop.** A first drag went by the window's place plus the pointer's
+  place in it, and ran away to -32,758 in a few frames: the pointer's place in the window is
+  stale once the window has moved under it, so each frame added travel already made.
+  `MouseState::desktop_x`, `desktop_y` is the pointer on the desktop as each event was made
+  (`GetMessagePos` on Win32, SDL's global state at its pointer events), and a drag goes by
+  that. An override (`input_pointer_override`) has none.
+- **Krome.** `grip=drag`: where the program may place a window, a press on it is Krome's and
+  `KromeDragged{screen, node, dx, dy, window, phase}` carries the pointer's travel on the
+  desktop since the press, and the release is no click; where it may not, it is `grip=move`.
+  `krome_tests`' `grips_test` checks the list, the travel and that no click fired.
+- **`examples/window --snap`**: a leader and a follower, frameless, each dragged by its band by
+  the program. The follower snaps to the leader's top or bottom edge within 10 pixels (and
+  its left edge then) and, snapped, follows it on the leader's `WindowMoved`; either snaps
+  to its display's work area.
+- **Measured** on Windows 11 at 150%, by synthesized mouse input: the follower dropped 4 px
+  right of and 6 px below the leader's bottom-left landed at exactly (310, 610) under a
+  leader at (310, 310) 300 tall; the leader dragged by (150, 80) took it to exactly (460,
+  690); pulled 120 px away it was on its own, and stayed when the leader moved 200 px. Frame
+  gaps stayed under 17 ms through the drags. Wayland and X11 are not tried here.
+- **Verified** (Nov 26): `kormake test ./modules` and `./examples` on windows-dev; `kromedemo
+  --two-check` passed again twice on D3D12. It counts real input too: a cursor resting where
+  the playlist opens moves into it, and it presents once more (seen once, with the cursor left
+  where the snap probe dropped the leader); run it with the mouse off both windows.
+
 **Verified for milestones 1 and 2** (Nov 25): `kormake test` on linux-debug, linux-dev and
 linux-ship; `platform_hid` and `krome` under `--sanitize address,undefined` and `thread`
 (`frameloop` has no tests of its own); `tools/determinism-check.sh` (rocks in every
@@ -426,4 +458,6 @@ configuration, arcfire's two recordings) unchanged; `tools/doccheck.sh` reports 
 new. Windows and macOS are not built here. Milestone 3 (Nov 26): `kormake test ./modules
 windows-dev`, 36 test programs, every check passed. Milestone 4 (Nov 26): the same, passed.
 `tools/doccheck.sh` reports one error, `asset_render`'s, which was there before slice 13's
-milestone 3.
+milestone 3. Milestones 3 to 7 were built and run on Windows only: their SDL halves
+(Linux, macOS), Metal's and the phones' are written and not built, and want `kormake test` on
+linux-debug, linux-dev and linux-ship, the sanitizers and a macOS build before the slice closes.

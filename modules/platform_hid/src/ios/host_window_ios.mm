@@ -264,6 +264,10 @@ void hid_video_down() {}
 bool hid_backend_holds_unfocused() { return true; }
 u32  hid_backend_windows() { return 1; } // a phone has one window, the app's
 void HostWindow::show(bool) {}          // the OS shows the app's window, or not
+bool hid_backend_can_place() { return false; }  // the OS places the app's one window
+bool HostWindow::position(i32*, i32*) const { return false; }
+bool HostWindow::move_to(i32, i32) { return false; }
+bool HostWindow::display_bounds(rect2*) const { return false; }
 
 bool HostWindow::open(const WindowDesc& desc) {
     KV_ASSERT(!native_);
