@@ -193,6 +193,7 @@ struct KromeNode {
     Name       binding;        // @name: its selected state is the model's value there, a press flips it (an edit: its text)
     Name       change, blur;   // an edit's other events: its text changed, it lost the focus
     Name       context;        // fired by the right button, with where it was pressed
+    Name       arrived;        // fired once its sizes and offsets reach where a change sent them (KR35)
     u32        bind_value = KROME_NONE; // @key=value: the value, an offset into strings
     u32        tooltip = KROME_NONE;    // shown at the pointer after it rests here
     Name       behave;         // the behaviour the pointer and the keys go to (`behave=slider`)

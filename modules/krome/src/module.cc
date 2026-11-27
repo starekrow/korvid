@@ -52,6 +52,7 @@ void free_screen(KromeModule& s, KromeScreen* sc) {
     krome_free_overlays(s, *sc);
     if (s.under.screen == sc->id) s.under = KromeTarget{};
     if (s.captured.screen == sc->id) s.captured = KromeTarget{};
+    krome_drop_timers(s, sc->id); // a screen's timers go when it closes
     krome_lua_release(s, *sc);
     free_in(s.general, sc->source, sc->source_len + 1);
     if (sc->arena.base) arena_destroy(sc->arena);
@@ -176,6 +177,10 @@ void krome_pump(TickContext& ctx) {
     KV_ZONE("krome.pump");
     KromeModule& s = ctx.state_as<KromeModule>();
     s.ctx = &ctx;
+    // The clock moves at the frame's start, so a timer due at the time the frame was asked
+    // for fires in it (and the paint sees the same time).
+    s.clock += ctx.dt;
+    s.clock_ahead = true;
     bool changed = krome_pump_docs(s);
     if (changed || krome_reload_pending(s)) krome_reload(s);
     krome_reload_strip(s);
@@ -215,6 +220,7 @@ void krome_pump(TickContext& ctx) {
     bool left = false;
     for (char* t : s.set_texts) if (t) left = true;
     if (!left) s.set_texts.len = 0;
+    krome_run_timers(s); // before layout, on the clock the last paint left
     s.ctx = nullptr;
 }
 
@@ -299,7 +305,8 @@ void krome_input(TickContext& ctx) {
 void krome_paint(TickContext& ctx) {
     KV_ZONE("krome.paint");
     KromeModule& s = ctx.state_as<KromeModule>();
-    s.clock += ctx.dt;
+    if (!s.clock_ahead) s.clock += ctx.dt; // a paint with no pump before it
+    s.clock_ahead = false;
     krome_view_frame(s);
 }
 
@@ -339,6 +346,9 @@ void krome_shutdown(Engine&, ModuleInstance& self) {
     krome_free_behaviours(*s);
     s->anims.free();
     s->plays.free();
+    s->motions.free();
+    s->timers.free(); // their functions went with the Lua state
+    s->arrivals.free();
 }
 
 // ---- /krome in the CLI --------------------------------------------------------------------------
@@ -599,6 +609,7 @@ bool krome_settled(Engine& e) {
     // A strip that plays some number of times is still changing until it rests; one that
     // plays for ever never would, and does not hold a picture back.
     for (const KromeModule::Play& p : s->plays) if (p.due > 0.0 && !p.forever) return false;
+    if (s->motions.len || s->arrivals.len) return false; // a place easing is still moving
     return true;
 }
 

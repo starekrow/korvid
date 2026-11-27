@@ -399,7 +399,22 @@ struct KromeModule {
     // rests, fired after the paint; `seen` marks the ones a paint of their tree still found.
     struct Play { u32 screen, overlay, node; Name id; u64 key; f64 start; u32 from; f64 due; bool done, tell, seen, forever; };
     Array<Play>         plays;
+    // A node's place easing (KR35): its sizes and offsets (KROME_PLACES of them, `mask` the
+    // ones moving) from where they were shown to where a binding or a behaviour put them. The
+    // node holds where it is shown while it eases; `to` is where it is going. Those that have
+    // arrived since the last paint, to fire their node's `arrived` after it.
+    struct Motion { u32 screen, overlay, node; Name id; f32 from[12], to[12]; u16 mask; f64 start; f32 dur; };
+    Array<Motion>       motions;
+    Array<KromeTarget>  arrivals;
+    // Timers (KR35): a script's after() and every(), by handle, on the Frame cycle's clock.
+    // `fn` is the function's registry ref; `every` 0 for one that fires once; `where` the
+    // chunk and line it was set at, for its error.
+    struct Timer { u32 id, screen; int fn; f64 due, every; char where[160]; };
+    Array<Timer>        timers;
+    u32                 next_timer = 1;
+    u32                 lua_screen = 0; // the screen a behaviour's call (or a timer's) is for, while it runs
     f64                 clock = 0.0;      // the Frame cycle's dt summed
+    bool                clock_ahead = false; // the pump moved it this frame: the paint does not again
     bool                animating = false; // a transition was mid-way when last painted
     vec2                drag_at{-1.0f, -1.0f}; // where a behaviour's drag was last told
     bool                window_focused = true;
@@ -588,6 +603,14 @@ void krome_free_behaviours(KromeModule& s);
 bool krome_lua_prelude(KromeModule& s, const char* source, usize len, const char* chunk, bool again = false);
 bool krome_lua_has_behaviour(KromeModule& s, Name name);
 bool krome_lua_behave(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 overlay, u32 node, KromeCall call, f32 x, f32 y, const KromeCallArgs& a, bool* taken);
+// Timers (KR35): those due on the clock called, in the pump before layout (one that came due
+// more than once while its window was hidden fires once); a screen's dropped when it closes
+// or its scripts run again; the clock's time the next is due among the screens whose window
+// is seen (0: none).
+constexpr u32 KROME_MAX_TIMERS = 256; // a screen's
+void krome_run_timers(KromeModule& s);
+void krome_drop_timers(KromeModule& s, u32 screen);
+f64  krome_next_timer(KromeModule& s);
 // A key as a behaviour sees it: "left", "enter", "a".
 const char* krome_key_name(Key k, char* out, usize cap);
 // The model at a path as a number; a Lua value written there (the top of the stack, popped).
@@ -620,6 +643,11 @@ KromeOverlay* krome_overlay(KromeScreen& sc, u32 id);
 KromeOverlay* krome_overlay_of(KromeScreen& sc, const KromeTree& t);
 // The transitions of a screen's tree (overlay 0) or an overlay's dropped: built again, or gone.
 void krome_drop_anims(KromeModule& s, u32 screen, u32 overlay);
+// A binding or a behaviour changed a node's place (`before` is the node as it was): where it
+// was shown, its sizes and offsets ease to where they now are over its look's transition, or
+// arrive at once with none; either way its `arrived` fires when they all have (KR35). A
+// change made by layout itself, or by a build, never comes here.
+void krome_moved(KromeModule& s, u32 screen, u32 overlay, KromeTree& t, u32 node, const KromeNode& before);
 // The screen on top (a higher layer, then the later opened); null when none is ready.
 KromeScreen* krome_top_screen(KromeModule& s);
 u32  krome_open_overlay(KromeModule& s, KromeScreen& sc); // a new, empty overlay on top; its id

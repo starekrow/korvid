@@ -405,6 +405,11 @@ const char* KromeTree::set(u32 node, const char* prop, const KromeValue& v, Krom
             n.shortcut_mods = (u8)mods;
             return nullptr;
         }
+        if (!strcmp(prop, "arrived")) {
+            if (v.kind != KromeValue::String) return "an event takes a name";
+            n.arrived = name_intern(v.s);
+            return nullptr;
+        }
         if (!strcmp(prop, "context")) {
             if (v.kind != KromeValue::String) return "an event takes a name";
             n.context = name_intern(v.s);

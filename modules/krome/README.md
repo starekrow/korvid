@@ -179,6 +179,18 @@ properties, `true` is a flag, the array part is children and a content string, `
 (or `looks = { hover = {...} }`) its look. `kim("file.kimb", "screen")` is a piece of markup
 in a script's tree, built in that file's scope.
 
+**Timers** (slice 8, KR35). `after(seconds, fn)` calls `fn()` once, that long from now;
+`every(seconds, fn)` at that interval until `cancel(handle)`; each returns its handle, and
+cancelling one that has gone does nothing. Every script and behaviour sees them (a
+behaviour's timer is the screen's whose node it runs for). They run on the Frame cycle's
+clock in `krome.pump`, before layout, and Krome asks the loop for a frame at the soonest due
+(`engine_want_frame_at`): a 500 ms timer wakes an on-demand window twice a second and at no
+other time. A hidden window runs no Frame cycle, and Krome asks nothing for a timer of a
+screen in one: its timers wait, and one that came due while hidden fires once when the
+window is seen, not once for each interval missed. A screen's timers go when it closes and
+when its scripts run again (a reload). One that raises is cancelled, its error naming the
+line it was set at. At most 256 a screen.
+
 **The model** is a table the scripts see as `model`. Writing a key refills every text that
 reads it (`"Saved {saves} times"`), sets every binding on it, and rebuilds every `each` and
 `if` on it; a list changed in place says so with `changed("key")`. C++ writes scalars with
@@ -324,12 +336,12 @@ Header `korvid/krome/krome.h`:
 | `krome.pump`, `krome.input`, `krome.paint` (Frame) | systems | documents, scripts, rebuilds and model values; the pointer; layout and paint |
 | `/krome` | CLI mount | `ls` screens and named nodes, `print` a tree or a node, `patch NODE PROPERTY VALUE...` |
 
-In Lua: the helpers (and `edit`, with `bind = "key"`), `model`, `emit(name, value)`,
+In Lua: the helpers (and `edit`, with `bind = "key"`), `model`, `emit(name, value)`, `after(s, fn)`, `every(s, fn)`, `cancel(h)`,
 `open_overlay(tree, opts)`, `close_overlay([id])`, `theme(name)`, `changed(key)`, `kim(file, screen)`.
 
 Properties: layout `w`, `h` (a number, a percentage, `hug`, `fill`, a range), `pad`, `gap`,
 `dir`, `anchor`, `l`, `t`, `r`, `b` (a stack child's edges), `x`, `y` (its offset), `scroll` (`x`, `y` or `xy`), `tooltip`, `context`, `behave`, `taborder`,
-`key` (a shortcut), `step`, `range` (Lua's form of a node's `1..99`); an edit's `placeholder`,
+`key` (a shortcut), `step`, `range` (Lua's form of a node's `1..99`), `arrived` (an event); an edit's `placeholder`,
 `change`, `blur`; `cursor`; `grip` (`move`, an edge or corner by compass point, `none`); any of them `@key` (bound to the model); look `bg`, `bg2` (a gradient to it), `angle`, `radius` (one, two
 or four), `border`, `border-color`, `shadow` (x y blur [spread]), `shadow-color`, `color`,
 `opacity`, `font`, `size`, `line-height`, `image`, `region` (x, y, w, h), `fit` (`stretch`,
@@ -338,7 +350,11 @@ or four), `border`, `border-color`, `shadow` (x y blur [spread]), `shadow-color`
 `scrollbar-color`, `scrollbar-track`, `scrollbar-size`, `transition` (seconds: the node's
 colors and opacity ease to what its look resolves to whenever that changes, by state,
 selection, theme or a bound value, on the Frame cycle's clock, turning around from where they
-are when interrupted; sizes and positions do not move).
+are when interrupted; and its `w`, `h`, `x`, `y`, `l`, `t`, `r`, `b` ease likewise when a
+binding or a behaviour's `w:part` changes them, laid out each frame while they move, never
+when layout itself moves the node). `arrived=NAME` fires NAME once its sizes and offsets reach
+where the latest change sent them (`on.NAME(id)`, and `KromeEvent`); at once, with no
+transition.
 **Images and shapes.** `image="hero.png"` draws a texture. A path ending `.svg` (or
 `.kshape`) draws a shape: the svg module's cook of it, rasterized by patherizer at the node's
 pixel size (logical size times the scale), measured at its view box unless `w` or `h` says
@@ -473,6 +489,9 @@ Focus rings (`focused { border-color=ring }`) show when Tab brought the focus. S
 - **One node has the keyboard** across every screen: an edit, or anything focusable.
 - **No shaping** beyond kerning, left to right only.
 - **Screen scripts cannot `require`** another file; a `.kimb` screen takes several scripts.
+- **A timer is for what is drawn.** It waits while its window is hidden, so a script that
+  counts on one for anything else (a save every minute, a socket's keepalive) is wrong to:
+  that is the program's, in its own system.
 
 ## Not in this module
 

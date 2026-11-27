@@ -217,6 +217,7 @@ namespace {
 constinit const KimbKernelProp k_props[] = {
     {"anchor", KimbType::Anchor, true},
     {"angle", KimbType::Number, false},
+    {"arrived", KimbType::String, true},
     {"b", KimbType::Edge, true},
     {"behave", KimbType::String, true},
     {"bg", KimbType::Color, false},

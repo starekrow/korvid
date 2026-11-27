@@ -15,6 +15,11 @@
 //            root = col { pad = 12, gap = 8, text "Name: {name}",
 //                         hit { id = "save", event = "save", text "Save" } } }
 //
+// after(seconds, fn), every(seconds, fn) and cancel(handle) are timers on the Frame cycle's
+// clock (Krome slice 8, KR35). They wait while their window is hidden, firing once when it is
+// seen: they are for what is drawn (a blink, a marquee), never for work that must happen on
+// time (a save, a keepalive), which is the program's own.
+//
 // Krome is cosmetic: none of its state is hashed, and its events are traced, not hashed.
 #pragma once
 #include "korvid/core/name.h"

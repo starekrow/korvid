@@ -948,7 +948,135 @@ void krome_drop_anims(KromeModule& s, u32 screen, u32 overlay) {
     for (u32 i = 0; i < s.plays.len; ++i)
         if (!(s.plays[i].screen == screen && s.plays[i].overlay == overlay)) s.plays[w++] = s.plays[i];
     s.plays.len = w;
+    w = 0;
+    for (u32 i = 0; i < s.motions.len; ++i)
+        if (!(s.motions[i].screen == screen && s.motions[i].overlay == overlay)) s.motions[w++] = s.motions[i];
+    s.motions.len = w;
 }
+
+// ---- a node's place, easing (KR35) -------------------------------------------------------------------
+
+namespace {
+
+// A node's twelve places: w, h, x, y, its edges' fractions (l, t, r, b), their distances.
+constexpr u32 k_places = 12;
+
+f32& place_of(KromeNode& n, u32 i) {
+    switch (i) {
+    case 0: return n.w.value;
+    case 1: return n.h.value;
+    case 2: return n.offset.x;
+    case 3: return n.offset.y;
+    default: return i < 8 ? n.edge[i - 4].frac : n.edge[i - 8].dist;
+    }
+}
+f32 place_of(const KromeNode& n, u32 i) { return place_of(const_cast<KromeNode&>(n), i); }
+
+// Whether a place can ease between two states of a node: a size of the same mode that is a
+// number (a fixed size, a percentage); an offset always; an edge tied in both.
+bool easable(const KromeNode& a, const KromeNode& b, u32 i) {
+    if (i < 2) {
+        const KromeAxis& x = i ? a.h : a.w;
+        const KromeAxis& y = i ? b.h : b.w;
+        return x.mode == y.mode && (x.mode == KromeSize::Fixed || x.mode == KromeSize::Percent);
+    }
+    if (i < 4) return true;
+    u32 e = (i - 4) & 3u;
+    return ((a.tied >> e) & 1u) && ((b.tied >> e) & 1u);
+}
+
+bool place_changed(const KromeNode& a, const KromeNode& b) {
+    if (a.w.mode != b.w.mode || a.h.mode != b.h.mode || a.tied != b.tied) return true;
+    for (u32 i = 0; i < k_places; ++i) if (place_of(a, i) != place_of(b, i)) return true;
+    return false;
+}
+
+KromeModule::Motion* motion_of(KromeModule& s, u32 screen, u32 overlay, u32 node) {
+    for (KromeModule::Motion& m : s.motions) if (m.screen == screen && m.overlay == overlay && m.node == node) return &m;
+    return nullptr;
+}
+
+void drop_motion(KromeModule& s, KromeModule::Motion* m) {
+    *m = s.motions.last();
+    --s.motions.len;
+}
+
+} // namespace
+
+void krome_moved(KromeModule& s, u32 screen, u32 overlay, KromeTree& t, u32 node, const KromeNode& before) {
+    if (node >= t.nodes.len) return;
+    KromeNode& n = t.nodes[node];
+    if (!place_changed(before, n)) return;
+    KromeModule::Motion* m = motion_of(s, screen, overlay, node);
+    if (m && m->id != n.id) { drop_motion(s, m); m = nullptr; }
+    // Sent again where it is already going (a binding set to the same value): it goes on.
+    if (m) {
+        bool same = true;
+        for (u32 i = 0; i < k_places && same; ++i)
+            if (place_of(n, i) != place_of(before, i)) same = (m->mask >> i & 1u) && m->to[i] == place_of(n, i);
+        if (same && before.w.mode == n.w.mode && before.h.mode == n.h.mode && before.tied == n.tied) {
+            for (u32 i = 0; i < k_places; ++i) place_of(n, i) = place_of(before, i);
+            return;
+        }
+    }
+    f32 dur = t.looks[n.look].transition;
+    // Where each place is going: what it was going to, and over that what this change says.
+    // Where it is: the node as it was, which holds what was shown.
+    f32 to[k_places], from[k_places];
+    u16 mask = m ? m->mask : 0;
+    for (u32 i = 0; i < k_places; ++i) {
+        from[i] = place_of(before, i);
+        to[i] = m && (m->mask >> i & 1u) ? m->to[i] : place_of(n, i);
+        if (place_of(n, i) != from[i]) {
+            to[i] = place_of(n, i);
+            if (easable(before, n, i)) mask |= (u16)(1u << i);
+            else mask &= (u16)~(1u << i);
+        }
+    }
+    for (u32 i = 0; i < k_places; ++i) if ((mask >> i & 1u) && to[i] == from[i]) mask &= (u16)~(1u << i);
+    if (!(dur > 0.0f) || !mask) {
+        // At once: where it is going, and arrived.
+        for (u32 i = 0; i < k_places; ++i) if (m && (m->mask >> i & 1u)) place_of(n, i) = to[i];
+        if (m) drop_motion(s, m);
+        t.dirty = true;
+        if (!n.arrived.is_null()) { s.arrivals.alloc = s.general; s.arrivals.push(KromeTarget{screen, overlay, node}); }
+        return;
+    }
+    if (!m) { s.motions.alloc = s.general; s.motions.push(KromeModule::Motion{}); m = &s.motions.last(); }
+    *m = KromeModule::Motion{screen, overlay, node, n.id, {}, {}, mask, s.clock, dur};
+    memcpy(m->from, from, sizeof from);
+    memcpy(m->to, to, sizeof to);
+    // Shown where it was until the frame moves it.
+    for (u32 i = 0; i < k_places; ++i) if (mask >> i & 1u) place_of(n, i) = from[i];
+    t.dirty = true;
+}
+
+namespace {
+
+// The current window's moving nodes, where the clock now has them: before its layout.
+void apply_motions(KromeModule& s) {
+    for (u32 i = 0; i < s.motions.len;) {
+        KromeModule::Motion& m = s.motions[i];
+        KromeScreen* sc = krome_screen_by_id(s, m.screen);
+        KromeTree* t = sc ? krome_target_tree(s, KromeTarget{m.screen, m.overlay, m.node}, nullptr) : nullptr;
+        if (!t || m.node >= t->nodes.len || t->nodes[m.node].id != m.id || (t->nodes[m.node].flags & KROME_DEAD)) { drop_motion(s, &m); continue; }
+        if (sc->window != s.cur_window) { ++i; continue; }
+        KromeNode& n = t->nodes[m.node];
+        f32 k = (f32)((s.clock - m.start) / (f64)m.dur);
+        bool done = k >= 1.0f;
+        if (k < 0.0f) k = 0.0f;
+        f32 e = k * k * (3.0f - 2.0f * k);
+        for (u32 p = 0; p < k_places; ++p)
+            if (m.mask >> p & 1u) place_of(n, p) = done ? m.to[p] : m.from[p] + (m.to[p] - m.from[p]) * e;
+        t->dirty = true;
+        if (m.overlay) if (KromeOverlay* o = krome_overlay(*sc, m.overlay)) o->placed = false;
+        if (!done) { ++i; continue; }
+        if (!n.arrived.is_null()) { s.arrivals.alloc = s.general; s.arrivals.push(KromeTarget{m.screen, m.overlay, m.node}); }
+        drop_motion(s, &m);
+    }
+}
+
+} // namespace
 
 KromeScreen* krome_top_screen(KromeModule& s) {
     KromeScreen* order[k_max_screens];
@@ -1393,6 +1521,7 @@ namespace {
 void view_window(KromeModule& s, Renderer* r, bool landed) {
     krome_update_viewport(s);
     if (!(s.win_w > 0.0f && s.win_h > 0.0f)) return;
+    apply_motions(s);
     f32 W = s.win_w / s.scale, H = s.win_h / s.scale;
     KromeMeasure m{&s, measure_text, measure_image, measure_paragraph};
     for (KromeScreen* sc : s.screens) {
@@ -1517,10 +1646,27 @@ void krome_view_frame(KromeModule& s) {
         KromeTree* tree = krome_target_tree(s, told[i], &sc);
         if (tree && sc && told[i].node < tree->nodes.len && !tree->nodes[told[i].node].event.is_null()) krome_fire(s, *sc, *tree, told[i].node, 1.0);
     }
+    // Nodes whose places arrived: each its `arrived`, once, as a strip's event.
+    if (s.arrivals.len) {
+        KromeTarget arrived[16];
+        u32 na = 0;
+        for (const KromeTarget& a : s.arrivals) if (na < 16) arrived[na++] = a;
+        s.arrivals.clear();
+        for (u32 i = 0; i < na; ++i) {
+            KromeScreen* sc = nullptr;
+            KromeTree* tree = krome_target_tree(s, arrived[i], &sc);
+            if (tree && sc && arrived[i].node < tree->nodes.len) krome_fire_named(s, *sc, *tree, arrived[i].node, tree->nodes[arrived[i].node].arrived, 1.0);
+        }
+    }
+    // A place still easing lays out and paints the next frame too.
+    if (s.motions.len) engine_want_frame(*s.e);
     // The next strip frame due, and nothing while every strip is still or at rest: an
     // on-demand window wakes for each frame and no more often.
     f64 due = 0.0;
     for (const KromeModule::Play& pl : s.plays) if (pl.due > 0.0 && (due <= 0.0 || pl.due < due)) due = pl.due;
+    // And a script's timer, the soonest due in a window that is seen (KR35).
+    f64 timer = krome_next_timer(s);
+    if (timer > 0.0 && (due <= 0.0 || timer < due)) due = timer;
     if (due > 0.0) engine_want_frame_at(*s.e, time_now() + (due > s.clock ? due - s.clock : 0.0));
 }
 

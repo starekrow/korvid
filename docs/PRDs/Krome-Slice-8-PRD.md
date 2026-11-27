@@ -287,3 +287,67 @@ In review of the draft (Nov 26):
   in a row and a col, by line.
 - **KM1.** `kromedemo --demo` (Kim and Lua), `--player --demo` and `kromescreens --demo`:
   45 pictures, every one byte for byte main's (largest channel difference 0).
+
+**Milestone 2, Easing** (Nov 26).
+
+- **A record per moving node** (`KromeModule::Motion`), beside the colours' `Anim`: twelve
+  places (`w`, `h`, `x`, `y`, the four edges' fractions and distances), a mask of those
+  moving, where from and where to. The node holds where it is shown while it eases;
+  `krome_moved` is told the node as it was before a binding (`krome_model_changed`) or a
+  behaviour's `w:part` changed it, and the frame (`apply_motions`, before the window's
+  layout) writes each place where the clock has it, eased in and out as a colour is. A size
+  eases only between two numbers of one mode (fixed, or a percentage), an edge only while it
+  stays tied; anything else jumps. Turned around mid-way it goes from where it is shown, and
+  sent again where it is already going it goes on undisturbed.
+- **Not through a state.** The PRD's "by a state" is not built: a state's look cannot set
+  layout (kimb refuses `hover { w=5 }`, as before this slice), and these eight are layout's.
+- **`arrived=NAME`** is a node's (`KromeNode::arrived`, kimb's `String`, layout): fired once
+  every place has arrived, after the paint, as a strip's event; at once when the node has no
+  transition. A build never eases and never arrives.
+- **Wakes.** While anything moves, the window is laid out each frame and the next asked for;
+  `krome_settled` waits for it.
+- **Found on the way.** In Lua, `l = 10` was taken for the helpers' own line number (they
+  wrote `l` into every node table, and the converter read any integer `l` as one): the
+  helpers' key is `_l` now.
+- **Tested** (`placed_test.cc`): the drawer, `x=@drawer transition=0.2 arrived=opened`, sent
+  120 pixels: moving on 12 frames of 60 a second, never backwards, a frame asked for on each
+  and none after, its handler told once with its id; 30 frames after it, nothing laid out,
+  painted or asked for. Turned around mid-way, from where it was, arriving once. A size and an
+  offset at once, one arrival. A node with no transition, there at once and arrived. A
+  resize, which moves a tied bar and eases nothing.
+- **KM1**: the 45 pictures again. One, `kromedemo_form`, differs in a band of a row's colour
+  on some runs; main's own build differs the same way from main's own picture on 5 runs of
+  5, so it is the demo's timing (a row's hover caught or not), not this slice.
+
+**Milestone 3, Timers** (Nov 26).
+
+- **`after`, `every`, `cancel`** in each screen's environment (closures over its id), and as
+  globals for the behaviours, which take the screen whose call is running
+  (`KromeModule::lua_screen`, set around a behaviour's call and a timer's). A record each
+  (`KromeModule::Timer`): its function's registry ref, the clock's time due, the interval,
+  and `luaL_where`'s chunk and line for its error.
+- **In `krome.pump`**, after the model's sets and before layout: those due, by handle (a call
+  may cancel the next); one that repeats is due again an interval on, or an interval from now
+  when that is already past, so a run of missed ones is one call. One that raises is
+  cancelled, `a timer set at t/timers.lua:14 raised, and is cancelled: ...`. 256 a screen, the
+  257th refused by `luaL_error`.
+- **The clock moves in the pump now**, at the frame's start, not in the paint: a frame asked
+  for at a timer's time ran the pump on the last frame's clock, found it not yet due, and asked
+  again at once (two wakes for each tick). The paint moves it only when no pump came first.
+- **Wakes.** The paint asks for a frame at the soonest due timer, as for a strip's frame,
+  among the screens whose window is seen (`HostWindow::visible`); a window that is hidden
+  asks nothing, and the frame loop draws it again when it is seen. A due time within a
+  millisecond counts as due: the loop wakes when asked and the frame's dt can fall a hair
+  short.
+- **Gone** when its screen closes, and when the screen's scripts run again (`make_env`, so a
+  reload's run starts with none).
+- **Tested** (`placed_test.cc`), on a clock of the test's own: an on-demand loop stepped by the
+  millisecond that runs a frame cycle only when one is wanted or due. Nothing set, no wakes in
+  2 s. `every(0.5)` for ten seconds: 20 ticks, 20 wakes, the text showing them refilled in the
+  same frames. Ten seconds with no frame (hidden), then one: one tick. Cancelled: one more
+  wake, the frame the loop had already been asked for, then none in 3 s. `after` once; one
+  cancelled before it fired never does, and a second cancel is nothing. One that raises,
+  called once and named by its line. 256 and the 257th refused. A reload, and a close, leave
+  none. A behaviour's `every` from its `update`, its screen's, ticking and gone with it.
+- **Not tested headless:** the hidden window's silence itself (no window here can be hidden);
+  the test stands in for it with no frames, which is what the loop gives a hidden window.

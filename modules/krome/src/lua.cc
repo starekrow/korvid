@@ -9,6 +9,7 @@
 #include "korvid/core/format.h"
 #include "korvid/core/log.h"
 #include "korvid/lua/lua.h"
+#include "korvid/platform_hid/module.h"
 #include "korvid/core/arena.h"
 #include "korvid/core/kbor.h"
 #include <stdarg.h>
@@ -36,7 +37,7 @@ local function make(w, dir, defaults)
   return function(t)
     if type(t) ~= "table" then t = { t } end
     local info = getinfo(2, "l")
-    local n = { w = w, f = {}, p = {}, c = {}, l = info and info.currentline or 0 }
+    local n = { w = w, f = {}, p = {}, c = {}, _l = info and info.currentline or 0 }
     if dir then n.p.dir = dir end
     if defaults then
       for k, v in pairs(defaults) do
@@ -80,7 +81,7 @@ edit   = make("edit")
 -- A screen of a .kimb as a piece of this tree, built in that file's scope.
 function kim(file, screen)
   local info = getinfo(2, "l")
-  return { w = "@kim", file = file, screen = screen, l = info and info.currentline or 0 }
+  return { w = "@kim", file = file, screen = screen, _l = info and info.currentline or 0 }
 end
 )lua";
 
@@ -95,6 +96,57 @@ int model_newindex(lua_State* L) {
     KromeModule* s = state_of(L, 2);
     KromeScreen* sc = krome_screen_by_id(*s, (u32)lua_tointeger(L, lua_upvalueindex(3)));
     if (sc && lua_type(L, 2) == LUA_TSTRING) krome_model_changed(*s, *sc, name_intern(lua_tostring(L, 2)).hash);
+    return 0;
+}
+
+// after(seconds, fn), every(seconds, fn), cancel(handle) (KR35). Upvalues: the state, the
+// screen's id (0, as the behaviours see them: the screen whose call is running).
+u32 timer_screen(lua_State* L, KromeModule* s) {
+    u32 id = (u32)lua_tointeger(L, lua_upvalueindex(2));
+    return id ? id : s->lua_screen;
+}
+
+int set_timer(lua_State* L, bool repeat) {
+    KromeModule* s = state_of(L, 1);
+    lua_Number secs = luaL_checknumber(L, 1);
+    luaL_checktype(L, 2, LUA_TFUNCTION);
+    if (!(secs >= 0.0 && secs < 1e7)) return luaL_error(L, "%s takes seconds, 0 or more", repeat ? "every" : "after");
+    if (repeat && secs < 0.001) return luaL_error(L, "every takes an interval of a millisecond or more");
+    u32 screen = timer_screen(L, s);
+    if (!screen || !krome_screen_by_id(*s, screen)) return luaL_error(L, "%s: no screen to run it for", repeat ? "every" : "after");
+    u32 n = 0;
+    for (const KromeModule::Timer& t : s->timers) if (t.screen == screen) ++n;
+    if (n >= KROME_MAX_TIMERS) return luaL_error(L, "a screen has at most %d timers", (int)KROME_MAX_TIMERS);
+    KromeModule::Timer t{};
+    t.id = s->next_timer++;
+    t.screen = screen;
+    t.due = s->clock + secs;
+    t.every = repeat ? secs : 0.0;
+    luaL_where(L, 1); // "chunk:line: "
+    format(t.where, sizeof t.where, "%s", lua_tostring(L, -1));
+    lua_pop(L, 1);
+    for (usize w = strlen(t.where); w > 0 && (t.where[w - 1] == ' ' || t.where[w - 1] == ':'); --w) t.where[w - 1] = 0;
+    lua_pushvalue(L, 2);
+    t.fn = luaL_ref(L, LUA_REGISTRYINDEX);
+    s->timers.alloc = s->general;
+    s->timers.push(t);
+    engine_want_frame(*s->e); // the next paint asks for the frame it is due at
+    lua_pushinteger(L, (lua_Integer)t.id);
+    return 1;
+}
+int script_after(lua_State* L) { return set_timer(L, false); }
+int script_every(lua_State* L) { return set_timer(L, true); }
+
+int script_cancel(lua_State* L) {
+    KromeModule* s = state_of(L, 1);
+    lua_Integer id = lua_tointeger(L, 1);
+    for (u32 i = 0; i < s->timers.len; ++i)
+        if ((lua_Integer)s->timers[i].id == id) {
+            luaL_unref(L, LUA_REGISTRYINDEX, s->timers[i].fn);
+            for (u32 k = i + 1; k < s->timers.len; ++k) s->timers[k - 1] = s->timers[k];
+            --s->timers.len;
+            break;
+        }
     return 0;
 }
 
@@ -168,7 +220,7 @@ JsonRef to_json(lua_State* L, int idx, JsonBuilder& b, u32 depth) {
     while (lua_next(L, idx)) {
         if (lua_type(L, -2) == LUA_TSTRING) {
             const char* key = lua_tostring(L, -2);
-            if (!strcmp(key, "l") && lua_isinteger(L, -1)) {
+            if (!strcmp(key, "_l") && lua_isinteger(L, -1)) { // the helpers' line: "l" is an edge
                 lua_Integer l = lua_tointeger(L, -1);
                 b.line(o, l > 0 && l < 0x7FFFFFFF ? (u32)l : 0);
             } else if (lua_type(L, -1) == LUA_TTABLE && empty_table(L, -1) && (!strcmp(key, "f") || !strcmp(key, "c") || !strcmp(key, "p"))) {
@@ -358,6 +410,17 @@ bool krome_lua_open(KromeModule& s) {
         KV_ERROR("krome", "the helpers: %s", lua_tostring(L, -1));
         return false;
     }
+    // The timers as a behaviour sees them: for the screen whose call is running.
+    {
+        const lua_CFunction fns[] = {script_after, script_every, script_cancel};
+        const char* const names[] = {"after", "every", "cancel"};
+        for (u32 i = 0; i < 3; ++i) {
+            lua_pushlightuserdata(L, &s);
+            lua_pushinteger(L, 0);
+            lua_pushcclosure(L, fns[i], 2);
+            lua_setglobal(L, names[i]);
+        }
+    }
     luaL_requiref(L, LUA_DBLIBNAME, luaopen_debug, 0);
     lua_getfield(L, -1, "getinfo");
     lua_remove(L, -2);
@@ -416,7 +479,10 @@ void make_env(KromeModule& s, KromeScreen& sc, bool keep = false) {
     lua_setfield(L, -3, "model");        // env store
     lua_pop(L, 1);                       // env
     struct Fn { const char* name; lua_CFunction fn; int ups; };
-    const Fn fns[] = {{"emit", script_emit, 2}, {"open_overlay", script_open_overlay, 2}, {"close_overlay", script_close_overlay, 2}, {"theme", script_theme, 1}, {"changed", script_changed, 2}};
+    const Fn fns[] = {{"emit", script_emit, 2}, {"open_overlay", script_open_overlay, 2}, {"close_overlay", script_close_overlay, 2}, {"theme", script_theme, 1}, {"changed", script_changed, 2},
+                      {"after", script_after, 2}, {"every", script_every, 2}, {"cancel", script_cancel, 2}};
+    // A fresh run: the timers the last one set go with its closures.
+    krome_drop_timers(s, sc.id);
     for (const Fn& f : fns) {
         lua_pushlightuserdata(L, &s);
         if (f.ups == 2) lua_pushinteger(L, sc.id);
@@ -853,8 +919,10 @@ void krome_model_changed(KromeModule& s, KromeScreen& sc, u64 key) {
             continue;
         }
         if (d.kind == KromeDep::Prop) {
+            const KromeNode before = sc.tree.nodes[d.node];
             if (const char* bad = krome_apply_bound(s, sc, sc.tree, d))
                 krome_error(s, name_str(sc.name), 0, nullptr, 0, "%s=@%s: %s", name_str(d.prop), name_str(d.path), bad);
+            krome_moved(s, sc.id, 0, sc.tree, d.node, before); // a size or an offset eases there
             sc.repaint = true;
             continue;
         }
@@ -1346,7 +1414,11 @@ bool krome_lua_behave(KromeModule& s, KromeScreen& sc, KromeTree& tree, u32 over
     case KromeCall::Pick:
         lua_pushstring(L, a.id ? a.id : ""); lua_pushstring(L, a.text ? a.text : ""); nargs = 3; break;
     }
-    if (lua_pcall(L, nargs, 1, 0) != LUA_OK) {
+    u32 was_screen = s.lua_screen;
+    s.lua_screen = sc.id; // a timer it sets is this screen's
+    int status = lua_pcall(L, nargs, 1, 0);
+    s.lua_screen = was_screen;
+    if (status != LUA_OK) {
         KV_ERROR("krome", "%s", lua_tostring(L, -1));
         lua_pop(L, 1);
         ++s.script_errors;
@@ -1425,6 +1497,81 @@ void krome_model_write_number(KromeModule& s, KromeScreen& sc, const char* path,
     lua_pop(L, 1);
     usize head = strcspn(path, ".");
     krome_model_changed(s, sc, name_intern(path, head).hash);
+}
+
+} // namespace kv
+
+namespace kv {
+
+void krome_drop_timers(KromeModule& s, u32 screen) {
+    u32 w = 0;
+    for (u32 i = 0; i < s.timers.len; ++i) {
+        if (s.timers[i].screen == screen) { if (s.L) luaL_unref(s.L, LUA_REGISTRYINDEX, s.timers[i].fn); continue; }
+        s.timers[w++] = s.timers[i];
+    }
+    s.timers.len = w;
+}
+
+constexpr f64 k_timer_slack = 0.001;
+
+void krome_run_timers(KromeModule& s) {
+    lua_State* L = s.L;
+    if (!L || !s.timers.len) return;
+    // Those due now, by handle: a call may set or cancel others.
+    u32 due[KROME_MAX_TIMERS];
+    u32 n = 0;
+    // Due within a millisecond: the loop wakes at the time asked for, and the frame's dt can
+    // fall a hair short of it; without the slack that is a second wake straight after.
+    for (const KromeModule::Timer& t : s.timers) if (t.due <= s.clock + k_timer_slack && n < KROME_MAX_TIMERS) due[n++] = t.id;
+    for (u32 k = 0; k < n; ++k) {
+        u32 at = KROME_NONE;
+        for (u32 i = 0; i < s.timers.len; ++i) if (s.timers[i].id == due[k]) at = i;
+        if (at == KROME_NONE) continue; // cancelled by one before it
+        KromeModule::Timer t = s.timers[at];
+        KromeScreen* sc = krome_screen_by_id(s, t.screen);
+        if (!sc || !sc->ready) continue; // waits for its screen
+        // Once, and again from now if it repeats: a timer that came due more than once while
+        // nothing ran (a hidden window) fires once.
+        bool repeat = t.every > 0.0;
+        if (repeat) {
+            f64 next = t.due + t.every;
+            s.timers[at].due = next > s.clock ? next : s.clock + t.every;
+        } else {
+            for (u32 i = at + 1; i < s.timers.len; ++i) s.timers[i - 1] = s.timers[i];
+            --s.timers.len;
+        }
+        lua_rawgeti(L, LUA_REGISTRYINDEX, t.fn);
+        if (!repeat) luaL_unref(L, LUA_REGISTRYINDEX, t.fn);
+        u32 was = s.lua_screen;
+        s.lua_screen = t.screen;
+        int status = lua_pcall(L, 0, 0, 0);
+        s.lua_screen = was;
+        if (status != LUA_OK) {
+            // One that throws is cancelled, and named by where it was set.
+            krome_error(s, name_str(sc->name), 0, nullptr, 0, "a timer set at %s raised, and is cancelled: %s", t.where, lua_tostring(L, -1));
+            lua_pop(L, 1);
+            if (repeat)
+                for (u32 i = 0; i < s.timers.len; ++i)
+                    if (s.timers[i].id == t.id) {
+                        luaL_unref(L, LUA_REGISTRYINDEX, s.timers[i].fn);
+                        for (u32 j = i + 1; j < s.timers.len; ++j) s.timers[j - 1] = s.timers[j];
+                        --s.timers.len;
+                        break;
+                    }
+        }
+    }
+}
+
+f64 krome_next_timer(KromeModule& s) {
+    f64 next = 0.0;
+    for (const KromeModule::Timer& t : s.timers) {
+        KromeScreen* sc = krome_screen_by_id(s, t.screen);
+        if (!sc) continue;
+        // A hidden window runs no Frame cycle: its timers wait, and ask for nothing.
+        if (!s.viewport_fixed && s.e) if (HostWindow* w = platform_window_by_id(*s.e, sc->window)) if (!w->visible()) continue;
+        if (next <= 0.0 || t.due < next) next = t.due;
+    }
+    return next;
 }
 
 } // namespace kv
