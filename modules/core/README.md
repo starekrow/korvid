@@ -115,8 +115,9 @@ delivery. An event with a schema whose handle no longer resolves is dropped from
 and counted. Scheduled events wait in a timer wheel keyed by tick; state triggers watch a
 component field across ticks and emit `StateEdge`.
 
-**Jobs** (`job.h`, `phase.h`). One pool of workers fed from one FIFO of chunks. `jobs_run`
-cuts a range into chunks and the caller works the queue too, so nested batches progress.
+**Jobs** (`job.h`, `phase.h`). One pool of workers. `jobs_run` queues a batch whole; threads
+take its chunks with one atomic add each, and idle ones spin briefly before they sleep. It
+cuts a range into chunks and the caller works alongside, on other batches too while it waits, so nested batches progress.
 `parallel_for` and `parallel_reduce` give each chunk its own event writer and command
 buffer, merged in chunk order, so results never depend on which thread ran what.
 
@@ -373,6 +374,7 @@ Header `korvid/core/job.h`, `thread.h`, `time.h`, `os_thread.h`, `atomic.h`:
 | name | kind | what |
 |---|---|---|
 | `jobs_init(workers)`, `jobs_shutdown()`, `jobs_worker_count()` | functions | the pool |
+| `jobs_set_idle_spin(seconds)`, `jobs_idle_spin()` | functions | how long an idle thread watches for a batch before it sleeps |
 | `jobs_run(count, grain, fn, user, name)`, `jobs_chunks` | functions | a batch; the caller works too |
 | `jobs_stats()`, `jobs_stats_reset()`, `JobStats` | functions, record | batches, tasks, waits |
 | `thread_id()`, `os_cpu_count()`, `thread_set_realtime`, `thread_is_realtime` | functions | identity; a real-time thread never allocates |

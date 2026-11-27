@@ -1,12 +1,15 @@
 // Korvid core: the job pool: worker threads that run one function over a range, in
 // chunks, with the calling thread working alongside them.
 //
-// One pool of workers serves the process, fed from a single FIFO of chunks. A batch is a
-// function over [0, count) cut into chunks of `grain`; jobs_run queues every chunk, then
-// the caller works the queue itself until its batch is done, so a batch started from
-// inside another batch's chunk makes progress on the thread that is waiting for it.
-// Nothing blocks a thread that could be working. The engine starts the pool in
-// engine_init and stops it in engine_shutdown.
+// One pool of workers serves the process. A batch is a function over [0, count) cut into
+// chunks of `grain`; jobs_run queues the batch, whole, and every thread that joins it takes
+// chunks from it with one atomic add each, the caller among them. The pool's lock is
+// taken to join a batch and to leave it, not for a chunk, so a chunk costs the same few
+// nanoseconds to hand out on sixteen threads as on two. When the caller's batch has no
+// chunk left to take and some are still running elsewhere, it works on other batches
+// until its own is done, so a batch started from inside another batch's chunk makes
+// progress on the thread that is waiting for it. Nothing blocks a thread that could be
+// working. The engine starts the pool in engine_init and stops it in engine_shutdown.
 //
 // Systems use the pool through parallel_for and parallel_reduce (phase.h), which give each
 // chunk its own event and command buffers and merge them in chunk order, so the result
@@ -30,16 +33,6 @@ namespace kv {
 // or the caller, at the same time as each other and in no fixed order.
 typedef void (*JobFn)(u32 chunk, u32 begin, u32 end, void* user);
 
-// ---- internal: a batch in flight, as the queue sees it --------------------------------
-struct JobBatch {
-    JobFn       fn;
-    void*       user;
-    u32         count, grain, chunks;
-    u16         owner;      // mem owner (module index + 1) for attribution inside the chunks
-    u32         done;       // atomic: chunks finished
-    const char* name;       // the profiler's name for the chunks
-};
-
 // ---- the pool -------------------------------------------------------------------------
 // Starts `workers` threads (0 is fine: every batch then runs on the caller). Idempotent
 // for the same count; a different count stops the old threads first. engine_init calls it
@@ -47,17 +40,29 @@ struct JobBatch {
 // processor, at most 64). False, logged, when a thread does not start; the pool is then
 // down. With no memory for the threads it logs, runs with 0 workers and returns true.
 bool jobs_init(u32 workers);
-// Stops and joins the workers and frees the queue; nothing if the pool is down. After it,
+// Stops and joins the workers; nothing if the pool is down. Call it with no batch in flight. After it,
 // jobs_run runs every batch on the caller.
 void jobs_shutdown();
 // Worker threads running, not counting the threads that call jobs_run; 0 when the pool is
 // down.
 u32  jobs_worker_count();
 
+// ---- the idle spin --------------------------------------------------------------------
+// How long a thread with nothing to take watches for the next batch before it sleeps, and
+// a caller for its last chunks before it does: 100 microseconds unless set. A tick is
+// several batches with a little serial work between them, and a worker the OS has to wake
+// for each one arrives late to all of them; one that watched for the gap is there. The
+// cost is a core held for that long after the last batch, and the caller's own core
+// running a little slower beside its spinning neighbours. 0 sleeps at once: for a program
+// that sends a batch now and then and would rather have the cores. Set it with no batch in
+// flight.
+void jobs_set_idle_spin(f64 seconds);
+f64  jobs_idle_spin();
+
 // ---- batches --------------------------------------------------------------------------
 // Runs fn over [0, count) in chunks of grain and returns when every chunk has run. The
 // caller takes chunks too. Chunk i covers [i * grain, min(count, (i + 1) * grain)). A count
-// or grain of 0 runs nothing; with no workers, one chunk, or a queue that cannot grow,
+// or grain of 0 runs nothing; with no workers or one chunk,
 // every chunk runs on the caller, in order. May be called from inside a chunk. `name`, a
 // static string, names the chunks in the profiler.
 void jobs_run(u32 count, u32 grain, JobFn fn, void* user, const char* name = "job");
@@ -67,12 +72,12 @@ inline u32 jobs_chunks(u32 count, u32 grain) { return grain ? (count + grain - 1
 // ---- statistics -----------------------------------------------------------------------
 // What the pool has been doing, for profiling. Counters are process-wide and relaxed.
 struct JobStats {
-    u64 batches;       // jobs_run calls that went to the queue (not the inline path)
-    u64 inline_batches;// ran entirely on the caller: no workers, one chunk, or no room to queue
-    u64 tasks;         // chunks run from the queue
-    u64 tasks_by_caller; // of those, run by the thread that was waiting for them
-    u64 helper_waits;  // a waiting caller found the queue empty and slept
-    u64 worker_waits;  // a worker found the queue empty and slept
+    u64 batches;       // jobs_run calls that went to the pool (not the inline path)
+    u64 inline_batches;// ran entirely on the caller: no workers, or one chunk
+    u64 tasks;         // chunks run from pooled batches, counted as each thread leaves a batch
+    u64 tasks_by_caller; // of those, run by a thread that was inside jobs_run
+    u64 helper_waits;  // a caller with chunks still running elsewhere found nothing to take and slept
+    u64 worker_waits;  // a worker found no batch with a chunk to take
 };
 // The counters since the last reset, each read on its own.
 JobStats jobs_stats();

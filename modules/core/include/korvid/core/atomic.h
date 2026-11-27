@@ -172,4 +172,20 @@ inline void atomic_fence(MemOrder o) {
 
 #endif
 
+
+// ---- spinning -------------------------------------------------------------------------
+// The processor's hint that the caller is in a spin loop, waiting on another thread's
+// store: it frees the core's other hardware thread and saves the mis-speculation when the
+// wait ends. Nothing where the processor has no such hint. For a wait of microseconds, with
+// a bound on it; anything longer sleeps on a condition variable (os_thread.h).
+inline void atomic_pause() {
+#if KV_COMPILER_MSVC
+    _mm_pause();
+#elif defined(__x86_64__) || defined(__i386__)
+    __builtin_ia32_pause();
+#elif defined(__aarch64__) || defined(__arm__)
+    __asm__ volatile("yield");
+#endif
+}
+
 } // namespace kv
