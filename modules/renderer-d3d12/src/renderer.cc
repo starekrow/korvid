@@ -48,6 +48,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     r->validation  = desc.validation;
     r->markers     = desc.validation || KV_DEV;
     r->vsync       = desc.vsync;
+    r->transparent = desc.transparent;
     r->want_width  = desc.width;
     r->want_height = desc.height;
 

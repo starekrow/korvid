@@ -4,8 +4,9 @@
 -- (render/shaders/), which the build compiles to DXIL wherever this backend is bound: the
 -- slang rule's renderer-d3d12 variant writes <stem>.dxil.zip, slangc's container of one
 -- signed DXIL blob per entry point (src/d3d_shader.cc reads it through pack and inflate).
--- Windows binds Vulkan by default; kormake.lua's `bind "render" { windows = ... }` picks
--- this one.
+-- A transparent window's swapchain is a composition one, shown through DirectComposition
+-- (dcomp.dll, every Windows since 8.1). Windows binds Vulkan by default; kormake.lua's
+-- `bind "render" { windows = ... }` picks this one.
 module "renderer-d3d12" {
   provides  = "render",
   platforms = { "windows" },

@@ -48,6 +48,7 @@
 #include <windows.h>
 #include <d3d12.h>
 #include <dxgi1_6.h>
+#include <dcomp.h> // a transparent window's swapchain is shown through DirectComposition (d3d_swapchain.cc)
 // minwindef.h's 16-bit relics: empty macros that would eat engine names (TimerWheel::far)
 // in the files the unity build puts after this one.
 #undef near
@@ -196,6 +197,12 @@ struct Swapchain {
     ID3D12Resource*  buffers[kBackBuffers] = {};
     u32              width = 0, height = 0;
     bool             tearing = false;    // DXGI_FEATURE_PRESENT_ALLOW_TEARING: vsync off really off
+    // A transparent window's (RenderCore::transparent): the swapchain is a composition one,
+    // premultiplied, and DirectComposition gives it to the window: a target for the HWND
+    // whose root visual's content it is. Null for an opaque window's.
+    IUnknown*        dcomp_device = nullptr; // IDCompositionDesktopDevice
+    IUnknown*        dcomp_target = nullptr; // IDCompositionTarget
+    IUnknown*        dcomp_visual = nullptr; // IDCompositionVisual2
 };
 
 struct Renderer : RenderCore {
