@@ -11,6 +11,7 @@
 #include "korvid/kim/kim.h"
 #include "korvid/image/png.h"
 #include "../../image/tests/png_data.h" // k_png_pal4: a palette image whose indexes are known
+#include "korvid/platform/io.h"
 #include "korvid/platform/module.h"
 #include "korvid/platform_hid/module.h"
 #include "korvid/render/renderer.h"
@@ -681,6 +682,149 @@ void test_mask_looks(TestCtx& c) {
     engine_shutdown(e);
 }
 
+// std's dial (KR36): a strip whose frame follows the value, the pointer's angle setting it,
+// the slider's keys.
+void test_dial(TestCtx& c) {
+    c.begin("krome placed: std's dial");
+    Engine e;
+    KV_CHECK(c, engine_init(e, k_list));
+    KromeModule& s = *krome_state(e);
+    krome_viewport(e, 300, 200, 1.0f);
+    const char* text =
+        "use \"krome/std\"\n"
+        "screen main { box dir=col pad=10 {\n"
+        "  dial @vol 0..100 id=d {\n"
+        "    image \"t/knob32.png\" part=face frames=32 w=40 h=40\n"
+        "  }\n"
+        "} }\n";
+    Name scn = open_kim(c, e, "t/dial.kim", text, "main");
+    for (u32 i = 0; i < 400 && !krome_ready(e, scn); ++i) { frames(e, 1); time_sleep(0.001); }
+    frames(e, 2);
+    KV_CHECK(c, krome_ready(e, scn));
+    KromeScreen& sc = *krome_screen(s, scn);
+    u32 d = krome_find(sc.tree, name_intern("d"));
+    KV_CHECK(c, d != KROME_NONE);
+    if (d == KROME_NONE) { engine_shutdown(e); return; }
+    u32 face = krome_find_part(sc.tree, d, name_intern("face"));
+    KV_CHECK(c, face != KROME_NONE);
+    const rect2 r = sc.tree.nodes[d].rect;
+    f32 cx = r.x + r.w * 0.5f, cy = r.y + r.h * 0.5f;
+    auto frame = [&] { return krome_still_frame(sc.tree.resolve_look(face, KromeState::Base, nullptr)); };
+    auto press = [&](f32 x, f32 y) {
+        krome_pointer(s, x, y, false, 0.0f, false);
+        krome_pointer(s, x, y, true, 0.0f, false);
+        krome_pointer(s, x, y, false, 0.0f, false);
+        frames(e, 1);
+        return atof(krome_model_text(e, scn, "vol"));
+    };
+    // Straight up is the middle; bottom left the least; bottom right the most; frames follow.
+    KV_CHECK(c, press(cx, r.y + 1) == 50.0 && (frame() == 15 || frame() == 16));
+    KV_CHECK(c, press(r.x + 1, r.y + r.h - 1) == 0.0 && frame() == 0);
+    KV_CHECK(c, press(r.x + r.w - 1, r.y + r.h - 1) == 100.0 && frame() == 31);
+    // A quarter turn right of up: 45 + 90 of 270.
+    f64 right = press(r.x + r.w - 1, cy);
+    KV_CHECK(c, right > 82.0 && right < 85.0);
+    // The keys: Home, End, an arrow.
+    krome_focus_take(s, sc, 0, d, true);
+    KV_CHECK(c, krome_focus_key(s, Key::Home, 0) && atof(krome_model_text(e, scn, "vol")) == 0.0);
+    KV_CHECK(c, krome_focus_key(s, Key::Right, 0) && atof(krome_model_text(e, scn, "vol")) == 1.0);
+    // Bound: the model turns it.
+    krome_set(e, scn, "vol", 75.0);
+    frames(e, 2);
+    KV_CHECK(c, frame() == 23);
+    engine_shutdown(e);
+}
+
+// kromedemo's path slider (KR36), from the example's own files: a behaviour in Lua whose
+// thumb follows a three-point curve, placed by fractions (KR30's edges), and std's keys.
+void test_pathslider(TestCtx& c) {
+    c.begin("krome placed: kromedemo's path slider");
+    Engine e;
+    KV_CHECK(c, engine_init(e, k_list));
+    KromeModule& s = *krome_state(e);
+    krome_viewport(e, 400, 300, 1.0f);
+    char path[700];
+    IoBytes kim{}, lua{};
+    test_source_path(path, sizeof path, "examples/kromedemo/assets/skinkit.kim"); // module.lua's test_files
+    KV_CHECK(c, io_read_file(path, &kim));
+    test_source_path(path, sizeof path, "examples/kromedemo/assets/skinkit.lua");
+    KV_CHECK(c, io_read_file(path, &lua));
+    Array<u8> k{};
+    KimErrors errs;
+    KV_CHECK(c, kim.data && kim_compile((const char*)kim.data, kim.size, "kromedemo/skinkit.kim", k, errs) && errs.count == 0);
+    krome_provide(e, "kromedemo/skinkit.kimb", k.data, k.len);
+    if (lua.data) krome_provide(e, "kromedemo/skinkit.lua", lua.data, lua.size);
+    k.free();
+    kim.free();
+    lua.free();
+    krome_clear_errors(e);
+    const char* text =
+        "use \"krome/std\"\n"
+        "use \"kromedemo/skinkit\"\n"
+        "screen main { box dir=col pad=20 {\n"
+        "  pathslider id=along @along 0..100 step=1\n"
+        "} }\n";
+    Name scn = open_kim(c, e, "t/ps.kim", text, "main");
+    for (u32 i = 0; i < 400 && !krome_ready(e, scn); ++i) { frames(e, 1); time_sleep(0.001); }
+    krome_set(e, scn, "along", 30.0);
+    frames(e, 3);
+    KV_CHECK(c, krome_ready(e, scn));
+    KromeScreen& sc = *krome_screen(s, scn);
+    u32 ps = krome_find(sc.tree, name_intern("along"));
+    KV_CHECK(c, ps != KROME_NONE);
+    if (ps == KROME_NONE) { engine_shutdown(e); return; }
+    u32 thumb = krome_find_part(sc.tree, ps, name_intern("thumb"));
+    const rect2 r = sc.tree.nodes[ps].rect;
+    // The curve, as skinkit.lua has it: from (0.06, 0.85) bowed through (0.5, -0.55) to (0.94, 0.85).
+    auto at = [&](f32 t, f32* x, f32* y) {
+        f32 a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, cc = t * t;
+        *x = r.x + (a * 0.06f + b * 0.5f + cc * 0.94f) * r.w;
+        *y = r.y + (a * 0.85f + b * -0.55f + cc * 0.85f) * r.h;
+    };
+    auto on_curve = [&](f32 t) {
+        f32 x, y;
+        at(t, &x, &y);
+        const rect2& tr = sc.tree.nodes[thumb].rect;
+        f32 cx = tr.x + tr.w * 0.5f, cy = tr.y + tr.h * 0.5f;
+        bool ok = cx - x < 0.05f && x - cx < 0.05f && cy - y < 0.05f && y - cy < 0.05f;
+        if (!ok) KV_ERROR("test", "thumb at (%g, %g), the curve at %g is (%g, %g)", cx, cy, t, x, y);
+        return ok;
+    };
+    // Placed by fractions, so right whenever its update ran (at build, before layout, too).
+    KV_CHECK(c, thumb != KROME_NONE && on_curve(0.3f));
+    auto press = [&](f32 x, f32 y) {
+        krome_pointer(s, x, y, false, 0.0f, false);
+        krome_pointer(s, x, y, true, 0.0f, false);
+        krome_pointer(s, x, y, false, 0.0f, false);
+        frames(e, 1);
+        return atof(krome_model_text(e, scn, "along"));
+    };
+    // A press at its middle: the curve's middle, the top of its bow. At its far right: the end.
+    KV_CHECK(c, press(r.x + r.w * 0.5f, r.y + r.h * 0.5f) == 50.0 && on_curve(0.5f));
+    KV_CHECK(c, press(r.x + r.w - 1, r.y + r.h - 1) == 100.0 && on_curve(1.0f));
+    // A drag along it.
+    {
+        f32 x, y;
+        at(0.25f, &x, &y);
+        krome_pointer(s, r.x + r.w - 1, r.y + r.h - 1, true, 0.0f, false);
+        krome_pointer(s, x, y, true, 0.0f, false);
+        krome_pointer(s, x, y, false, 0.0f, false);
+        frames(e, 1);
+        f64 v = atof(krome_model_text(e, scn, "along"));
+        KV_CHECK(c, v >= 24.0 && v <= 26.0);
+    }
+    // std's keys: Home, an arrow.
+    krome_focus_take(s, sc, 0, ps, true);
+    KV_CHECK(c, krome_focus_key(s, Key::End, 0) && atof(krome_model_text(e, scn, "along")) == 100.0);
+    KV_CHECK(c, krome_focus_key(s, Key::Left, 0) && atof(krome_model_text(e, scn, "along")) == 99.0);
+    frames(e, 1);
+    KV_CHECK(c, on_curve(0.99f));
+    const KimErrors* er = krome_errors(e);
+    KV_CHECK(c, !er || er->count == 0);
+    if (er && er->count) { char line[300]; for (u32 i = 0; i < er->count; ++i) { er->format_one(i, line, sizeof line); KV_ERROR("test", "  %s", line); } }
+    engine_shutdown(e);
+}
+
 } // namespace
 
 void test_placed(TestCtx& c) {
@@ -694,4 +838,6 @@ void test_placed(TestCtx& c) {
     test_masks(c);
     test_masks_kim(c);
     test_mask_looks(c);
+    test_dial(c);
+    test_pathslider(c);
 }

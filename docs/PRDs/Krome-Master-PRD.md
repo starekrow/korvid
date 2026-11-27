@@ -409,7 +409,7 @@ diff review as a rule edit's preview, since goldberg has no lockfile yet (slice 
 **After it, drafted and not built** (Nov 23, 2026). Blackwing's skin import note asks
 Krome to draw other players' skins, which are made of pieces of bitmaps placed by
 coordinate (`docs/PRDs/Korvid-Changes-For-Blackwing.md` in Blackwing's checkout, KR28 to
-KR42). Two slices are drafted from it, and the first is built. Neither is part of "done"
+KR42). Two slices are drafted from it, and both are built. Neither is part of "done"
 above.
 
 7. **Pictures.** A region of an image, strips of frames, tiled and nine-slice fits,
@@ -420,7 +420,12 @@ above.
    still needs, placement (KR30) first; its As built lists the rest.
 8. **Placed, moving, and not a rectangle.** Edges and offsets in a stack, easing of sizes
    and positions, timers for scripts, text that scrolls, hit testing through a mask
-   (KR30, KR33, KR35, KR36, KR37). Drafted: [Krome-Slice-8-PRD.md](Krome-Slice-8-PRD.md).
+   (KR30, KR33, KR35, KR36, KR37). Built on Linux (Nov 27;
+   [Krome-Slice-8-PRD.md](Krome-Slice-8-PRD.md)): `l`, `t`, `r`, `b`, `x`, `y`; sizes and
+   offsets eased and `arrived`; `after`, `every`, `cancel`; `marquee`; `mask-alpha`, `mask`
+   and its shares by colour, value and palette index, with a look confined to them; std's
+   `dial`, and a path slider in Lua in `kromedemo`. Metal and D3D12 not verified. Review kept
+   one kernel; what a behaviour could not say is named KR36a to KR36c.
 
 Both go past this document's non-goals ("animation beyond transitions between style
 states") and bear on K1; slice 8's "For review" asks how far the kernel should go. The

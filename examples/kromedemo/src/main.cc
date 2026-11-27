@@ -197,6 +197,14 @@ constinit const Step k_steps[] = {
     {Act::Settle, nullptr, 0, nullptr},
     {Act::Check, "last", 0, "spun"},
     {Act::Shot, "gallery_skin", 0, nullptr},
+    {Act::Click, "turn", 0, nullptr},        // std's dial (slice 8): its middle is straight up, half way
+    {Act::Check, "turn", 0, "50"},
+    {Act::Key, "right", 0, ""},              // and the slider's keys
+    {Act::Check, "turn", 0, "51"},
+    {Act::Click, "along", 0, nullptr},       // the path slider: its middle's nearest point is the curve's middle
+    {Act::Check, "along", 0, "50"},
+    {Act::Key, "left", 0, ""},
+    {Act::Check, "along", 0, "49"},
     {Act::Click, "tab_split", 0, nullptr},
     {Act::Click, "split", 0, nullptr},       // the splitter takes the focus; the arrows move it
     {Act::Key, "right", 0, ""},

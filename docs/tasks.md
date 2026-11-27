@@ -57,6 +57,7 @@ the [module catalog](README.md#modules) has everything.
 - **Build a menu, a HUD or a dialogue box:** [ui](../modules/sprite_ui/README.md), `spui_load`, `spui_open`
 - **Build a tool's interface:** [krome](../modules/krome/README.md)
 - **Draw a skin cut from sheets, with pixel fonts and frames:** [krome](../modules/krome/README.md#how-it-works), `region`, `fit`, `frames`, `font=".kbf"`, `pixel`, `gain`
+- **Place a skin's pieces, move them, and take presses by their shape:** [krome](../modules/krome/README.md#how-it-works), `l`/`t`/`r`/`b`, `x`/`y`, `transition`, `after`/`every`, `marquee`, `mask`, `mask-alpha`, `dial`
 - **Write a custom shader for a material:** [render](../modules/render/README.md)
 - **Take a screenshot from the command line:** [frameloop](../modules/frameloop/README.md#using-it), `--screenshot`
 

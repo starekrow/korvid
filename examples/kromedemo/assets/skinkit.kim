@@ -1,0 +1,32 @@
+// kromedemo/skinkit: what a skin needs that krome/std has not (Krome slice 8, KR36). Its
+// script returns the behaviours; this file is the prelude a screen uses to have them.
+
+use "krome/std"
+script "kromedemo/skinkit.lua"
+
+// `pathslider @v 0..100`: a thumb along a three-point curve, a dot every eighth of it.
+style pathslider {
+    w=200 h=60 cursor=hand border=1 border-color=clear radius=4
+    focused { border-color=ring }
+}
+style pathslider-dot {
+    w=4 h=4 radius=2 bg=muted
+}
+style pathslider-thumb {
+    w=12 h=12 radius=6 bg=knob border=1 border-color=edge
+}
+
+def pathslider {
+    box [pathslider] behave=pathslider dir=stack {
+        box [pathslider-dot] part=dot0
+        box [pathslider-dot] part=dot1
+        box [pathslider-dot] part=dot2
+        box [pathslider-dot] part=dot3
+        box [pathslider-dot] part=dot4
+        box [pathslider-dot] part=dot5
+        box [pathslider-dot] part=dot6
+        box [pathslider-dot] part=dot7
+        box [pathslider-dot] part=dot8
+        box [pathslider-thumb] part=thumb
+    }
+}

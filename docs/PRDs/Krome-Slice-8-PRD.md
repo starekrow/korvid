@@ -1,6 +1,6 @@
 # Krome Slice 8 — Placed, moving, and not a rectangle
 
-Nov 23, 2026 · @starekrow · building (see As built)
+Nov 23, 2026 · @starekrow · built on Linux (see As built)
 
 ## Goal and exit criteria
 
@@ -439,3 +439,52 @@ In review of the draft (Nov 26):
   computed look, no look before the mask is in, nothing for a node that is no share.
 - **Not verified:** Metal and D3D12 (their `ui` references were already stale since slice 7).
 
+**Milestone 7, The path slider and the dial** (Nov 27).
+
+- **The dial is std's**, as decided: `dial @v 0..100 { image "skin/knob.png" part=face frames=32 }`.
+  Its behaviour (`std.lua`) sets the face's `frame-at` from the value in `update`, and `press`
+  and `drag` turn the pointer's angle about the dial's middle (`math.atan`) into a value through
+  270 degrees, bottom left to bottom right; `key` and `wheel` are the slider's own functions.
+- **The path slider is kromedemo's**, in a prelude of its own (`assets/skinkit.kim`, its script
+  `skinkit.lua`): its thumb at a quadratic Bezier's point a fraction along, set with `w:part`;
+  a press or a drag finds the nearest point (64 samples, then 32 more either side of the best);
+  std's slider's keys and wheel, copied. Nine dots mark the curve.
+- **Neither needed a kernel change of its own.** What they found, by ID:
+  - **KR36a, a behaviour's own parameters.** A behaviour is told its node's `lo`, `hi`, `step`
+    and value, and nothing else: the path slider's three points are in its script, as fractions
+    of its node, and every path slider has the same curve. A skin's converter would want them
+    on the use (`pathslider p0=... p1=... p2=...`).
+  - **KR36b, a part's size.** A behaviour cannot read a part's rect, so the thumb's size (12)
+    and the dots' (4) are in the script beside their styles, as std's slider's knob (14) is.
+  - **KR36c, a dial's face as a child.** `w:part` reaches only descendants, so the dial cannot
+    draw its own node's frames: its face is the use's child (`part=face`), which also means any
+    strip, at any size, serves.
+  - **Update before layout.** A behaviour's `update` runs at build, before the node is laid out
+    (`w.rect` is 0 then), and again when its value changes. Placing the thumb by fractions, with
+    slice 8's own edges (`l=31.2%-6`), makes that harmless; placed in pixels, as `x=`, it
+    would be wrong until the value next changed.
+- **Found on the way, and fixed: a name was a token.** `part=thumb` in skinkit took std's theme
+  token `thumb` (`#ffffff38`) for the part's name, since a theme's token wins over a literal
+  spelled the same; `knob` is a token too. The builder now takes a node's names (`part`,
+  `behave`, `arrived`, `change`, `blur`, `context`, `cursor`, `grip`, `key`, `marquee-mode`) as
+  written.
+- **Shown.** kromedemo's Skin tab: the dial on a 32-frame strip (`dial.png`, original art) and the
+  path slider, with their values; `--demo` clicks the dial (straight up: 50), turns it with an
+  arrow (51), clicks the path slider's middle (50) and steps it back (49). The Skin tab's two
+  pictures change by the new row, and nothing else does.
+- **Tested** (`placed_test.cc`): the dial through std: straight up 50, bottom left 0, bottom right
+  100, a quarter turn right of up 83, Home and an arrow, the face's frame following each and a
+  bound value. The path slider from the example's own files (krome's `test_files`): its thumb on
+  the curve at 0.3 by fractions, a press at its middle (50) and at its end (100), a drag to a
+  quarter (25), End and an arrow, and no errors.
+
+**Verification** (Nov 27). `kormake test` on linux-debug, linux-dev and linux-ship; `krome`,
+`kim`, `kimb`, `image`, `render`, `renderer-cpu` and `renderer-cpu-raster` under `--sanitize
+address,undefined`, with no report. Render-gate on Linux: the CPU renderer's passes; Vulkan's
+passes every check but "shader sources differ from main", which is `ui.slang`'s change (its
+compiled shaders are byte for byte the baseline's where main has them). `tools/doccheck.sh`
+reports nothing new, and `--module` finds no name of this slice's missing from a quick
+reference. KM1: after milestones 1 to 5 and at the end, `kromedemo --demo` (Kim and Lua), `--player --demo` and
+`kromescreens --demo`, 45 pictures against main's: byte for byte but `kromedemo_form`, whose
+row colour varies from run to run on main too, and from milestone 7 the Skin tab's two
+pictures, which have its new row. Metal and D3D12 are not verified.

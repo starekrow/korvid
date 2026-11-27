@@ -3,6 +3,7 @@
 // opens the page a press names.
 
 use "krome/std"
+use "kromedemo/skinkit"
 script "kromedemo/gallery.lua"
 
 // A pixel font written inline (Krome slice 7): pixfont.png's 5 x 7 capitals and digits. It
@@ -184,6 +185,16 @@ screen gallery {
                                 slider id=dial @dial 0..1 step=0.02 w=160
                                 image "kromedemo/spinner.png" id=spinner frames=12 across fps=@spin_fps loops=2 w=32 h=32 -> spun
                                 button "Spin" id=spin -> spin
+                            }
+                            // Krome slice 8 (KR36): std's dial, a 32-frame strip turned by the
+                            // pointer's angle; and a slider along a curve, a behaviour of
+                            // skinkit's written in Lua on what any behaviour has.
+                            row gap=16 middle {
+                                dial id=turn @turn 0..100 step=1 {
+                                    image "kromedemo/dial.png" part=face frames=32 w=48 h=48
+                                }
+                                pathslider id=along @along 0..100 step=1
+                                text "{turn} / {along}" id=dials
                             }
                             // Bitmap fonts: a time display from digits.kbf, three times its
                             // size and recoloured; a title in the inline font.

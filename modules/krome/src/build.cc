@@ -257,7 +257,12 @@ void prop(Build& b, const KromeFrame* fr, u32 node, const KimbFile& f, u32 line,
         return;
     }
     const char* why = nullptr;
-    const JsonValue* r = kimb_resolve_value(*b.scope, b.theme, k->type, v, &why);
+    // A name (a part's, a behaviour's, an event's, a cursor's) is never a theme's token:
+    // std's theme has `thumb` and `knob`, and part=thumb is the part's name, not a colour.
+    static const char* const names[] = {"part", "behave", "arrived", "change", "blur", "context", "cursor", "grip", "key", "marquee-mode"};
+    bool is_name = false;
+    for (const char* nm : names) if (!strcmp(name, nm)) is_name = true;
+    const JsonValue* r = is_name && kimb_literal(k->type, v) ? &v : kimb_resolve_value(*b.scope, b.theme, k->type, v, &why);
     const JsonDoc* rdoc = &f.doc;
     if (r && r != &v) {
         // A token's value lives in the document of the theme that gave it.

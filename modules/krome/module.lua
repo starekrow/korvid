@@ -4,7 +4,8 @@
 module "krome" {
   deps          = { "core", "math", "platform", "platform_hid", "cli", "render", "asset", "asset_render", "lua", "kimb", "typeset", "dejavu", "patherizer", "image" }, -- image: a mask's PNG decoded on the CPU (slice 8)
   test_deps     = { "kim" }, -- a test compiles .kim text, as goldberg does
-  test_files    = { "modules/dejavu/assets/DejaVuSans.ttf" }, -- the edit test's face
+  test_files    = { "modules/dejavu/assets/DejaVuSans.ttf", -- the edit test's face
+                    "examples/kromedemo/assets/skinkit.kim", "examples/kromedemo/assets/skinkit.lua" }, -- the path slider (slice 8), tested as kromedemo has it
   engine_module = true,
   licenses      = { "icons/LICENSE" }, -- std's icons: Material Symbols (Apache 2.0), icons/README.md
 }

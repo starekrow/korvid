@@ -15,7 +15,10 @@ dropdown, input and password, buttons with a shortcut and a tooltip, a menu bar,
 tree, a 10,000-row table with sortable, resizable columns and a context menu, a splitter
 between scroll views, a modal dialog), and a skin's buttons cut from one sheet
 (`assets/skin.png`), their hover and pressed looks regions beside them, drawn `pixel`. The header's navigation (in both forms, and the
-gallery) fires `nav`; the game opens the page it names in place of the one shown.
+gallery) fires `nav`; the game opens the page it names in place of the one shown. The Skin
+tab also has std's dial on a 32-frame strip (`assets/dial.png`) and a slider along a curve,
+`pathslider`, from a prelude of the demo's own (`assets/skinkit.kim` and `skinkit.lua`): a
+behaviour written in Lua on what every behaviour has (Krome slice 8, KR36).
 
     build/linux-dev/bin/kromedemo                    # the form
     build/linux-dev/bin/kromedemo --theme light      # in std's light theme

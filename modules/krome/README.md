@@ -336,6 +336,13 @@ Header `korvid/krome/krome.h`:
 | `krome.pump`, `krome.input`, `krome.paint` (Frame) | systems | documents, scripts, rebuilds and model values; the pointer; layout and paint |
 | `/krome` | CLI mount | `ls` screens and named nodes, `print` a tree or a node, `patch NODE PROPERTY VALUE...` |
 
+Header `korvid/krome/tree.h` (slice 8's additions; the tree and layout are described above):
+
+| name | kind | what |
+|---|---|---|
+| `KromeEdge`, `krome_parse_edge(text, out)` | struct, function | a stack child's edge: a fraction of the parent's inside and a distance; `"10"`, `"33.3%"`, `"100%-40"` |
+| `KromeMaskMatch` | enum | what part of a shared mask a node is: `Color`, `Value`, `Index` |
+
 In Lua: the helpers (and `edit`, with `bind = "key"`), `model`, `emit(name, value)`, `after(s, fn)`, `every(s, fn)`, `cancel(h)`,
 `open_overlay(tree, opts)`, `close_overlay([id])`, `theme(name)`, `changed(key)`, `kim(file, screen)`.
 
@@ -472,6 +479,17 @@ Flags: `fill`, `clip`, `scroll`, `disabled`, `selected`, `hidden`, the alignment
 vocabulary is fixed (`modules/kimb`); `prop name type` in a prelude types a definition's
 parameter.
 
+**The dial** (slice 8, KR36). `dial @volume 0..100 { image "skin/knob.png" part=face frames=32 }`:
+std's behaviour `dial` sets its face's `frame-at` from the value, and a press or a drag sets
+the value by the pointer's angle about its middle, through 270 degrees from bottom left to
+bottom right; the keys and the wheel are the slider's. The face is the use's child, so any
+strip will do. A slider along a curve is not in std: `examples/kromedemo/assets/skinkit.lua`
+has one, written in Lua.
+
+**Names are not tokens.** A node's `part`, `behave`, `arrived`, `change`, `blur`, `context`,
+`cursor`, `grip`, `key` and `marquee-mode` are taken as written, never as a theme's token:
+std's theme has `thumb` and `knob`, which are good names for parts too.
+
 **`krome/std`** (`assets/std.kim`): themes `dark` (first, so a screen starts in it) and
 `light`; `row`, `col`, `stack`, `spacer`, `separator`, `label`, `heading`, `field`, `badge`,
 `button` (and `[danger]`), `checkbox` (bind it: `checkbox "Wrap" @wrap`), `input` and
@@ -482,6 +500,7 @@ input), `menu-item`, `panel`; and slice 4's, their behaviours in `assets/std.lua
 | widget | written | does |
 |---|---|---|
 | `slider` | `slider @level 0..100 step=5` | press, drag, arrows, Page Up/Down, Home/End, wheel; update draws fill and knob |
+| `dial` | `dial @vol 0..100 { image "knob.png" part=face frames=32 }` | the face's frame follows the value; the pointer's angle sets it (slice 8); the slider's keys and wheel |
 | `progress` | `progress @done` | a bar `done` wide (`"40%"`) |
 | `radio` | `radio "Fast" @mode=fast` | `@key=value` |
 | `dropdown`, `option` | `dropdown @kind { option "sound" id=sound ... }` | opens its options below it; the pointer, or the arrows and Enter, pick one (its id, else its label) |

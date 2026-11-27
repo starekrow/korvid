@@ -262,6 +262,20 @@ def slider {
     }
 }
 
+// `dial @volume 0..100 { image "skin/knob.png" part=face frames=32 }`: a strip of frames
+// whose frame follows the value; the pointer's angle about its middle sets it (270 degrees,
+// bottom left to bottom right), and the keys and the wheel as a slider's (Krome slice 8).
+style dial {
+    cursor=hand border=1 border-color=clear radius=4
+    focused { border-color=ring }
+}
+
+def dial {
+    box [dial] behave=dial dir=stack {
+        slot
+    }
+}
+
 // `progress @done`: a bar `done` wide, a percentage ("40%").
 style progress {
     w=fill h=6 radius=3 bg=off-bg

@@ -55,6 +55,31 @@ local slider = {
   end,
 }
 
+-- ---- dial: a strip of frames turned by the pointer's angle (Krome slice 8, KR36) ---------
+
+-- Its face is a strip (`frames=32`) given as the use's child with `part=face`: its frame
+-- follows the value. A press or a drag sets the value by the pointer's angle about the
+-- dial's middle, through 270 degrees from bottom left to bottom right; the keys and the
+-- wheel are the slider's.
+local sweep = 135 -- degrees either side of straight up
+
+local function dial_at(w, x, y)
+  local lo, hi = range(w)
+  local a = math.deg(math.atan(x - w.rect.w / 2, w.rect.h / 2 - y)) -- 0 up, clockwise
+  return settle(w, lo + (hi - lo) * (clamp(a, -sweep, sweep) + sweep) / (2 * sweep))
+end
+
+local dial = {
+  press = function(w, x, y) w:set(dial_at(w, x, y)) end,
+  drag = function(w, x, y) w:set(dial_at(w, x, y)) end,
+  key = slider.key,
+  wheel = slider.wheel,
+  update = function(w)
+    local lo, hi = range(w)
+    w:part("face", "frame-at", clamp(((tonumber(w.value) or lo) - lo) / (hi - lo), 0, 1))
+  end,
+}
+
 -- ---- dropdown: its options below it -------------------------------------------------------
 
 local dropdown = {
@@ -134,4 +159,4 @@ local splitter = {
   end,
 }
 
-return { slider = slider, dropdown = dropdown, menu = menu, column = column, splitter = splitter }
+return { slider = slider, dial = dial, dropdown = dropdown, menu = menu, column = column, splitter = splitter }
