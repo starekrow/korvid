@@ -1,6 +1,7 @@
 #include "korvid/core/ktable.h"
 #include "korvid/core/format.h"
 #include "korvid/core/hash.h"
+#include "korvid/core/job.h"
 #include "korvid/core/memory.h"
 #include "korvid/core/profile.h"
 #include <string.h>
@@ -254,6 +255,25 @@ u32 KTable::destroy_all() {
     return gone;
 }
 
+// The previous copy of a large ktable goes to the job pool, a range of rows a chunk, each
+// chunk copying every prev column for its rows. A serial copy is the one stretch of a tick
+// with every worker idle, and long enough (200,000 rows of a point: about 90 us) that the
+// workers were asleep again when the first system's batch arrived. cpukiller's engine tick
+// on 16 threads, ship: 295 us with the copy serial, 197 with it here.
+//
+// Below kPrevPoolBytes the copy is quicker than a batch is to hand out; kPrevChunkBytes of
+// 64 KB and of 256 KB measured the same. The ranges are disjoint, so the result is the
+// serial copy's whatever ran where.
+constexpr usize kPrevPoolBytes  = 256 * 1024;
+constexpr usize kPrevChunkBytes = 64 * 1024;
+
+namespace {
+void prev_copy_rows(u32, u32 begin, u32 end, void* user) {
+    for (Column& c : ((KTable*)user)->columns)
+        if (c.prev) memcpy(c.prev + (usize)begin * c.stride, c.data + (usize)begin * c.stride, (usize)(end - begin) * c.stride);
+}
+} // namespace
+
 void KTable::begin_tick() {
     // A still ktable's rows equal their previous copies unless it spawned since the last copy.
     if (desc && desc->still) {
@@ -261,8 +281,12 @@ void KTable::begin_tick() {
         churn_copied = churn;
     }
     u32 n = rows();
-    for (Column& c : columns)
-        if (c.prev) memcpy(c.prev, c.data, (usize)n * c.stride);
+    usize row_bytes = 0; // of every prev column together
+    for (const Column& c : columns) if (c.prev) row_bytes += c.stride;
+    if (!n || !row_bytes) return;
+    u32 grain = (u32)(kPrevChunkBytes / row_bytes);
+    if (grain && (usize)n * row_bytes >= kPrevPoolBytes && jobs_worker_count()) jobs_run(n, grain, prev_copy_rows, this, "prev copy");
+    else prev_copy_rows(0, 0, n, this);
 }
 
 u64 KTable::hash() const {

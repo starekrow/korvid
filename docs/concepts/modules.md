@@ -460,7 +460,7 @@ tick N
   tick start              timers due at N fire; held next-tick events and the engine's writer merge into the streams
   phase Input             units (systems and handlers) level by level, each level's consumed streams merged first;
                           then the phase's events, its commands, and the engine's writer (the commands' Spawned)
-  prev copy               every CompPrev column: current -> previous
+  prev copy               every CompPrev column: current -> previous (a large ktable's on the job pool)
   phase PreSim            the same
   phase Sim               the same
   phase PostSim           the same

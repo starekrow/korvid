@@ -270,7 +270,8 @@ struct KTable {
     // not fit the capacity or disagree with themselves.
     bool restore_slots(Span<const u32> gen_words, Span<const u32> free_order);
 
-    // Top of PreSim: the current rows become the previous ones, for every prev column. The
+    // Top of PreSim: the current rows become the previous ones, for every prev column, on
+    // the job pool when the ktable is large. The
     // engine's.
     void begin_tick();
 

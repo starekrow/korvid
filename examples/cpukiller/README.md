@@ -83,7 +83,8 @@ power setting they were taken with, as Markdown.
 
 On a Ryzen 7 7840U (8 cores, 16 threads), Windows 11, Balanced plan on mains, Nov 26,
 2026, ship build unless said. "Before" is the first pool: every chunk queued by itself,
-the pool's lock taken twice a chunk, a broadcast to every sleeper after each, and no spin.
+the pool's lock taken twice a chunk, a broadcast to every sleeper after each, no spin, and
+the previous copy on the main thread.
 
 | | before | now | reference |
 |---|---|---|---|
@@ -91,33 +92,45 @@ the pool's lock taken twice a chunk, a broadcast to every sleeper after each, an
 | chunks of 4 µs and up | 13.6x to 14.3x | 13.3x to 14.4x | 13.4x to 14.1x |
 | a chunk's dispatch, at scale | 181 ns | 15 ns | 14 ns |
 | nested, 64 batches of 64 | 1.3x | 8.4x | |
-| 16 chunks of 52 µs, pool awake | 139 µs | 106 µs | 57 µs (ideal 52) |
-| the same, pool asleep | 230 µs | 216 µs | |
+| 16 chunks of 52 µs, pool awake | 139 µs | 87 to 106 µs | 57 µs (ideal 52) |
+| the same, pool asleep | 230 µs | 216 to 226 µs | |
 | 2 empty chunks, a batch | 0.2 µs | 3.8 µs | 0.6 µs |
 | 16 empty chunks, a batch | 6.5 µs | 8.0 µs | 1.1 µs |
-| an engine tick, 16 threads | 397 µs (2.7x) | 221 to 294 µs (3.7x to 4.9x) | bare arrays 118 µs (6.8x) |
+| an engine tick, 16 threads | 397 to 444 µs (2.4x to 2.7x) | 196 µs (5.5x) | bare arrays 119 µs (6.5x) |
+| engine ticks by threads: 2, 4, 8, 16 | 1.6x, 2.5x, 3.1x, 2.8x | 1.8x, 3.3x, 5.2x, 5.3x | 1.9x, 2.9x, 5.5x, 6.5x |
 
 - **The pool is at the floor at every grain.** Taking a chunk is one atomic add; the lock
   is taken once for each batch a thread joins.
-- **The idle spin is most of the engine's gain.** A tick is four batches a few tens of
-  microseconds apart. `--only engine --spin N`, three rounds interleaved: 397 µs a tick
-  with no spin, 221 with 50, 100, 200 or 500 µs of it, and a worse p99 the longer it is
-  (about 700 µs at 50 to 100, 1,100 to 1,300 at 500). The default is 100.
+- **The engine tick came down in three steps.** The claim alone: nothing (444 µs). The
+  idle spin: 295 µs. The previous copy on the pool (`KTable::begin_tick`): 196 µs. The
+  copy was one serial `memcpy` of about 90 µs, about as long as the spin, so the workers
+  were asleep again when the first system's batch arrived; as a batch it is shorter and
+  keeps them there.
+- **The spin's length.** Before the copy moved, `--only engine --spin N`: 444 µs a tick
+  with none, 295 with 100 µs, 227 to 268 with 500, and a p99 of about 600 µs up to 100
+  and 800 to 1,150 at 500. The default is 100.
+- **Chunk size is not the limit.** Chunks half and a quarter the size: no change. An
+  eighth and a sixteenth: slower by 40 to 110 µs a tick, on one thread too, since every
+  chunk has its own event writer and command buffer, made and merged on the caller.
+- **What is left between the engine and bare arrays** (196 µs against 119): a chunk's
+  work is 1.3 to 1.4 times the bare loop's (events, commands, liveness), and about 70 µs
+  a tick (dev, traced) goes to waiting for the last chunks and merging the buffers. The
+  hardware bounds both: a chunk that takes 4.3 µs alone takes 8 to 11 with sixteen
+  threads at it, for bare arrays the same, where pure computation scales 14x.
 - **A batch of nothing costs more than it did.** Workers that are awake join a batch at
   once, and the caller waits for them to leave: 3.8 µs for two empty chunks where the
   first pool took 0.2 because nobody had woken yet. A batch with work in it is what the
   pool is for; one without is the case to run on the caller.
-- **Waking a sleeping pool is the OS's price**, and unchanged: about 160 µs over ideal.
+- **Waking a sleeping pool is the OS's price**, and unchanged: about 170 µs over ideal.
+- **A loaded machine stalls a 16-thread tick.** With another program on 12 cores, ticks
+  of 60 to 360 ms appeared; on a quiet machine the worst of 5,400 was 1.1 ms. A batch
+  waits for every thread that joined it, and a thread the OS has taken away is one.
 - **The allocator beats `malloc` in ship.** Small blocks 353 M/s against 271, filled
   blocks 181 against 40, remote frees 57 against 3.3.
 - **The allocator does not scale in dev.** Small blocks on 16 threads take as long as on
   one (25 M/s against `malloc`'s 285): the dev build's bookkeeping is shared between the
   threads.
-- **The engine is cheap on one thread and still short on many.** One thread: 1.08 ms a
-  tick against 0.77 to 0.86 for bare arrays. Sixteen threads: 3.7x to 4.9x where bare
-  arrays on the spinning pool reach 6.8x, and best at 8 threads in the sweep (4.0x). The
-  workers wait 38% of their time (dev), down from 41%: what is left is the serial work
-  between batches, not the pool.
+- **The workers wait 32% of their time** in the engine scenario (dev), from 41%.
 - **Every hash equal**, at every thread count, in every run.
 
 ## Where things are
