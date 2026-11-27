@@ -597,8 +597,35 @@ bool trace_mouse() {
     return on != 0;
 }
 
-// One OS event into bus events and raw input: pump's and drain's.
-void translate(HostWindow& w, const SDL_Event& e, EventBus& bus, Input& input) {
+// The window an event is for: the open HostWindow whose SDL window has the event's window
+// id. The main one for an event that names none (a quit, a pad, the wake); null for one
+// whose window is already closed.
+HostWindow* event_window(HostWindow& main, const SDL_Event& e) {
+    SDL_WindowID id = 0;
+    if (e.type >= SDL_EVENT_WINDOW_FIRST && e.type <= SDL_EVENT_WINDOW_LAST) id = e.window.windowID;
+    else switch (e.type) {
+    case SDL_EVENT_KEY_DOWN: case SDL_EVENT_KEY_UP: id = e.key.windowID; break;
+    case SDL_EVENT_TEXT_INPUT:    id = e.text.windowID; break;
+    case SDL_EVENT_TEXT_EDITING:  id = e.edit.windowID; break;
+    case SDL_EVENT_MOUSE_MOTION:  id = e.motion.windowID; break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: id = e.button.windowID; break;
+    case SDL_EVENT_MOUSE_WHEEL:   id = e.wheel.windowID; break;
+    default: break;
+    }
+    if (!id) return &main;
+    SDL_Window* sw = SDL_GetWindowFromID(id);
+    for (u32 i = 0; sw && i < KV_WINDOWS; ++i)
+        if (HostWindow* h = hid_window(i); h && h->native_ == sw) return h;
+    return nullptr;
+}
+
+// One OS event into bus events and raw input: pump's and drain's, always on the main
+// window, whose queue is every window's.
+void translate(HostWindow& main, const SDL_Event& e, EventBus& bus, Input& input) {
+        HostWindow* to = event_window(main, e);
+        if (!to) return;
+        HostWindow& w = *to;
+        u8 id = w.id_;
         if (trace_mouse()) {
             switch (e.type) {
             case SDL_EVENT_WINDOW_MOUSE_ENTER: KV_INFO("input", "trace: the pointer entered the window"); break;
@@ -620,16 +647,18 @@ void translate(HostWindow& w, const SDL_Event& e, EventBus& bus, Input& input) {
             default: break;
             }
         }
-        if (g_wake_event && e.type == g_wake_event) { atomic_store(&w.wake_queued_, 0u, MO_RELEASE); return; }
+        if (g_wake_event && e.type == g_wake_event) { atomic_store(&main.wake_queued_, 0u, MO_RELEASE); return; }
         // How long a press waited for the pump, from SDL's stamp (the OS's, on its clock).
         if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
             u64 now = SDL_GetTicksNS();
-            w.input_delay_ = e.common.timestamp && e.common.timestamp <= now ? (f64)(now - e.common.timestamp) * 1e-9 : 0.0;
+            main.input_delay_ = e.common.timestamp && e.common.timestamp <= now ? (f64)(now - e.common.timestamp) * 1e-9 : 0.0;
         }
         switch (e.type) {
         case SDL_EVENT_QUIT:
-        case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             bus.emit(CloseRequested{0});
+            break;
+        case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+            bus.emit(CloseRequested{id});
             break;
 
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
@@ -640,7 +669,7 @@ void translate(HostWindow& w, const SDL_Event& e, EventBus& bus, Input& input) {
                 if (w.shape_.len) hid_window_shape(w); // the mask, scaled to the new size
                 // Bounds are pixels, SDL's are window units: a new scale changes them.
                 if ((w.bounds_[0] | w.bounds_[1] | w.bounds_[2] | w.bounds_[3]) && w.pixel_scale() != w.bounds_scale_) hid_window_bounds(w);
-                bus.emit(WindowResized{nw, nh});
+                bus.emit(WindowResized{nw, nh, id});
             }
             break;
         }
@@ -657,13 +686,13 @@ void translate(HostWindow& w, const SDL_Event& e, EventBus& bus, Input& input) {
 
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
             w.focused_ = true;
-            bus.emit(FocusChanged{true});
+            bus.emit(FocusChanged{true, id});
             break;
 
         case SDL_EVENT_WINDOW_FOCUS_LOST:
             w.focused_ = false;
             input.raw.clear(); // keys released while unfocused never report an up edge
-            bus.emit(FocusChanged{false});
+            bus.emit(FocusChanged{false, id});
             break;
 
         case SDL_EVENT_TEXT_INPUT:
@@ -707,7 +736,9 @@ void translate(HostWindow& w, const SDL_Event& e, EventBus& bus, Input& input) {
             f32 s = w.pixel_scale();
             MouseState& m = input.raw.mouse;
             f32 nx = e.motion.x * s, ny = e.motion.y * s;
-            bus.emit(MouseMoved{nx, ny, e.motion.xrel * s, e.motion.yrel * s});
+            bool into = m.window != id; // into another window: its pixels, so no travel
+            bus.emit(MouseMoved{nx, ny, into ? 0.0f : e.motion.xrel * s, into ? 0.0f : e.motion.yrel * s, id});
+            m.window = id;
             m.x = nx; m.y = ny;
             break;
         }
@@ -725,18 +756,19 @@ void translate(HostWindow& w, const SDL_Event& e, EventBus& bus, Input& input) {
             {
                 f32 s = w.pixel_scale();
                 MouseState& m = input.raw.mouse;
+                m.window = id;
                 m.x = e.button.x * s; m.y = e.button.y * s;
                 bool down = e.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
                 m.set(b, down);
-                if (down) bus.emit(MouseButtonDown{b, m.x, m.y});
-                else      bus.emit(MouseButtonUp{b, m.x, m.y});
+                if (down) bus.emit(MouseButtonDown{b, m.x, m.y, id});
+                else      bus.emit(MouseButtonUp{b, m.x, m.y, id});
             }
         done:
             break;
         }
         case SDL_EVENT_MOUSE_WHEEL: {
             input.raw.mouse.wheel += e.wheel.y;
-            bus.emit(MouseWheel{e.wheel.x, e.wheel.y});
+            bus.emit(MouseWheel{e.wheel.x, e.wheel.y, id});
             break;
         }
 
@@ -782,6 +814,15 @@ void HostWindow::on_modal(void (*fn)(void* ctx), void* ctx) {
 }
 
 bool hid_backend_holds_unfocused() { return false; }
+u32  hid_backend_windows() { return KV_WINDOWS; }
+
+// SDL's hide and show; SDL then says WINDOW_HIDDEN and _SHOWN, which mark it unmapped too.
+void HostWindow::show(bool on) {
+    SDL_Window* w = (SDL_Window*)native_;
+    if (!w) return;
+    if (on) SDL_ShowWindow(w); else SDL_HideWindow(w);
+    hidden_ = on ? (u8)(hidden_ & ~HiddenByProgram) : (u8)(hidden_ | HiddenByProgram);
+}
 bool HostWindow::touch_screen() const { return false; }
 
 int platform_app_main(int argc, char** argv, int (*run)(int argc, char** argv, void* ctx), void* ctx) {

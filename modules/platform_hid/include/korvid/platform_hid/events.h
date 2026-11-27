@@ -5,25 +5,29 @@
 
 namespace kv {
 
-struct WindowResized { u32 width, height; };
-struct FocusChanged  { bool focused; };
-struct CloseRequested { u8 unused; };
+// The window an event is about is `window`, its HostWindow::id(): 0 is the main one, the
+// first opened (platform_window). A program with one window can ignore it.
+struct WindowResized { u32 width, height; u8 window = 0; };
+struct FocusChanged  { bool focused; u8 window = 0; };
+struct CloseRequested { u8 window = 0; };
 // The window stopped being seen, or is seen again (KR21): emitted when it changes, and
 // readable between as HostWindow::visible(). As well as each OS can tell: minimized
 // everywhere; covered, on another workspace or behind a locked screen where the OS or the
-// compositor says so (a suspended Wayland surface, macOS's occlusion). Where it cannot be
-// told the window is shown. On a phone the loop stops while the app is in the background:
+// compositor says so (a suspended Wayland surface, macOS's occlusion); hidden by the program
+// (HostWindow::show). Where it cannot be told the window is shown. On a phone the loop stops while the app is in the background:
 // the hidden and shown events arrive together when it comes back.
-enum class WindowHidden : u8 { None, Minimized, Occluded };
-struct WindowVisibility { bool visible; WindowHidden why; };
+enum class WindowHidden : u8 { None, Minimized, Occluded, Hidden };
+struct WindowVisibility { bool visible; WindowHidden why; u8 window = 0; };
 
 struct KeyDown { Key key; u8 device; bool repeat; };
 struct KeyUp   { Key key; u8 device; };
 
-struct MouseMoved      { f32 x, y, dx, dy; };     // framebuffer pixels, origin top-left
-struct MouseButtonDown { MouseButton button; f32 x, y; };
-struct MouseButtonUp   { MouseButton button; f32 x, y; };
-struct MouseWheel      { f32 dx, dy; };           // dy positive away from the user
+// The pointer is in one window at a time, `window` (MouseState::window), and its x and y are
+// that window's framebuffer pixels, origin top-left. A move into another window has no dx, dy.
+struct MouseMoved      { f32 x, y, dx, dy; u8 window = 0; };
+struct MouseButtonDown { MouseButton button; f32 x, y; u8 window = 0; };
+struct MouseButtonUp   { MouseButton button; f32 x, y; u8 window = 0; };
+struct MouseWheel      { f32 dx, dy; u8 window = 0; }; // dy positive away from the user
 
 // Text from the OS's text input (layouts, dead keys, an input method's commit), UTF-8, while
 // a text field asks for it (platform_text_input). A long commit comes as several, split at

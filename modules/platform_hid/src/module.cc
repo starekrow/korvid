@@ -12,33 +12,47 @@ namespace kv {
 
 namespace {
 
-// From platform_pump, before the I/O queue: OS events become bus events and raw input.
+// From platform_pump, before the I/O queue: OS events become bus events and raw input. The
+// main window's pump takes every window's events.
 void hid_pump(Engine& e, void* user) {
     HidState& s = *(HidState*)user;
-    if (!s.window.is_open()) return;
-    s.window.pump(e.events, s.input);
-    s.window.send_visibility(e.events);
-    if (hid_backend_holds_unfocused()) engine_hold(e, HoldFocus, !s.window.focused());
+    if (!s.windows[0].is_open()) return;
+    s.windows[0].pump(e.events, s.input);
+    bool focused = false;
+    for (HostWindow& w : s.windows) {
+        if (!w.is_open()) continue;
+        w.send_visibility(e.events);
+        focused = focused || w.focused();
+    }
+    if (hid_backend_holds_unfocused()) engine_hold(e, HoldFocus, !focused);
+}
+
+// The window the pointer is in, or the main one.
+HostWindow* pointer_window(HidState& s) {
+    HostWindow& w = s.windows[s.input.raw.mouse.window < KV_WINDOWS ? s.input.raw.mouse.window : 0];
+    return w.is_open() ? &w : s.windows[0].is_open() ? &s.windows[0] : nullptr;
 }
 
 // platform_wait's waiter: the window's wait while it is open; the platform's own before.
 int hid_wait(void* user, f64 seconds) {
     HidState& s = *(HidState*)user;
-    if (!s.window.is_open()) return -1;
-    return s.window.wait(seconds) ? 1 : 0;
+    if (!s.windows[0].is_open()) return -1;
+    return s.windows[0].wait(seconds) ? 1 : 0; // every window's events end it: they share a queue
 }
-void hid_wake(void* user) { ((HidState*)user)->window.wake(); }
+void hid_wake(void* user) { ((HidState*)user)->windows[0].wake(); }
 
 bool hid_startup(Engine& engine, ModuleInstance& self) {
     if (!hid_backend_startup()) return false;
     HidState* s = arena_push<HidState>(self.arena);
     if (!s) return false;
     self.set_state(s);
+    for (u32 i = 0; i < KV_WINDOWS; ++i) s->windows[i].id_ = (u8)i;
+    hid_windows_set(s->windows);
     // Systems reach these under their declared access; the accessors below are for code
     // outside the schedule (the frame loop, startup).
     if (!engine_publish(engine, self, "input.state", &s->input) ||
         !engine_publish(engine, self, "input.actions", &s->actions) ||
-        !engine_publish(engine, self, ".window", &s->window)) return false;
+        !engine_publish(engine, self, ".window", &s->windows[0])) return false;
     PlatformWaiter w{hid_wait, hid_wake, s};
     platform_set_waiter(engine, &w);
     return platform_pump_add(engine, hid_pump, s);
@@ -49,10 +63,11 @@ void hid_shutdown(Engine& e, ModuleInstance& self) {
     if (s) {
         platform_pump_remove(e, hid_pump, s);
         platform_set_waiter(e, nullptr);
-        s->window.close(); // the service ends with the module, whoever opened it
+        for (u32 i = KV_WINDOWS; i-- > 0;) s->windows[i].close(); // the service ends with the module, whoever opened it; the main one last
         input_gamepads_close(s->input);
         s->clipboard.free();
     }
+    hid_windows_set(nullptr);
     hid_backend_shutdown();
 }
 
@@ -201,8 +216,8 @@ static void hid_modal(void* ctx) {
     HidState* s = state(e);
     if (!s || !s->modal_frame || s->in_modal_frame) return;
     s->in_modal_frame = true;
-    s->window.drain(e.events, s->input);
-    s->window.send_visibility(e.events);
+    s->windows[0].drain(e.events, s->input); // every window's, as pump
+    for (HostWindow& w : s->windows) if (w.is_open()) w.send_visibility(e.events);
     s->modal_frame(s->modal_user);
     s->in_modal_frame = false;
 }
@@ -210,10 +225,32 @@ static void hid_modal(void* ctx) {
 HostWindow* platform_open_window(Engine& e, const WindowDesc& desc) {
     HidState* s = state(e);
     if (!s) { KV_ERROR("hid", "module not started"); return nullptr; }
-    if (s->window.is_open()) { KV_ERROR("hid", "a window is already open"); return nullptr; }
-    if (!s->window.open(desc)) return nullptr;
-    s->window.on_modal(hid_modal, &e);
-    return &s->window;
+    u32 most = hid_backend_windows();
+    u32 id = 0;
+    while (id < most && s->windows[id].is_open()) ++id;
+    if (id == most) {
+        KV_ERROR("hid", most == 1 ? "a window is already open, and this platform has one" : "%u windows are open, the most there are", most);
+        return nullptr;
+    }
+    HostWindow& w = s->windows[id];
+    if (!w.open(desc)) return nullptr;
+    w.on_modal(hid_modal, &e);
+    if (s->text_requests) w.text_input(true);
+    if (id) KV_INFO("window", "window %u opened beside the main one", id);
+    return &w;
+}
+
+void platform_close_window(Engine& e, HostWindow* w) {
+    HidState* s = state(e);
+    if (!s || !w || w < s->windows || w >= s->windows + KV_WINDOWS) return;
+    if (w == &s->windows[0]) { KV_WARN("hid", "the main window closes with the module, not by platform_close_window"); return; }
+    if (s->input.raw.mouse.window == w->id()) s->input.raw.mouse.window = 0;
+    w->close();
+}
+
+HostWindow* platform_window_by_id(Engine& e, u32 id) {
+    HidState* s = state(e);
+    return s && id < KV_WINDOWS && s->windows[id].is_open() ? &s->windows[id] : nullptr;
 }
 
 void platform_modal_frame(Engine& e, void (*fn)(void* user), void* user) {
@@ -225,14 +262,14 @@ void platform_modal_frame(Engine& e, void (*fn)(void* user), void* user) {
 
 void platform_surface_hook(Engine& e, void (*fn)(void* user, void* native), void* user) {
     HidState* s = state(e);
-    if (s) s->window.on_surface(fn, user);
+    if (s) s->windows[0].on_surface(fn, user);
 }
 
 bool platform_video_up(Engine&) { return hid_video_up(); }
 
 HostWindow* platform_window(Engine& e) {
     HidState* s = state(e);
-    return s && s->window.is_open() ? &s->window : nullptr;
+    return s && s->windows[0].is_open() ? &s->windows[0] : nullptr;
 }
 
 bool platform_window_visible(Engine& e) {
@@ -245,7 +282,8 @@ void platform_text_input(Engine& e, bool on) {
     if (!s) return;
     u32 before = s->text_requests;
     if (on) ++s->text_requests; else if (s->text_requests) --s->text_requests;
-    if ((before == 0) != (s->text_requests == 0) && s->window.is_open()) s->window.text_input(s->text_requests != 0);
+    if ((before == 0) == (s->text_requests == 0)) return;
+    for (HostWindow& w : s->windows) if (w.is_open()) w.text_input(s->text_requests != 0);
 }
 
 void input_pointer_override(Engine& e, f32 x, f32 y, u8 buttons, f32 wheel) {
@@ -288,13 +326,17 @@ void input_compose_override(Engine& e, const char* text, u32 caret) {
 
 void platform_text_area(Engine& e, rect2 r, f32 caret) {
     HidState* s = state(e);
-    if (s && s->window.is_open()) s->window.text_area(r, caret);
+    if (!s) return;
+    // The focused window's: the field with the keyboard is in it. The main one when none is.
+    HostWindow* at = s->windows[0].is_open() ? &s->windows[0] : nullptr;
+    for (HostWindow& w : s->windows) if (w.is_open() && w.focused()) { at = &w; break; }
+    if (at) at->text_area(r, caret);
 }
 
 bool platform_clipboard_get(Engine& e, Array<char>& out) {
     HidState* s = state(e);
     if (!s) return false;
-    if (s->window.is_open() && s->window.clipboard_get(out)) return true;
+    if (s->windows[0].is_open() && s->windows[0].clipboard_get(out)) return true;
     if (!s->clipboard.len) return false;
     memcpy(out.push_n(s->clipboard.len), s->clipboard.data, s->clipboard.len);
     return true;
@@ -306,17 +348,19 @@ void platform_clipboard_set(Engine& e, const char* utf8) {
     usize n = utf8 ? strlen(utf8) : 0;
     s->clipboard.clear();
     if (n) memcpy(s->clipboard.push_n((u32)n), utf8, n);
-    if (s->window.is_open()) s->window.clipboard_set(utf8 ? utf8 : "");
+    if (s->windows[0].is_open()) s->windows[0].clipboard_set(utf8 ? utf8 : "");
 }
 
 void platform_cursor(Engine& e, CursorShape shape) {
     HidState* s = state(e);
-    if (s && s->window.is_open()) s->window.cursor(shape);
+    if (!s) return;
+    if (HostWindow* w = pointer_window(*s)) w->cursor(shape);
 }
 
 void platform_capture_mouse(Engine& e, bool on) {
     HidState* s = state(e);
-    if (s && s->window.is_open()) s->window.capture_mouse(on);
+    if (!s) return;
+    if (HostWindow* w = pointer_window(*s)) w->capture_mouse(on);
 }
 
 void InputState::type(const char* utf8) {

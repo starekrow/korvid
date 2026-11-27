@@ -18,6 +18,14 @@ void hid_video_down();
 // Whether a window without focus holds the sim (HoldFocus): on iOS an app without focus is
 // not on screen, and its game waits. On the desktop, a game that wants it asks.
 bool hid_backend_holds_unfocused();
+// How many windows the backend opens at once: KV_WINDOWS on the desktop, 1 on a phone.
+u32  hid_backend_windows();
+
+// The module's windows, KV_WINDOWS of them by id, open or not (window_parts.cc keeps the
+// pointer): the main window's pump gives each event to the one it is for. Null before the
+// module starts.
+void        hid_windows_set(HostWindow* list);
+HostWindow* hid_window(u32 id);
 
 // HostWindow::shape, grips and bounds keep what they are given (src/window_parts.cc), then
 // ask the backend to apply what the window holds now: its shape_, grips_ and bounds_. A

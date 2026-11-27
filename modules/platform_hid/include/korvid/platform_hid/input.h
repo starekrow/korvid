@@ -61,6 +61,7 @@ struct MouseState {
     f32 x = 0.0f, y = 0.0f;
     f32 wheel = 0.0f;
     u8  buttons = 0;
+    u8  window = 0; // the window the pointer was last in (HostWindow::id), whose pixels x and y are
     bool down(MouseButton b) const { return (buttons >> (u32)b) & 1u; }
     void set(MouseButton b, bool on) { u8 m = (u8)(1u << (u32)b); if (on) buttons |= m; else buttons &= (u8)~m; }
 };

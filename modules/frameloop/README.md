@@ -54,7 +54,7 @@ would without drawing; the first pass it is seen again draws.
 
 The system `frameloop.exit` (phase PreSim, `Always`) emits `ExitRequested` with a reason:
 
-- `WindowClosed` when `CloseRequested` arrived and the config allows it;
+- `WindowClosed` when the main window's `CloseRequested` arrived (another window's is the program's) and the config allows it;
 - `Escape` when the key is held and the config allows it;
 - `Timer` once, when `--run-seconds` has elapsed or `--run-ticks` is reached.
 

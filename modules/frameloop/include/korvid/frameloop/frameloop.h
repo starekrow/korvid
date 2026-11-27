@@ -54,7 +54,7 @@ struct FrameLoopConfig {
     // game's choice: its frames redraw most of the window. 1: every pixel, a tool's: sharp
     // text, and its frames cost only what changed.
     u32         cpu_scale   = 0;
-    bool        exit_on_close  = true;  // CloseRequested -> ExitRequested
+    bool        exit_on_close  = true;  // the main window's CloseRequested -> ExitRequested
     bool        exit_on_escape = true;  // Escape held    -> ExitRequested
     f64         run_seconds    = -1.0;  // >= 0: ExitRequested after this long (smoke tests)
     u64         run_ticks      = 0;     // > 0: ExitRequested at this sim tick: the same length on any machine
@@ -74,7 +74,7 @@ struct FrameLoopConfig {
 // ready, or ignores it. Handle it in a handler or an Always system, so a pause cannot
 // hold it.
 enum class ExitReason : u8 {
-    WindowClosed, // CloseRequested arrived and exit_on_close is set
+    WindowClosed, // the main window's CloseRequested arrived and exit_on_close is set
     Escape,       // Escape is held and exit_on_escape is set
     Timer,        // --run-seconds or --run-ticks (run_seconds, run_ticks) reached; once
 };

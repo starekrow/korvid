@@ -506,6 +506,8 @@ void hid_backend_shutdown() {}
 bool hid_video_up() { return g_app.activity != nullptr; }
 void hid_video_down() {}
 bool hid_backend_holds_unfocused() { return true; }
+u32  hid_backend_windows() { return 1; } // a phone has one window, the app's
+void HostWindow::show(bool) {}          // the OS shows the app's window, or not
 
 bool HostWindow::open(const WindowDesc& desc) {
     KV_ASSERT(!native_);

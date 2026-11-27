@@ -40,6 +40,9 @@ struct WindowGripRect { rect2 rect; WindowGrip grip; };
 // The most a window keeps; more are dropped, with a warning once.
 constexpr u32 KV_WINDOW_GRIPS = 64;
 
+// The most windows a process has open at once (platform_open_window). A phone has one.
+constexpr u32 KV_WINDOWS = 8;
+
 // TODO(wayland): mouse resizing stalls on GNOME Wayland. GNOME has no server-side
 // decorations, so SDL3 uses libdecor, which repaints the frame synchronously inside every
 // xdg configure; Mutter sends one configure per pointer motion, so the event pump never
@@ -72,6 +75,14 @@ struct HostWindow {
     bool open(const WindowDesc& desc);
     void close();
     bool is_open() const { return native_ != nullptr; }
+    // Which of the process's windows this is, 0 to KV_WINDOWS - 1: what its events and the
+    // pointer name it by. 0 is the main window, the first opened. Set by the module.
+    u8   id() const { return id_; }
+    // Hides the window, or shows it again, without closing it: what it holds (its size,
+    // shape, grips, the renderer's surface) is kept. Hidden, it is not seen (visible() is
+    // false, why Hidden, a WindowVisibility at the next pump) and takes no input. Nothing on
+    // a phone.
+    void show(bool on);
 
     // The framebuffer in pixels (not window units: a scaled desktop differs), as of the
     // last pump. The renderer is told at render rate when it changes.
@@ -86,11 +97,13 @@ struct HostWindow {
     // After a pump the module calls send_visibility, which emits WindowVisibility once if
     // whether it is seen, or why, is not what was last sent: a restore that clears one
     // reason and then another is one event.
-    enum : u8 { HiddenMinimized = 1, HiddenUnmapped = 2, HiddenOccluded = 4 };
+    enum : u8 { HiddenMinimized = 1, HiddenUnmapped = 2, HiddenOccluded = 4, HiddenByProgram = 8 };
     void set_hidden(EventBus& bus, u8 reason, bool on);
     void send_visibility(EventBus& bus);
 
-    // Translates OS events into bus events and updates input.raw. Call once per frame.
+    // Translates OS events into bus events and updates input.raw. Call once per frame, on the
+    // main window (id 0): it takes every open window's events, which on SDL and Win32 come in
+    // one queue, and gives each to its window. Each event says which (WindowResized::window).
     void pump(EventBus& bus, Input& input);
     // The same for the events already queued, without asking the OS for more: for code
     // running inside an OS modal loop (on_modal), where asking would re-enter the loop
@@ -208,6 +221,7 @@ struct HostWindow {
 
     // The fields are the module's; read them through the accessors.
     void*         native_     = nullptr;
+    u8            id_         = 0;
     WindowSurface surface_    = WindowSurface::Software;
     u32   width_      = 0;
     u32   height_     = 0;

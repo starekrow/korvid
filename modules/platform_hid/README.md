@@ -17,8 +17,8 @@ Alt+F4 asks to close. Gamepads use SDL's gamepad subsystem alone, polled by the 
 
 ## How it works
 
-**The window** (`host_window.h`). One per process, opened on request by the frameloop
-module and closed at module shutdown, never by the caller. It is a service, not an
+**The window** (`host_window.h`). Opened on request (the frameloop module opens the main one)
+and closed at module shutdown. It is a service, not an
 entity. `platform_pump`, through the pump hook this module adds, turns OS events into bus
 events (`WindowResized`, `FocusChanged`, `CloseRequested`, `WindowVisibility`, key, mouse
 and gamepad edges) and updates the raw input state. **Whether it is seen**:
@@ -27,6 +27,21 @@ and gamepad edges) and updates the raw input state. **Whether it is seen**:
 desktop; covered or away where the OS says so (SDL's occluded: a suspended Wayland
 surface, macOS's occlusion); on a phone the background, whose loop waits in the pump, so
 both events arrive when the app comes back. Where the OS cannot tell, it is seen.
+**More than one** (slice 13, KR40): `platform_open_window` again, up to `KV_WINDOWS` (8) at
+once; a phone refuses a second. Each has an id (`HostWindow::id()`); the first opened is the
+main one, id 0, which `platform_window(e)` and the `platform_hid.window` resource are, and
+which closes with the module; `platform_close_window` closes another. Every window event
+and every mouse event says which window it is about (`window`), and `MouseState::window`
+is the one the pointer was last in, whose pixels its x and y are: a move into another
+window has no travel. The main window's pump takes every window's events, in the order
+they came (SDL has one queue; on Win32 each window has its thread, and they share one
+queue). `HostWindow::show(on)` hides a window and shows it again without closing it: its
+size, shape and grips are kept, and `WindowVisibility` says `Hidden`. The keyboard and
+typed text go to whichever window has the focus, unnamed: Krome keeps one focus across
+them. The cursor and capture are the pointer's window's, the input method's area the
+focused one's, the clipboard the main one's. The frame loop quits on the main window's
+`CloseRequested` only. `window --two` shows it.
+
 `HostWindow::minimize(on)` minimizes or restores it, for tests (Wayland restores nothing
 a program asks to). A Vulkan window hands its native handle to the renderer; a software window can
 only `present_blank`. **Waiting for it** (KR26): `HostWindow::wait(seconds)` blocks till the
@@ -178,7 +193,8 @@ Header `korvid/platform_hid/host_window.h`:
 | name | kind | what |
 |---|---|---|
 | `WindowDesc` | record | `title`, `width`, `height`, `vsync` (a preference the renderer reads), `surface` (`Software`, `Vulkan`, `Metal`, `D3D12`), `borderless`, `transparent` |
-| `HostWindow` | record | `open(desc)`, `close()`, `is_open()`, `width()`, `height()`, `vsync()`, `focused()`, `visible()`, `hidden_why()`, `minimize(on)`, `pump(bus, input)`, `wait(seconds)`, `wake()`, `input_delay()`, `present_blank()`, `native_handle()`; `transparent()`, `shape(alpha, w, h)`, `grips(list, count)`, `grip_at(x, y)`, `bounds(min_w, min_h, max_w, max_h)` |
+| `HostWindow` | record | `open(desc)`, `close()`, `is_open()`, `id()`, `show(on)`, `width()`, `height()`, `vsync()`, `focused()`, `visible()`, `hidden_why()`, `minimize(on)`, `pump(bus, input)`, `wait(seconds)`, `wake()`, `input_delay()`, `present_blank()`, `native_handle()`; `transparent()`, `shape(alpha, w, h)`, `grips(list, count)`, `grip_at(x, y)`, `bounds(min_w, min_h, max_w, max_h)` |
+| `KV_WINDOWS` | constant | 8: the most windows open at once |
 | `WindowGrip`, `WindowGripRect`, `KV_WINDOW_GRIPS` | enum, record, constant | `Move`, `N` ... `NW` by compass point, `None` (the program's); a rect in framebuffer pixels and its grip; 64 kept |
 
 Header `korvid/platform_hid/input.h`:
@@ -188,17 +204,17 @@ Header `korvid/platform_hid/input.h`:
 | `Key` | enum | letters, digits, F keys, `Escape`, `Space`, `Enter`, `Tab`, `Backspace`, arrows, modifiers; `key_name` |
 | `PadButton`, `PadAxis` | enums | the standard layout; `pad_button_name`, `pad_axis_name` |
 | `GamepadState` | record | `buttons` (bits), `axes`, `connected`, `id`; `down(b)`, `axis(a)` |
-| `MouseButton`, `MouseState` | enum, record | `x`, `y` in framebuffer pixels (origin top-left), `wheel` (the scroll since the last sample), `buttons`; `down(b)`; `mouse_button_name` |
+| `MouseButton`, `MouseState` | enum, record | `x`, `y` in framebuffer pixels (origin top-left) of `window`, the one the pointer was last in, `wheel` (the scroll since the last sample), `buttons`; `down(b)`; `mouse_button_name` |
 | `mouse_screen(x, y, w, h, &sx, &sy)` | function | window pixels to screen space: center origin, +y up, what screen-space sprites use |
 | `InputState` | record | `down(key)`, `set(key, on)`, `clear()`, `pads[KV_MAX_GAMEPADS]`, `pad()` (the first connected), `mouse` |
 | `Input` | record | `raw`, `sampled`, `sample()` |
 | `key_from_scancode`, `scancode_from_key` | functions | the SDL mapping, both ways |
 | `KV_MAX_GAMEPADS`, `KV_PAD_DEAD_ZONE` | constants | 4; 0.15 |
 
-Header `korvid/platform_hid/events.h`: `WindowResized{width, height}`, `FocusChanged{focused}`,
-`CloseRequested`, `WindowVisibility{visible, why}` (`WindowHidden`: `None`, `Minimized`, `Occluded`), `KeyDown{key, device, repeat}`, `KeyUp{key, device}`,
-`MouseMoved{x, y, dx, dy}`, `MouseButtonDown{button, x, y}`, `MouseButtonUp{button, x, y}`,
-`MouseWheel{dx, dy}`, `GamepadConnected{pad}`, `GamepadDisconnected{pad}`,
+Header `korvid/platform_hid/events.h`: `WindowResized{width, height, window}`, `FocusChanged{focused, window}`,
+`CloseRequested{window}`, `WindowVisibility{visible, why, window}` (`WindowHidden`: `None`, `Minimized`, `Occluded`, `Hidden`), `KeyDown{key, device, repeat}`, `KeyUp{key, device}`,
+`MouseMoved{x, y, dx, dy, window}`, `MouseButtonDown{button, x, y, window}`, `MouseButtonUp{button, x, y, window}`,
+`MouseWheel{dx, dy, window}`, `GamepadConnected{pad}`, `GamepadDisconnected{pad}`,
 `PadButtonDown{button, pad}`, `PadButtonUp{button, pad}`.
 
 Header `korvid/platform_hid/actions.h`: `InputActionDesc`, `ActionKind`, `InputActions`,
@@ -211,9 +227,10 @@ Header `korvid/platform_hid/module.h`:
 | name | kind | what |
 |---|---|---|
 | `platform_hid_module` | `ModuleDesc` | the record; kormake puts it in the list |
-| `HidState` | record | `input`, `window`, `actions`: the module's state, for code outside the schedule |
-| `platform_open_window(engine, desc)`, `platform_window(engine)` | functions | the one window; null if open already or refused |
-| `platform_window_visible(engine)` | function | whether the window is seen; true with no window |
+| `HidState` | record | `input`, `windows` (by id, `[0]` the main one), `actions`: the module's state, for code outside the schedule |
+| `platform_open_window(engine, desc)`, `platform_window(engine)` | functions | a window, the main one first; null with `KV_WINDOWS` open, a second on a phone, or refused. The main window |
+| `platform_close_window(engine, window)`, `platform_window_by_id(engine, id)` | functions | closes a window other than the main one; the open window with an event's id |
+| `platform_window_visible(engine)` | function | whether the main window is seen; true with no window |
 | `platform_video_up(engine)` | function | SDL video and gamepads, once; false without a video driver |
 | `platform_input(engine)` | function | the input, for code outside the schedule |
 
@@ -250,7 +267,7 @@ What the module registers with the engine:
 
 ## Not in this module
 
-Touch, more than one window (slice 13's KR40), placing a window and the display's bounds
+Touch, drawing in more than one window (slice 13's KR40, its later milestones), placing a window and the display's bounds
 (KR42), controller rumble.
 
 ## Android

@@ -12,6 +12,11 @@
 // the disc's upper band moves it and the handle resizes it, by the OS's own move and
 // resize (HostWindow::grips), between 160 and 720 pixels a side (HostWindow::bounds). A
 // click below the band is the program's, and is logged.
+//
+// --two opens a second window beside the main one (slice 13, KR40): every event names its
+// window, the pointer's moves between them are logged, H hides the second and shows it again
+// (HostWindow::show), and closing it hides it; closing the main one quits. --two-script
+// also hides it at 1 s and shows it at 2 s, and checks what it says it is.
 #include "korvid/window/module.h"
 #include "korvid/core/os_error.h"
 #include "korvid/platform/module.h"
@@ -104,25 +109,51 @@ void round_draw(Round& rd, HostWindow& win) {
     win.present_software();
 }
 
-void on_close(TickContext& ctx, Span<const CloseRequested>) {
-    KV_INFO("window", "close requested");
-    engine_request_quit(*ctx.engine);
+// --two's second window, while it is open.
+HostWindow* g_second = nullptr;
+
+void on_close(TickContext& ctx, Span<const CloseRequested> evs) {
+    for (const CloseRequested& c : evs) {
+        if (c.window != 0 && g_second && c.window == g_second->id()) {
+            KV_INFO("window", "close requested of window %u: hidden instead", c.window);
+            g_second->show(false);
+            continue;
+        }
+        KV_INFO("window", "close requested");
+        engine_request_quit(*ctx.engine);
+    }
 }
 void on_resized(TickContext&, Span<const WindowResized> evs) {
-    for (const WindowResized& r : evs) KV_INFO("window", "resized to %ux%u px", r.width, r.height);
+    for (const WindowResized& r : evs) {
+        KV_INFO("window", "window %u resized to %ux%u px", r.window, r.width, r.height);
+        if (g_second && r.window == g_second->id()) g_second->present_blank();
+    }
 }
 void on_focus(TickContext&, Span<const FocusChanged> evs) {
-    for (const FocusChanged& f : evs) KV_INFO("window", "focus %s", f.focused ? "gained" : "lost");
+    for (const FocusChanged& f : evs) KV_INFO("window", "window %u focus %s", f.window, f.focused ? "gained" : "lost");
+}
+void on_moved(TickContext&, Span<const MouseMoved> evs) {
+    static u32 in = ~0u;
+    for (const MouseMoved& m : evs) {
+        if (m.window == in) continue;
+        in = m.window;
+        KV_INFO("window", "the pointer is in window %u, at %.0f, %.0f", m.window, m.x, m.y);
+    }
 }
 void on_key(TickContext& ctx, Span<const KeyDown> evs) {
     for (const KeyDown& k : evs) {
         if (k.repeat) continue;
         KV_INFO("window", "key %s", key_name(k.key));
         if (k.key == Key::Escape) engine_request_quit(*ctx.engine);
+        if (k.key == Key::H && g_second) {
+            bool hide = g_second->visible();
+            g_second->show(!hide);
+            if (!hide) g_second->present_blank();
+        }
     }
 }
 void on_button(TickContext&, Span<const MouseButtonDown> evs) {
-    for (const MouseButtonDown& b : evs) KV_INFO("window", "mouse %s at %.0f, %.0f", mouse_button_name(b.button), b.x, b.y);
+    for (const MouseButtonDown& b : evs) KV_INFO("window", "mouse %s at %.0f, %.0f in window %u", mouse_button_name(b.button), b.x, b.y, b.window);
 }
 void on_wheel(TickContext&, Span<const MouseWheel> evs) {
     for (const MouseWheel& w : evs) KV_INFO("window", "wheel %.2f, %.2f", w.dx, w.dy);
@@ -143,6 +174,7 @@ constinit const HandlerDesc k_handlers[] = {
     {.name = ".on_key", KV_ON(KeyDown, on_key), .phase = Phase::Input},
     {.name = ".on_button", KV_ON(MouseButtonDown, on_button), .phase = Phase::Input},
     {.name = ".on_wheel", KV_ON(MouseWheel, on_wheel), .phase = Phase::Input},
+    {.name = ".on_moved", KV_ON(MouseMoved, on_moved), .phase = Phase::Input},
 };
 
 // The loop's health and one frame of it, shared by the loop and by the frames run from
@@ -183,7 +215,7 @@ int run(int argc, char** argv) {
     bool borderless = false;
     const char* bundled = nullptr;
     const char* asset = nullptr;
-    bool text = false;
+    bool text = false, two = false, two_script = false;
     Round round;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--run-seconds") == 0 && i + 1 < argc) run_seconds = atof(argv[++i]);
@@ -194,7 +226,9 @@ int run(int argc, char** argv) {
         else if (strcmp(argv[i], "--text") == 0) text = true;
         else if (strcmp(argv[i], "--round") == 0) round.on = true;
         else if (strcmp(argv[i], "--grips") == 0) round.on = round.grips = true;
-        else { KV_ERROR("window", "unknown option '%s' (--run-seconds N, --hitch-ms N, --borderless, --round, --grips, --bundled NAME, --asset PATH, --text)", argv[i]); return 2; }
+        else if (strcmp(argv[i], "--two") == 0) two = true;
+        else if (strcmp(argv[i], "--two-script") == 0) two = two_script = true;
+        else { KV_ERROR("window", "unknown option '%s' (--run-seconds N, --hitch-ms N, --borderless, --round, --grips, --two, --two-script, --bundled NAME, --asset PATH, --text)", argv[i]); return 2; }
     }
     Engine e;
     if (!engine_init(e, kv_module_list())) return 1;
@@ -211,6 +245,19 @@ int run(int argc, char** argv) {
     HostWindow* win = platform_open_window(e, d);
     if (!win) rc = 1;
     if (win && round.grips) win->bounds(160, 160, 720, 720);
+    if (win && two) {
+        WindowDesc d2;
+        d2.title = "korvid window 2";
+        d2.width = 480;
+        d2.height = 320;
+        g_second = platform_open_window(e, d2);
+        if (!g_second) { KV_ERROR("window", "the second window did not open"); rc = 1; }
+        else {
+            KV_INFO("window", "a second window, id %u, %ux%u px; the main one is id %u", g_second->id(), g_second->width(), g_second->height(), win->id());
+            g_second->present_blank();
+        }
+    }
+    u32 script_step = 0, script_bad = 0;
     // Where a platform keeps a program's files, shown: a bundled file read now
     // ("shaders/sprite.spv"), an asset through the mounts ("window/hello.txt").
     if (bundled) {
@@ -254,11 +301,35 @@ int run(int argc, char** argv) {
             }
         }
         if (round.on && win) round_draw(round, *win);
+        // --two-script: hide the second window at 1 s, show it at 2 s, and say whether each
+        // took, as visible() has it once a pump has passed.
+        if (two_script && g_second) {
+            f64 t = time_now() - start;
+            if (script_step == 0 && t >= 1.0) { g_second->show(false); ++script_step; }
+            else if (script_step == 1 && t >= 1.5) {
+                KV_INFO("window", "script: window %u hidden: visible %d", g_second->id(), (int)g_second->visible());
+                script_bad += g_second->visible();
+                ++script_step;
+            }
+            else if (script_step == 2 && t >= 2.0) { g_second->show(true); g_second->present_blank(); ++script_step; }
+            else if (script_step == 3 && t >= 2.5) {
+                KV_INFO("window", "script: window %u shown: visible %d, still %ux%u", g_second->id(), (int)g_second->visible(), g_second->width(), g_second->height());
+                script_bad += !g_second->visible();
+                ++script_step;
+            }
+        }
         frame(l);
         if (run_seconds > 0.0 && time_now() - start >= run_seconds) break;
         time_sleep(0.004); // nothing to present: pace the loop at about 250 Hz
     }
     platform_modal_frame(e, nullptr, nullptr);
+    if (two_script) {
+        if (script_step < 4) KV_ERROR("window", "script: ended at step %u of 4 (give --run-seconds 3 or more)", script_step);
+        else if (script_bad) KV_ERROR("window", "script: %u of 2 checks failed", script_bad);
+        else KV_INFO("window", "script: the second window hid and showed as asked");
+        if (script_step < 4 || script_bad) rc = rc ? rc : 1;
+    }
+    g_second = nullptr;
     round.mask.free();
     engine_shutdown(e);
     names_shutdown();

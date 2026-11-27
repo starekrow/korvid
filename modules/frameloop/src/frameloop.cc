@@ -268,7 +268,10 @@ bool parse_options(int argc, char** argv, FrameLoopConfig& cfg) {
 void frameloop_exit(TickContext& ctx) {
     FrameLoopState& s = ctx.state_as<FrameLoopState>();
     const Input* input = ctx.resource<const Input>("input.state");
-    if (s.config.exit_on_close && ctx.received<CloseRequested>().len)
+    // The main window's close ends the run; another window's is the program's to answer.
+    bool closed = false;
+    for (const CloseRequested& c : ctx.received<CloseRequested>()) closed = closed || c.window == 0;
+    if (s.config.exit_on_close && closed)
         ctx.emit(ExitRequested{ExitReason::WindowClosed});
     if (s.config.exit_on_escape && input && input->sampled.down(Key::Escape))
         ctx.emit(ExitRequested{ExitReason::Escape});

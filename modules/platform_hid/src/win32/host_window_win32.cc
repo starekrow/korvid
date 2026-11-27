@@ -60,6 +60,7 @@ struct WinMsg {
     u32        c, d;    // Compose: the caret and the selection's length, in bytes
     f32        x, y;    // Move, Button: position in pixels; Wheel: dx, dy in notches
     f64        at;      // time_now() as the window thread queued it: input_delay()'s start
+    u8         win;     // the window it came from: its HostWindow's id
 };
 
 constexpr UINT WM_KV_DESTROY  = WM_APP + 1; // close() asks the window thread to destroy it
@@ -82,15 +83,10 @@ struct Win32Window {
     HDC           soft_dc  = nullptr;
     bool          layered  = false;
     bool          transparent = false; // a popup with no frame, its alpha composited
-    OsThread      thread;
-    OsMutex       mu;               // guards queue, texts, ready, failed and the area
-    OsCond        cv;               // open() waits on it for the window to exist
-    bool          ready  = false;
+    u8            index = 0;        // its HostWindow's id, and its place in g_wins
+    OsThread      thread;           // the window's own: it makes the window and runs its messages
+    bool          ready  = false;   // under g_q.mu
     bool          failed = false;
-    Array<WinMsg> queue;            // the window thread appends
-    Array<WinMsg> taken;            // pump's side of the swap, the engine thread's alone
-    Array<char>   texts;            // compositions' UTF-8, which Compose messages point into
-    Array<char>   texts_taken;
     WindowDesc    desc;
     wchar_t       title[256] = {};
     u32           width = 0, height = 0; // the client size at creation, before ready
@@ -106,23 +102,41 @@ struct Win32Window {
     WindowGripRect grips[KV_WINDOW_GRIPS] = {};
     u32           grip_count = 0;
     u32           bounds[4] = {};
-    // The loop's wait (KR26). `queued` (manual reset) is set as the window thread appends to
-    // the queue and reset as pump swaps it out, both under mu, so a wait ends early exactly
-    // when something came since the last pump. `woken` (auto reset) is wake()'s. Made at the
-    // first open and kept for the process: a wake from another thread never finds them closed.
+};
+
+Win32Window g_wins[KV_WINDOWS]; // by HostWindow id
+// The window's own, on its thread: what its window procedure and the IME and cursor code
+// act on. Set before the window is made, so the first messages find it.
+thread_local Win32Window* t_win = nullptr;
+
+// What every window shares: one queue, so the main window's pump sees their messages in the
+// order they came, and one pair of events for the loop's wait.
+struct Win32Shared {
+    OsMutex       mu;               // guards the queue and texts, each window's ready, failed, area, grips and bounds
+    OsCond        cv;               // open() waits on it for its window to exist
+    bool          up = false;       // mu and cv made: at the first open, kept for the process
+    Array<WinMsg> queue;            // the window threads append
+    Array<WinMsg> taken;            // pump's side of the swap, the engine thread's alone
+    Array<char>   texts;            // compositions' UTF-8, which Compose messages point into
+    Array<char>   texts_taken;
+    // The loop's wait (KR26). `queued` (manual reset) is set as a window thread appends to the
+    // queue and reset as pump swaps it out, both under mu, so a wait ends early exactly when
+    // something came since the last pump. `woken` (auto reset) is wake()'s. Made at the first
+    // open and kept for the process: a wake from another thread never finds them closed.
     HANDLE        queued = nullptr;
     HANDLE        woken  = nullptr;
 };
+Win32Shared g_q;
 
-Win32Window g_win; // one window per process
-
+// From a window's thread: a message from its window.
 void post(const WinMsg& msg) {
     WinMsg m = msg;
     m.at = time_now();
-    os_mutex_lock(&g_win.mu);
-    g_win.queue.push(m);
-    SetEvent(g_win.queued);
-    os_mutex_unlock(&g_win.mu);
+    m.win = t_win->index;
+    os_mutex_lock(&g_q.mu);
+    g_q.queue.push(m);
+    SetEvent(g_q.queued);
+    os_mutex_unlock(&g_q.mu);
 }
 
 // ---- the input method -------------------------------------------------------------------------------
@@ -130,20 +144,21 @@ void post(const WinMsg& msg) {
 // A composition's text (UTF-16, n units) to the engine: its UTF-8, the caret and the
 // selection (the clause being converted) at their byte offsets. Empty: it ended.
 void post_compose(const wchar_t* s, int n, int caret, int sel_from, int sel_len) {
+    Win32Window& W = *t_win;
     auto bytes = [&](int units) { return units > 0 ? WideCharToMultiByte(CP_UTF8, 0, s, units, nullptr, 0, nullptr, nullptr) : 0; };
     int len = bytes(n);
     WinMsg m{};
     m.type = WinMsgType::Compose;
-    os_mutex_lock(&g_win.mu);
-    m.a = g_win.texts.len;
+    os_mutex_lock(&g_q.mu);
+    m.a = g_q.texts.len;
     m.b = (u32)len;
-    if (len) WideCharToMultiByte(CP_UTF8, 0, s, n, g_win.texts.push_n((u32)len), len, nullptr, nullptr);
+    if (len) WideCharToMultiByte(CP_UTF8, 0, s, n, g_q.texts.push_n((u32)len), len, nullptr, nullptr);
     m.c = (u32)bytes(sel_len > 0 ? sel_from : caret);
     m.d = sel_len > 0 ? (u32)bytes(sel_from + sel_len) - m.c : 0;
-    g_win.queue.push(m);
-    SetEvent(g_win.queued);
-    os_mutex_unlock(&g_win.mu);
-    g_win.composing = n > 0;
+    g_q.queue.push(m);
+    SetEvent(g_q.queued);
+    os_mutex_unlock(&g_q.mu);
+    W.composing = n > 0;
 }
 
 void post_char(u32 u) {
@@ -156,13 +171,14 @@ void post_char(u32 u) {
 // The IME's composition string, its caret and the clause it is converting (the target
 // attributes), posted; the result string, if one came, posted first as typed characters.
 void ime_composition(HWND h, LPARAM lp) {
+    Win32Window& W = *t_win;
     HIMC imc = ImmGetContext(h);
     if (!imc) return;
     wchar_t text[256];
     if (lp & GCS_RESULTSTR) {
         LONG got = ImmGetCompositionStringW(imc, GCS_RESULTSTR, text, sizeof text);
         int n = got > 0 ? (int)(got / sizeof(wchar_t)) : 0;
-        if (g_win.composing) post_compose(L"", 0, 0, 0, 0); // what was composing is replaced by the result
+        if (W.composing) post_compose(L"", 0, 0, 0, 0); // what was composing is replaced by the result
         for (int i = 0; i < n; ++i) {
             u32 u = text[i];
             if (u >= 0xD800 && u < 0xDC00 && i + 1 < n) { u = 0x10000 + ((u - 0xD800) << 10) + ((u32)text[i + 1] - 0xDC00); ++i; }
@@ -183,7 +199,7 @@ void ime_composition(HWND h, LPARAM lp) {
             if (target) ++sel_len;
             else if (sel_len) break;
         }
-        if (n || g_win.composing) post_compose(text, n, caret, sel_from, sel_len);
+        if (n || W.composing) post_compose(text, n, caret, sel_from, sel_len);
     }
     ImmReleaseContext(h, imc);
 }
@@ -191,11 +207,12 @@ void ime_composition(HWND h, LPARAM lp) {
 // The candidate list beside the caret, kept off the text field's line; the composition
 // window (not shown) at the caret, which some IMEs place their candidates by.
 void ime_place(HWND h) {
-    os_mutex_lock(&g_win.mu);
-    bool set = g_win.area_set;
-    RECT r = g_win.area;
-    LONG caret = g_win.area_caret;
-    os_mutex_unlock(&g_win.mu);
+    Win32Window& W = *t_win;
+    os_mutex_lock(&g_q.mu);
+    bool set = W.area_set;
+    RECT r = W.area;
+    LONG caret = W.area_caret;
+    os_mutex_unlock(&g_q.mu);
     if (!set) return;
     HIMC imc = ImmGetContext(h);
     if (!imc) return;
@@ -215,9 +232,10 @@ void ime_place(HWND h) {
 // ---- the cursor ------------------------------------------------------------------------------------
 
 void show_cursor() {
+    Win32Window& W = *t_win;
     static const LPCWSTR ids[(u32)CursorShape::Count] = {IDC_ARROW, IDC_IBEAM, IDC_HAND, IDC_SIZEALL, IDC_SIZEWE, IDC_SIZENS, IDC_NO};
     static HCURSOR made[(u32)CursorShape::Count] = {};
-    u32 i = atomic_load(&g_win.cursor, MO_ACQUIRE);
+    u32 i = atomic_load(&W.cursor, MO_ACQUIRE);
     if (i >= (u32)CursorShape::Count) i = 0;
     if (!made[i]) made[i] = LoadCursorW(nullptr, ids[i]);
     SetCursor(made[i]);
@@ -234,11 +252,12 @@ bool pointer_inside(HWND h) {
 }
 
 void post_button(HWND h, MouseButton b, bool down, LPARAM lp) {
+    Win32Window& W = *t_win;
     // The window keeps the mouse while a button is held, so a drag that leaves the window
     // still reports its moves and its release.
     u8 bit = (u8)(1u << (u32)b);
-    if (down) { if (!g_win.buttons) SetCapture(h); g_win.buttons |= bit; }
-    else { g_win.buttons &= (u8)~bit; if (!g_win.buttons) ReleaseCapture(); }
+    if (down) { if (!W.buttons) SetCapture(h); W.buttons |= bit; }
+    else { W.buttons &= (u8)~bit; if (!W.buttons) ReleaseCapture(); }
     WinMsg m{};
     m.type = WinMsgType::Button;
     m.on = down;
@@ -263,13 +282,14 @@ u32 scancode_of(WPARAM wp, LPARAM lp) {
 
 // What the window's copy of the grips says is under a client pixel: the last that holds it.
 WindowGrip grip_at_point(f32 x, f32 y) {
+    Win32Window& W = *t_win;
     WindowGrip g = WindowGrip::None;
-    os_mutex_lock(&g_win.mu);
-    for (u32 i = g_win.grip_count; i-- > 0;) {
-        const rect2& r = g_win.grips[i].rect;
-        if (x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h) { g = g_win.grips[i].grip; break; }
+    os_mutex_lock(&g_q.mu);
+    for (u32 i = W.grip_count; i-- > 0;) {
+        const rect2& r = W.grips[i].rect;
+        if (x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h) { g = W.grips[i].grip; break; }
     }
-    os_mutex_unlock(&g_win.mu);
+    os_mutex_unlock(&g_q.mu);
     return g;
 }
 
@@ -298,6 +318,7 @@ SIZE frame_extra(HWND h) {
 }
 
 LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+    Win32Window& W = *t_win;
     switch (msg) {
     case WM_CLOSE: { WinMsg m{}; m.type = WinMsgType::Close; post(m); return 0; } // the engine decides
     case WM_KV_DESTROY: DestroyWindow(h); return 0;
@@ -319,7 +340,7 @@ LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     case WM_DPICHANGED: {
-        atomic_store(&g_win.dpi, (u32)HIWORD(wp), MO_RELEASE);
+        atomic_store(&W.dpi, (u32)HIWORD(wp), MO_RELEASE);
         const RECT* r = (const RECT*)lp; // the size Windows suggests at the new DPI
         SetWindowPos(h, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
         return 0;
@@ -327,7 +348,7 @@ LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_SETFOCUS:
     case WM_KILLFOCUS: {
-        if (msg == WM_KILLFOCUS && g_win.buttons) { g_win.buttons = 0; ReleaseCapture(); }
+        if (msg == WM_KILLFOCUS && W.buttons) { W.buttons = 0; ReleaseCapture(); }
         WinMsg m{};
         m.type = WinMsgType::Focus;
         m.on = msg == WM_SETFOCUS;
@@ -366,7 +387,7 @@ LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_IME_STARTCOMPOSITION: ime_place(h); return 0;
     case WM_IME_COMPOSITION: ime_composition(h, lp); return 0;
     case WM_IME_ENDCOMPOSITION:
-        if (g_win.composing) post_compose(L"", 0, 0, 0, 0);
+        if (W.composing) post_compose(L"", 0, 0, 0, 0);
         return 0;
     case WM_KV_IME_AREA: ime_place(h); return 0;
     case WM_KV_IME_ON: ImmAssociateContextEx(h, nullptr, wp ? IACE_DEFAULT : 0); return 0;
@@ -413,9 +434,9 @@ LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     // What a point is for (KR41): the last grip that holds it, when there is a list. A
     // grip's press is the OS's (a WM_NCLBUTTONDOWN), so the engine sees no button for it.
     case WM_NCHITTEST: {
-        os_mutex_lock(&g_win.mu);
-        u32 n = g_win.grip_count;
-        os_mutex_unlock(&g_win.mu);
+        os_mutex_lock(&g_q.mu);
+        u32 n = W.grip_count;
+        os_mutex_unlock(&g_q.mu);
         if (!n) break;
         POINT p{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
         ScreenToClient(h, &p);
@@ -425,12 +446,12 @@ LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         return hit_of(grip_at_point((f32)p.x + 0.5f, (f32)p.y + 0.5f));
     }
     case WM_NCCALCSIZE:
-        if (g_win.transparent) return 0; // the client area is the whole window, at creation too: no frame drawn
+        if (W.transparent) return 0; // the client area is the whole window, at creation too: no frame drawn
         break;
     case WM_GETMINMAXINFO: {
-        os_mutex_lock(&g_win.mu);
-        u32 b[4] = {g_win.bounds[0], g_win.bounds[1], g_win.bounds[2], g_win.bounds[3]};
-        os_mutex_unlock(&g_win.mu);
+        os_mutex_lock(&g_q.mu);
+        u32 b[4] = {W.bounds[0], W.bounds[1], W.bounds[2], W.bounds[3]};
+        os_mutex_unlock(&g_q.mu);
         if (!(b[0] | b[1] | b[2] | b[3])) break;
         SIZE f = frame_extra(h);
         MINMAXINFO* mm = (MINMAXINFO*)lp;
@@ -447,9 +468,9 @@ LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_KV_BOUNDS: {
         // A size outside the new bounds is brought inside them: the OS holds a resize to
         // them, and SetWindowPos asks WM_GETMINMAXINFO too.
-        os_mutex_lock(&g_win.mu);
-        u32 b[4] = {g_win.bounds[0], g_win.bounds[1], g_win.bounds[2], g_win.bounds[3]};
-        os_mutex_unlock(&g_win.mu);
+        os_mutex_lock(&g_q.mu);
+        u32 b[4] = {W.bounds[0], W.bounds[1], W.bounds[2], W.bounds[3]};
+        os_mutex_unlock(&g_q.mu);
         RECT c;
         GetClientRect(h, &c);
         LONG w = c.right, ht = c.bottom;
@@ -464,7 +485,7 @@ LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     // A renderer's window (Vulkan or D3D12) is the renderer's to paint; erasing it would
     // flash the background.
     case WM_ERASEBKGND:
-        if (g_win.desc.surface != WindowSurface::Software) return 1;
+        if (W.desc.surface != WindowSurface::Software) return 1;
         break;
     default: break;
     }
@@ -473,14 +494,16 @@ LRESULT CALLBACK window_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 
 // The window's size for a client area of the desc's logical size at a DPI.
 SIZE outer_size(DWORD style, UINT dpi) {
-    RECT r = {0, 0, MulDiv((int)g_win.desc.width, (int)dpi, 96), MulDiv((int)g_win.desc.height, (int)dpi, 96)};
-    if (!g_win.transparent) AdjustWindowRectExForDpi(&r, style, FALSE, 0, dpi); // a transparent window's frame is its client area
+    Win32Window& W = *t_win;
+    RECT r = {0, 0, MulDiv((int)W.desc.width, (int)dpi, 96), MulDiv((int)W.desc.height, (int)dpi, 96)};
+    if (!W.transparent) AdjustWindowRectExForDpi(&r, style, FALSE, 0, dpi); // a transparent window's frame is its client area
     return SIZE{r.right - r.left, r.bottom - r.top};
 }
 
-// The window thread: creates the window, says so, then runs its messages until close().
-void window_main(void*) {
-    Win32Window& w = g_win;
+// A window's thread: creates the window, says so, then runs its messages until close().
+void window_main(void* arg) {
+    Win32Window& w = *(Win32Window*)arg;
+    t_win = &w;
     HINSTANCE inst = GetModuleHandleW(nullptr);
     static bool registered = false;
     if (!registered) {
@@ -526,12 +549,12 @@ void window_main(void*) {
         w.width  = (u32)c.right;
         w.height = (u32)c.bottom;
     }
-    os_mutex_lock(&w.mu);
+    os_mutex_lock(&g_q.mu);
     w.hwnd   = h;
     w.failed = !h;
     w.ready  = true;
-    os_cond_broadcast(&w.cv);
-    os_mutex_unlock(&w.mu);
+    os_cond_broadcast(&g_q.cv);
+    os_mutex_unlock(&g_q.mu);
     if (!h) {
         KV_ERROR("window", "CreateWindowExW failed (error %lu)", (unsigned long)err);
         mem_thread_exit();
@@ -572,7 +595,8 @@ void hid_video_down() { sdl_pads_down(); }
 bool HostWindow::open(const WindowDesc& desc) {
     KV_ASSERT(!native_);
     if (!hid_video_up()) return false;
-    Win32Window& w = g_win;
+    Win32Window& w = g_wins[id_];
+    w.index = id_;
     w.desc = desc;
     w.desc.title = nullptr; // the wide copy below is what the window thread reads
     const char* title = desc.title ? desc.title : "korvid";
@@ -583,10 +607,6 @@ bool HostWindow::open(const WindowDesc& desc) {
     w.ready = w.failed = false;
     w.buttons = 0;
     w.width = w.height = 0;
-    w.queue.clear();
-    w.taken.clear();
-    w.texts.clear();
-    w.texts_taken.clear();
     w.cursor = 0;
     w.area_set = false;
     w.composing = false;
@@ -594,30 +614,28 @@ bool HostWindow::open(const WindowDesc& desc) {
     w.layered = desc.transparent && desc.surface == WindowSurface::Software;
     w.grip_count = 0;
     for (u32& b : w.bounds) b = 0;
-    if (!w.queued) w.queued = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (!w.woken) w.woken = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (!w.queued || !w.woken) {
+    if (!g_q.queued) g_q.queued = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!g_q.woken) g_q.woken = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!g_q.queued || !g_q.woken) {
         KV_ERROR("window", "CreateEventW failed (error %lu)", (unsigned long)GetLastError());
         return false;
     }
-    ResetEvent(w.queued);
-    os_mutex_init(&w.mu);
-    os_cond_init(&w.cv);
+    if (!g_q.up) {
+        os_mutex_init(&g_q.mu);
+        os_cond_init(&g_q.cv);
+        g_q.up = true;
+    }
     w.thread = OsThread();
-    if (!os_thread_start(&w.thread, window_main, nullptr)) {
+    if (!os_thread_start(&w.thread, window_main, &w)) {
         KV_ERROR("window", "could not start the window thread");
-        os_cond_destroy(&w.cv);
-        os_mutex_destroy(&w.mu);
         return false;
     }
-    os_mutex_lock(&w.mu);
-    while (!w.ready) os_cond_wait(&w.cv, &w.mu);
+    os_mutex_lock(&g_q.mu);
+    while (!w.ready) os_cond_wait(&g_q.cv, &g_q.mu);
     bool ok = !w.failed;
-    os_mutex_unlock(&w.mu);
+    os_mutex_unlock(&g_q.mu);
     if (!ok) {
         os_thread_join(&w.thread);
-        os_cond_destroy(&w.cv);
-        os_mutex_destroy(&w.mu);
         return false;
     }
     native_  = w.hwnd;
@@ -640,19 +658,21 @@ bool HostWindow::open(const WindowDesc& desc) {
 // so composing keys are keys (a game's WASD is not an IME's first syllable). A window
 // starts with its IME, as Windows makes it.
 void HostWindow::text_input(bool on) {
+    Win32Window& W = g_wins[id_];
     if (!native_) return;
-    PostMessageW(g_win.hwnd, WM_KV_IME_ON, on ? 1 : 0, 0);
+    PostMessageW(W.hwnd, WM_KV_IME_ON, on ? 1 : 0, 0);
 }
 
 // The caret's area in framebuffer pixels, which on this host are the client area's.
 void HostWindow::text_area(rect2 r, f32 caret) {
+    Win32Window& W = g_wins[id_];
     if (!native_) return;
-    os_mutex_lock(&g_win.mu);
-    g_win.area = RECT{(LONG)r.x, (LONG)r.y, (LONG)(r.x + r.w), (LONG)(r.y + r.h)};
-    g_win.area_caret = (i32)caret;
-    g_win.area_set = true;
-    os_mutex_unlock(&g_win.mu);
-    PostMessageW(g_win.hwnd, WM_KV_IME_AREA, 0, 0);
+    os_mutex_lock(&g_q.mu);
+    W.area = RECT{(LONG)r.x, (LONG)r.y, (LONG)(r.x + r.w), (LONG)(r.y + r.h)};
+    W.area_caret = (i32)caret;
+    W.area_set = true;
+    os_mutex_unlock(&g_q.mu);
+    PostMessageW(W.hwnd, WM_KV_IME_AREA, 0, 0);
 }
 
 namespace {
@@ -670,7 +690,8 @@ bool open_clipboard(HWND h) {
 
 // CF_UNICODETEXT, its CRLFs read as the engine's LFs.
 bool HostWindow::clipboard_get(Array<char>& out) {
-    if (!native_ || !IsClipboardFormatAvailable(CF_UNICODETEXT) || !open_clipboard(g_win.hwnd)) return false;
+    Win32Window& W = g_wins[id_];
+    if (!native_ || !IsClipboardFormatAvailable(CF_UNICODETEXT) || !open_clipboard(W.hwnd)) return false;
     bool got = false;
     if (HANDLE d = GetClipboardData(CF_UNICODETEXT)) {
         if (const wchar_t* w = (const wchar_t*)GlobalLock(d)) {
@@ -694,6 +715,7 @@ bool HostWindow::clipboard_get(Array<char>& out) {
 
 // The text as CF_UNICODETEXT, its LFs written as CRLFs, which Windows programs expect.
 bool HostWindow::clipboard_set(const char* utf8) {
+    Win32Window& W = g_wins[id_];
     if (!native_) return false;
     if (!utf8) utf8 = "";
     int n = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, nullptr, 0); // with the terminator
@@ -712,7 +734,7 @@ bool HostWindow::clipboard_set(const char* utf8) {
         *o++ = src[i];
     }
     GlobalUnlock(mem);
-    bool ok = open_clipboard(g_win.hwnd);
+    bool ok = open_clipboard(W.hwnd);
     if (ok) {
         EmptyClipboard();
         ok = SetClipboardData(CF_UNICODETEXT, mem) != nullptr; // the system's from here
@@ -723,12 +745,14 @@ bool HostWindow::clipboard_set(const char* utf8) {
 }
 
 void HostWindow::minimize(bool on) {
-    if (native_) ShowWindowAsync(g_win.hwnd, on ? SW_MINIMIZE : SW_RESTORE); // the window thread's to do
+    Win32Window& W = g_wins[id_];
+    if (native_) ShowWindowAsync(W.hwnd, on ? SW_MINIMIZE : SW_RESTORE); // the window thread's to do
 }
 
 void HostWindow::cursor(CursorShape shape) {
+    Win32Window& W = g_wins[id_];
     if (!native_ || (u32)shape >= (u32)CursorShape::Count) return;
-    if (atomic_exchange(&g_win.cursor, (u32)shape, MO_ACQ_REL) != (u32)shape) PostMessageW(g_win.hwnd, WM_KV_CURSOR, 0, 0);
+    if (atomic_exchange(&W.cursor, (u32)shape, MO_ACQ_REL) != (u32)shape) PostMessageW(W.hwnd, WM_KV_CURSOR, 0, 0);
 }
 
 // The window keeps the mouse whenever a button is held (post_button), which is what a drag
@@ -738,15 +762,23 @@ bool HostWindow::capture_mouse(bool) { return native_ != nullptr; }
 
 void HostWindow::close() {
     if (!native_) return;
-    Win32Window& w = g_win;
+    Win32Window& w = g_wins[id_];
     PostMessageW(w.hwnd, WM_KV_DESTROY, 0, 0);
     os_thread_join(&w.thread);
-    os_cond_destroy(&w.cv);
-    os_mutex_destroy(&w.mu);
-    w.queue.free();
-    w.taken.free();
-    w.texts.free();
-    w.texts_taken.free();
+    // What it queued and no pump took is dropped: its id may be another window's by then.
+    bool others = false;
+    os_mutex_lock(&g_q.mu);
+    u32 k = 0;
+    for (const WinMsg& m : g_q.queue) if (m.win != w.index) g_q.queue.data[k++] = m;
+    g_q.queue.len = k;
+    os_mutex_unlock(&g_q.mu);
+    for (const Win32Window& o : g_wins) others = others || (&o != &w && o.hwnd);
+    if (!others) { // the last: the queue's memory goes back
+        g_q.queue.free();
+        g_q.taken.free();
+        g_q.texts.free();
+        g_q.texts_taken.free();
+    }
     if (w.soft_dib) {
         DeleteObject(w.soft_dib); // its bits were soft
         w.soft = nullptr;
@@ -765,13 +797,15 @@ void HostWindow::close() {
     hidden_  = 0;
     hidden_sent_ = WindowHidden::None;
     hid_window_parts_reset(*this);
-    KV_INFO("window", "closed");
+    if (id_) KV_INFO("window", "window %u closed", id_);
+    else KV_INFO("window", "closed");
 }
 
 // The window class's brush paints a software window; nothing to do here.
 void HostWindow::present_blank() {}
 
 bool HostWindow::software_frame(SoftwareFrame* out) {
+    Win32Window& W = g_wins[id_];
     HWND h = (HWND)native_;
     if (!h || surface_ != WindowSurface::Software) return false;
     RECT rc;
@@ -779,11 +813,11 @@ bool HostWindow::software_frame(SoftwareFrame* out) {
     u32 w = (u32)(rc.right - rc.left), hh = (u32)(rc.bottom - rc.top);
     if (!w || !hh) return false;
     usize bytes = (usize)w * hh * 4;
-    if (g_win.layered) {
+    if (W.layered) {
         // A DIB section the size of the window, made again when the size changes: what
         // UpdateLayeredWindow reads.
-        if (!g_win.soft_dib || w != g_win.soft_w || hh != g_win.soft_h) {
-            if (!g_win.soft_dc) g_win.soft_dc = CreateCompatibleDC(nullptr);
+        if (!W.soft_dib || w != W.soft_w || hh != W.soft_h) {
+            if (!W.soft_dc) W.soft_dc = CreateCompatibleDC(nullptr);
             BITMAPINFO bi = {};
             bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
             bi.bmiHeader.biWidth = (LONG)w;
@@ -792,29 +826,29 @@ bool HostWindow::software_frame(SoftwareFrame* out) {
             bi.bmiHeader.biBitCount = 32;
             bi.bmiHeader.biCompression = BI_RGB;
             void* bits = nullptr;
-            HBITMAP dib = g_win.soft_dc ? CreateDIBSection(g_win.soft_dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0) : nullptr;
+            HBITMAP dib = W.soft_dc ? CreateDIBSection(W.soft_dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0) : nullptr;
             if (!dib) return false;
-            SelectObject(g_win.soft_dc, dib);
-            if (g_win.soft_dib) DeleteObject(g_win.soft_dib);
-            g_win.soft_dib = dib;
-            g_win.soft = (u8*)bits;
+            SelectObject(W.soft_dc, dib);
+            if (W.soft_dib) DeleteObject(W.soft_dib);
+            W.soft_dib = dib;
+            W.soft = (u8*)bits;
         }
-        g_win.soft_w = w;
-        g_win.soft_h = hh;
-        software_ = g_win.soft;
-        *out = SoftwareFrame{g_win.soft, w, hh, w * 4, false, false, true};
+        W.soft_w = w;
+        W.soft_h = hh;
+        software_ = W.soft;
+        *out = SoftwareFrame{W.soft, w, hh, w * 4, false, false, true};
         return true;
     }
-    if (bytes > g_win.soft_bytes) {
-        if (g_win.soft) free_in(mem_general(), g_win.soft, g_win.soft_bytes);
-        g_win.soft = (u8*)alloc_in(mem_general(), bytes, 16);
-        g_win.soft_bytes = g_win.soft ? bytes : 0;
-        if (!g_win.soft) return false;
+    if (bytes > W.soft_bytes) {
+        if (W.soft) free_in(mem_general(), W.soft, W.soft_bytes);
+        W.soft = (u8*)alloc_in(mem_general(), bytes, 16);
+        W.soft_bytes = W.soft ? bytes : 0;
+        if (!W.soft) return false;
     }
-    g_win.soft_w = w;
-    g_win.soft_h = hh;
-    software_ = g_win.soft;
-    *out = SoftwareFrame{g_win.soft, w, hh, w * 4, false};
+    W.soft_w = w;
+    W.soft_h = hh;
+    software_ = W.soft;
+    *out = SoftwareFrame{W.soft, w, hh, w * 4, false};
     return true;
 }
 
@@ -822,19 +856,20 @@ bool HostWindow::software_frame(SoftwareFrame* out) {
 bool HostWindow::software_vsync(bool) { return false; }
 
 void HostWindow::present_software() {
+    Win32Window& W = g_wins[id_];
     HWND h = (HWND)native_;
     if (!h || !software_) return;
     software_ = nullptr;
-    if (g_win.layered) {
+    if (W.layered) {
         // Its premultiplied alpha composited by the DWM; a pixel of alpha 0 also passes the
         // mouse through. The size given is the window's: a frame drawn at a size the window
         // has since left (a drag under way) is not shown, since showing it would undo the drag.
         RECT c;
-        if (!GetClientRect(h, &c) || (u32)c.right != g_win.soft_w || (u32)c.bottom != g_win.soft_h) return;
+        if (!GetClientRect(h, &c) || (u32)c.right != W.soft_w || (u32)c.bottom != W.soft_h) return;
         BLENDFUNCTION bf = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
         POINT at = {0, 0};
-        SIZE size = {(LONG)g_win.soft_w, (LONG)g_win.soft_h};
-        if (!UpdateLayeredWindow(h, nullptr, nullptr, &size, g_win.soft_dc, &at, 0, &bf, ULW_ALPHA)) {
+        SIZE size = {(LONG)W.soft_w, (LONG)W.soft_h};
+        if (!UpdateLayeredWindow(h, nullptr, nullptr, &size, W.soft_dc, &at, 0, &bf, ULW_ALPHA)) {
             static bool told = false;
             if (!told) KV_WARN("window", "UpdateLayeredWindow failed (error %lu)", (unsigned long)GetLastError());
             told = true;
@@ -843,63 +878,67 @@ void HostWindow::present_software() {
     }
     BITMAPINFO bi = {};
     bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bi.bmiHeader.biWidth = (LONG)g_win.soft_w;
-    bi.bmiHeader.biHeight = -(LONG)g_win.soft_h; // top-down
+    bi.bmiHeader.biWidth = (LONG)W.soft_w;
+    bi.bmiHeader.biHeight = -(LONG)W.soft_h; // top-down
     bi.bmiHeader.biPlanes = 1;
     bi.bmiHeader.biBitCount = 32;
     bi.bmiHeader.biCompression = BI_RGB;
     HDC dc = GetDC(h); // GDI on another thread's window: allowed with its DC
     if (!dc) return;
-    SetDIBitsToDevice(dc, 0, 0, g_win.soft_w, g_win.soft_h, 0, 0, 0, g_win.soft_h, g_win.soft, &bi, DIB_RGB_COLORS);
+    SetDIBitsToDevice(dc, 0, 0, W.soft_w, W.soft_h, 0, 0, 0, W.soft_h, W.soft, &bi, DIB_RGB_COLORS);
     ReleaseDC(h, dc);
 }
 
 // Physical pixels per logical unit: the window's DPI over 96.
 f32 HostWindow::pixel_scale() const {
+    Win32Window& W = g_wins[id_];
     if (!native_) return 1.0f;
-    return (f32)atomic_load(&g_win.dpi, MO_ACQUIRE) / 96.0f;
+    return (f32)atomic_load(&W.dpi, MO_ACQUIRE) / 96.0f;
 }
 
 void HostWindow::pump(EventBus& bus, Input& input) {
     if (!native_) return;
-    Win32Window& w = g_win;
-    os_mutex_lock(&w.mu);
-    Array<WinMsg> swap = w.queue;
-    w.queue = w.taken;
-    w.taken = swap;
-    Array<char> swap_texts = w.texts;
-    w.texts = w.texts_taken;
-    w.texts_taken = swap_texts;
-    ResetEvent(w.queued); // what it was set for is taken
-    os_mutex_unlock(&w.mu);
+    os_mutex_lock(&g_q.mu);
+    Array<WinMsg> swap = g_q.queue;
+    g_q.queue = g_q.taken;
+    g_q.taken = swap;
+    Array<char> swap_texts = g_q.texts;
+    g_q.texts = g_q.texts_taken;
+    g_q.texts_taken = swap_texts;
+    ResetEvent(g_q.queued); // what it was set for is taken
+    os_mutex_unlock(&g_q.mu);
     // A wake the platform already took (its flag is set before the event) must not end the
     // next wait as well; one after this sets the flag again, which the next wait reads first.
-    ResetEvent(w.woken);
+    ResetEvent(g_q.woken);
     MouseState& mouse = input.raw.mouse;
-    for (const WinMsg& m : w.taken) {
+    for (const WinMsg& m : g_q.taken) {
+        HostWindow* hw = hid_window(m.win); // every window's messages come here, the main one's pump
+        if (!hw || !hw->is_open()) continue;
+        HostWindow& w = *hw;
+        u8 id = w.id_;
         // How long a press waited for the pump, from the window thread's queueing of it: the
         // part the loop's wait decides (the OS's own delivery before it is not counted here).
         if ((m.type == WinMsgType::Key || m.type == WinMsgType::Button) && m.on) input_delay_ = time_now() - m.at;
         switch (m.type) {
         case WinMsgType::Close:
-            bus.emit(CloseRequested{0});
+            bus.emit(CloseRequested{id});
             break;
         case WinMsgType::Size:
-            if ((m.a != width_ || m.b != height_) && m.a && m.b) {
-                width_  = m.a;
-                height_ = m.b;
-                if (shape_.len) hid_window_shape(*this); // the mask scaled to the new size
-                bus.emit(WindowResized{m.a, m.b});
+            if ((m.a != w.width_ || m.b != w.height_) && m.a && m.b) {
+                w.width_  = m.a;
+                w.height_ = m.b;
+                if (w.shape_.len) hid_window_shape(w); // the mask scaled to the new size
+                bus.emit(WindowResized{m.a, m.b, id});
             }
             break;
         case WinMsgType::Minimized:
-            set_hidden(bus, HiddenMinimized, m.on);
+            w.set_hidden(bus, HiddenMinimized, m.on);
             break;
         case WinMsgType::Focus:
-            if (m.on == focused_) break;
-            focused_ = m.on;
+            if (m.on == w.focused_) break;
+            w.focused_ = m.on;
             if (!m.on) input.raw.clear(); // keys released while unfocused never report an up edge
-            bus.emit(FocusChanged{m.on});
+            bus.emit(FocusChanged{m.on, id});
             break;
         case WinMsgType::Char: {
             char utf8[5] = {};
@@ -910,7 +949,7 @@ void HostWindow::pump(EventBus& bus, Input& input) {
         case WinMsgType::Compose: {
             // As much of the composition as the event holds, at a code point's edge.
             TextComposing tc{};
-            const char* src = w.texts_taken.data + m.a;
+            const char* src = g_q.texts_taken.data + m.a;
             usize n = utf8_prefix(src, m.b < sizeof tc.text - 1 ? m.b : sizeof tc.text - 1);
             memcpy(tc.text, src, n);
             tc.caret = m.c < n ? m.c : (u32)n;
@@ -928,28 +967,34 @@ void HostWindow::pump(EventBus& bus, Input& input) {
             break;
         }
         case WinMsgType::Move:
-            if (m.x == mouse.x && m.y == mouse.y) break;
-            bus.emit(MouseMoved{m.x, m.y, m.x - mouse.x, m.y - mouse.y});
+            if (mouse.window != id) { // into another window: its pixels, so no travel
+                mouse.window = id;
+                bus.emit(MouseMoved{m.x, m.y, 0.0f, 0.0f, id});
+            } else {
+                if (m.x == mouse.x && m.y == mouse.y) break;
+                bus.emit(MouseMoved{m.x, m.y, m.x - mouse.x, m.y - mouse.y, id});
+            }
             mouse.x = m.x;
             mouse.y = m.y;
             break;
         case WinMsgType::Button: {
             MouseButton b = (MouseButton)m.button;
+            mouse.window = id;
             mouse.x = m.x;
             mouse.y = m.y;
             mouse.set(b, m.on);
-            if (m.on) bus.emit(MouseButtonDown{b, m.x, m.y});
-            else      bus.emit(MouseButtonUp{b, m.x, m.y});
+            if (m.on) bus.emit(MouseButtonDown{b, m.x, m.y, id});
+            else      bus.emit(MouseButtonUp{b, m.x, m.y, id});
             break;
         }
         case WinMsgType::Wheel:
             mouse.wheel += m.y;
-            bus.emit(MouseWheel{m.x, m.y});
+            bus.emit(MouseWheel{m.x, m.y, id});
             break;
         }
     }
-    w.taken.clear();
-    w.texts_taken.clear();
+    g_q.taken.clear();
+    g_q.texts_taken.clear();
     sdl_pads_pump(bus, input);
 }
 
@@ -963,12 +1008,12 @@ void HostWindow::drain(EventBus& bus, Input& input) { pump(bus, input); }
 bool HostWindow::wait(f64 seconds) {
     if (seconds <= 0.0 || !native_) return false;
     f64 ms = seconds * 1000.0 + 0.999;
-    HANDLE both[2] = {g_win.queued, g_win.woken};
+    HANDLE both[2] = {g_q.queued, g_q.woken};
     DWORD r = WaitForMultipleObjects(2, both, FALSE, ms >= 4.0e9 ? INFINITE - 1 : (DWORD)ms);
     return r == WAIT_OBJECT_0 || r == WAIT_OBJECT_0 + 1;
 }
 void HostWindow::wake() {
-    if (g_win.woken) SetEvent(g_win.woken);
+    if (g_q.woken) SetEvent(g_q.woken);
 }
 
 // The window's thread takes the system's modal move and size loops, so the frame loop is
@@ -979,6 +1024,15 @@ void HostWindow::on_modal(void (*fn)(void* ctx), void* ctx) {
 }
 
 bool hid_backend_holds_unfocused() { return false; }
+u32  hid_backend_windows() { return KV_WINDOWS; }
+
+// The window's thread shows it or hides it; shown, it does not take the focus. Seen or not
+// is the program's reason, given now and sent at the next pump.
+void HostWindow::show(bool on) {
+    if (!native_) return;
+    ShowWindowAsync(g_wins[id_].hwnd, on ? SW_SHOWNA : SW_HIDE);
+    hidden_ = on ? (u8)(hidden_ & ~HiddenByProgram) : (u8)(hidden_ | HiddenByProgram);
+}
 bool HostWindow::touch_screen() const { return false; }
 
 int platform_app_main(int argc, char** argv, int (*run)(int argc, char** argv, void* ctx), void* ctx) {
@@ -990,8 +1044,9 @@ int platform_app_main(int argc, char** argv, int (*run)(int argc, char** argv, v
 // so the region's coordinates are the client's. The region clips what the DWM shows too,
 // one bit a pixel: a soft edge is drawn inside it and cut at it.
 bool hid_window_shape(HostWindow& hw) {
+    Win32Window& W = g_wins[hw.id_];
     if (!hw.native_) return false;
-    if (!g_win.transparent) {
+    if (!W.transparent) {
         static bool told = false;
         if (!told) KV_WARN("window", "a shape on a window not opened transparent (WindowDesc::transparent): it stays a rectangle");
         told = true;
@@ -1033,7 +1088,7 @@ bool hid_window_shape(HostWindow& hw) {
         }
     }
     // SetWindowRgn is the window thread's to call: from here it would wait on that thread.
-    if (!PostMessageW(g_win.hwnd, WM_KV_SHAPE, 0, (LPARAM)rgn)) {
+    if (!PostMessageW(W.hwnd, WM_KV_SHAPE, 0, (LPARAM)rgn)) {
         if (rgn) DeleteObject(rgn);
         return false;
     }
@@ -1042,22 +1097,24 @@ bool hid_window_shape(HostWindow& hw) {
 
 // Grips are client pixels here, which are framebuffer pixels: copied as given.
 bool hid_window_grips(HostWindow& hw) {
+    Win32Window& W = g_wins[hw.id_];
     if (!hw.native_) return false;
-    os_mutex_lock(&g_win.mu);
-    if (hw.grip_count_) memcpy(g_win.grips, hw.grips_, (usize)hw.grip_count_ * sizeof hw.grips_[0]);
-    g_win.grip_count = hw.grip_count_;
-    os_mutex_unlock(&g_win.mu);
+    os_mutex_lock(&g_q.mu);
+    if (hw.grip_count_) memcpy(W.grips, hw.grips_, (usize)hw.grip_count_ * sizeof hw.grips_[0]);
+    W.grip_count = hw.grip_count_;
+    os_mutex_unlock(&g_q.mu);
     return true;
 }
 
 // The bounds are client pixels too; WM_GETMINMAXINFO adds the frame, where there is one.
 void hid_window_bounds(HostWindow& hw) {
+    Win32Window& W = g_wins[hw.id_];
     if (!hw.native_) return;
-    os_mutex_lock(&g_win.mu);
-    for (u32 i = 0; i < 4; ++i) g_win.bounds[i] = hw.bounds_[i];
-    os_mutex_unlock(&g_win.mu);
+    os_mutex_lock(&g_q.mu);
+    for (u32 i = 0; i < 4; ++i) W.bounds[i] = hw.bounds_[i];
+    os_mutex_unlock(&g_q.mu);
     hw.bounds_scale_ = hw.pixel_scale();
-    PostMessageW(g_win.hwnd, WM_KV_BOUNDS, 0, 0);
+    PostMessageW(W.hwnd, WM_KV_BOUNDS, 0, 0);
 }
 
 } // namespace kv

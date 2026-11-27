@@ -2,12 +2,12 @@
 // at the machine touches and looks at. The backend is SDL3 today. Startup initializes
 // SDL's event subsystem only; video and gamepads come up when a window opens (or when a
 // renderer asks, platform_video_up), so a test with this module still runs without a
-// display. The window is a service opened on request and closed at module shutdown, never
-// by the caller; "input.sample" (phase Input) samples the keys into "input.state" once per
-// tick. Both are published resources: a system declares "input.state" or
-// "platform_hid.window" in its sets and reaches them with ctx.resource<const Input>() and
-// ctx.resource<const HostWindow>(). The window's events reach the bus from platform_pump,
-// through a pump hook.
+// display. A window is a service opened on request, up to KV_WINDOWS; the first is the main
+// one, closed at module shutdown, never by the caller. "input.sample" (phase Input) samples
+// the keys into "input.state" once per tick. Both are published resources: a system
+// declares "input.state" or "platform_hid.window" (the main window) in its sets and reaches
+// them with ctx.resource<const Input>() and ctx.resource<const HostWindow>(). The windows'
+// events reach the bus from platform_pump, through a pump hook.
 #pragma once
 #include "korvid/core/module.h"
 #include "korvid/platform_hid/actions.h"
@@ -33,7 +33,7 @@ constexpr u32 KV_HID_PRESSES = 8;
 
 struct HidState {
     Input        input;    // raw at frame rate, sampled per tick
-    HostWindow   window;   // one window per process; closed at module shutdown
+    HostWindow   windows[KV_WINDOWS]; // by id; [0] is the main one. Each closed at module shutdown
     InputActions actions;  // what the game named, from the sampled input each tick
     u32          text_requests = 0; // platform_text_input's count
     char         text_override[KV_INPUT_TEXT_MAX] = {}; // input_text_override's, for the next sample
@@ -54,16 +54,24 @@ struct HidState {
     bool         in_modal_frame = false;
 };
 
-// Opens the window. Null if one is already open or SDL refused. Owned by the module.
+// Opens a window: the first is the main one (id 0, platform_window), each after it the next
+// free id, up to KV_WINDOWS. Null when that many are open, on a phone once one is, or when
+// the system refuses. Owned by the module.
 HostWindow* platform_open_window(Engine& e, const WindowDesc& desc);
+// Closes a window other than the main one; its id is free again. The main one closes with
+// the module.
+void        platform_close_window(Engine& e, HostWindow* w);
+// The open window with this id (an event's `window`), or null.
+HostWindow* platform_window_by_id(Engine& e, u32 id);
 // The module starts headless. This brings up video and gamepads (once; they stay up
 // until the module shuts down) for whatever needs a display before a window exists,
 // such as a renderer loading the Vulkan loader. Opening a window calls it. False with a
 // log line when there is no video driver.
 bool        platform_video_up(Engine& e);
-// The open window, or null. For code outside the schedule; systems use the resource.
+// The main window, or null. For code outside the schedule; systems use the resource
+// (platform_hid.window, the main one too).
 HostWindow* platform_window(Engine& e);
-// Whether the window is seen (HostWindow::visible); true with no window.
+// Whether the main window is seen (HostWindow::visible); true with no window.
 bool        platform_window_visible(Engine& e);
 // Asks the OS for typed text (InputState::text) while on; a text field turns it on while it
 // has the focus. Counted: on twice needs off twice.
@@ -86,9 +94,9 @@ void platform_text_area(Engine& e, rect2 r, f32 caret);
 bool platform_clipboard_get(Engine& e, Array<char>& out);
 // Sets the system's clipboard and the process's own.
 void platform_clipboard_set(Engine& e, const char* utf8);
-// The pointer's shape over the window.
+// The pointer's shape over the window it is in (MouseState::window).
 void platform_cursor(Engine& e, CursorShape shape);
-// The pointer held to the window while on, so a drag goes on outside it (Krome's presses).
+// The pointer held to the window it is in while on, so a drag goes on outside it (Krome's presses).
 void platform_capture_mouse(Engine& e, bool on);
 // Puts the pointer at (x, y) (framebuffer pixels, top-left origin) with these buttons held
 // (MouseButton bits) and this much wheel, as if from the mouse, into the next sample; it

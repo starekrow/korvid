@@ -7,6 +7,7 @@
 namespace kv {
 
 WindowHidden HostWindow::hidden_why() const {
+    if (hidden_ & HiddenByProgram) return WindowHidden::Hidden;
     if (hidden_ & HiddenMinimized) return WindowHidden::Minimized;
     if (hidden_) return WindowHidden::Occluded;
     return WindowHidden::None;
@@ -23,8 +24,11 @@ void HostWindow::send_visibility(EventBus& bus) {
     WindowHidden why = hidden_why();
     if (why == hidden_sent_) return;
     hidden_sent_ = why;
-    KV_INFO("window", "%s", why == WindowHidden::None ? "shown" : why == WindowHidden::Minimized ? "hidden: minimized" : "hidden: covered or away");
-    bus.emit(WindowVisibility{why == WindowHidden::None, why});
+    const char* what = why == WindowHidden::None ? "shown" : why == WindowHidden::Minimized ? "hidden: minimized"
+                     : why == WindowHidden::Hidden ? "hidden by the program" : "hidden: covered or away";
+    if (id_) KV_INFO("window", "window %u %s", id_, what);
+    else KV_INFO("window", "%s", what);
+    bus.emit(WindowVisibility{why == WindowHidden::None, why, id_});
 }
 
 } // namespace kv

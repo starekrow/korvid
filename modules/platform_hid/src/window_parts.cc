@@ -50,6 +50,13 @@ void HostWindow::bounds(u32 min_w, u32 min_h, u32 max_w, u32 max_h) {
     if (native_) hid_window_bounds(*this);
 }
 
+namespace {
+HostWindow* g_windows = nullptr; // the module's list (hid_windows_set)
+}
+
+void hid_windows_set(HostWindow* list) { g_windows = list; }
+HostWindow* hid_window(u32 id) { return g_windows && id < KV_WINDOWS ? &g_windows[id] : nullptr; }
+
 void hid_window_parts_reset(HostWindow& w) {
     w.shape_.free();
     w.shape_w_ = w.shape_h_ = 0;
