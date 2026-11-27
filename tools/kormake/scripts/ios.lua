@@ -184,6 +184,21 @@ function M.test(exe)
       if n:sub(1, 1) ~= "." and kfs.isdir(util.join(tree, n)) then util.copy_tree(util.join(tree, n), util.join(app, "assets/" .. n)) end
     end
   end
+  -- What it reads of the source tree (module.lua's test_files), named by <test>.files beside
+  -- it, the root on its first line: into source/, where test_source_path looks on a device.
+  local listed = kfs.read(util.join(bin, name .. ".files"))
+  if listed then
+    local root
+    for line in listed:gmatch("[^\r\n]+") do
+      if not root then root = line
+      else
+        local from, to = util.join(root, line), util.join(app, "source/" .. line)
+        if kfs.isdir(from) then util.copy_tree(from, to)
+        elseif kfs.isfile(from) then kfs.mkdirp(util.dirname(to)); kfs.copy(from, to)
+        else return fail(name .. ".files names " .. line .. ", which is not in " .. root) end
+      end
+    end
+  end
   kfs.write(util.join(app, "Info.plist"), info_plist(name, bundle_id))
   local err = M.sign(work, app, bundle_id, device)
   if err then return fail(err) end

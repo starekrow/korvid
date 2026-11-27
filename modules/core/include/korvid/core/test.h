@@ -28,8 +28,21 @@
 // A failed check logs an error and the run carries on, so one run lists every failure:
 //
 //   [ERROR] test: random: FAIL ref.next() == 0xa15c02b7u (.../core/tests/random_test.cc:21)
+//
+// A test that reads a file of the source tree (a font, a reference picture) names it by
+// its path from the repository's root, through test_source_path, and its module lists it
+// in module.lua's test_files, so a device that has no source tree is given a copy.
 #pragma once
+#include "korvid/core/format.h"
 #include "korvid/core/log.h"
+#include <string.h>
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE && !TARGET_OS_SIMULATOR
+#include <mach-o/dyld.h>
+#define KV_TEST_SOURCE_BUNDLED 1
+#endif
+#endif
 
 namespace kv {
 
@@ -59,6 +72,26 @@ inline int test_report(const TestCtx& c, const char* exe) {
     if (c.failures) KV_ERROR("test", "%s: %u of %u checks failed", exe, c.failures, c.checks);
     else            KV_INFO ("test", "%s: %u checks passed", exe, c.checks);
     return c.failures ? 1 : 0;
+}
+
+// The path of `rel`, a file or directory of the source tree by its path from the root
+// ("modules/dejavu/assets/DejaVuSans.ttf"). The root is where this header is: the build
+// names headers by their full paths. An iOS device has no source tree: the test runner
+// copies what the module's test_files lists into source/ beside the executable, and the
+// path is there.
+inline void test_source_path(char* out, usize cap, const char* rel) {
+#if defined(KV_TEST_SOURCE_BUNDLED)
+    char exe[1024];
+    uint32_t n = sizeof exe;
+    if (_NSGetExecutablePath(exe, &n) != 0) exe[0] = 0;
+    if (char* slash = strrchr(exe, '/')) *slash = 0;
+    format(out, cap, "%s/source/%s", exe, rel);
+#else
+    char root[1024];
+    format(root, sizeof root, "%s", __FILE__); // <root>/modules/core/include/korvid/core/test.h
+    for (int up = 0; up < 6; ++up) if (char* slash = strrchr(root, '/')) *slash = 0;
+    format(out, cap, "%s/%s", root, rel);
+#endif
 }
 
 } // namespace kv

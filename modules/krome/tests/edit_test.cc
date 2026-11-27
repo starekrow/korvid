@@ -88,11 +88,9 @@ bool clip_is(Engine& e, const char* want) {
 void test_edit(kv::TestCtx& c) {
     using namespace kv;
     c.begin("krome edit");
-    char root[600], dir[400], src[700], dst[700];
-    format(root, sizeof root, "%s", __FILE__);
-    for (int up = 0; up < 4; ++up) if (char* slash = strrchr(root, '/')) *slash = 0;
+    char dir[400], src[700], dst[700];
     KV_CHECK(c, io_make_temp_dir("kv-krome-edit", dir, sizeof dir));
-    format(src, sizeof src, "%s/modules/dejavu/assets/DejaVuSans.ttf", root);
+    test_source_path(src, sizeof src, "modules/dejavu/assets/DejaVuSans.ttf"); // module.lua's test_files
     format(dst, sizeof dst, "%s/dejavu", dir);
     io_make_dirs(dst);
     format(dst, sizeof dst, "%s/dejavu/DejaVuSans.ttf", dir);

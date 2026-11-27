@@ -44,6 +44,9 @@ local module_fields = {
   -- set the toolchain names in `isa` ({ avx2 = { "src/raster.cc" } }).
   codegen = true, codegen_sources = true, isa_sources = true,
   test_deps = true, -- modules the module's tests use and it does not, linked into its test only
+  -- test_files: files or directories of the source tree its tests read, by their paths from
+  -- the root ({ "modules/dejavu/assets/DejaVuSans.ttf" }): a device is given copies.
+  test_files = true,
   -- externals: for a toolchain, what each external means on its platforms ({ sdl3 = {...} });
   -- for any other module, externals it defines itself, per platform
   -- ({ linux = { pipewire = { pkg_config = "libpipewire-0.3" } } }): collect.lua.

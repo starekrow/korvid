@@ -6,4 +6,5 @@ module "asset_render" {
   deps          = { "core", "platform", "math", "render", "asset", "image" },
   engine_module = true,
   test_deps     = { "cli" },
+  test_files    = { "modules/dejavu/assets/DejaVuSans.ttf" },
 }

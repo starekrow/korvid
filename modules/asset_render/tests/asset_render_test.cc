@@ -68,12 +68,6 @@ bool write_png(const char* rel, u32 w, u32 h, u8 r, u8 g, u8 b) {
     return ok;
 }
 
-// The repository's root, from this file's path (.../modules/asset_render/tests/reload_test.cc).
-void repo_root(char* out, usize cap) {
-    format(out, cap, "%s", __FILE__);
-    for (int up = 0; up < 4; ++up) if (char* slash = strrchr(out, '/')) *slash = 0;
-}
-
 struct Lines { u32 n = 0; char text[8][160]; };
 void collect(void* user, const char* line) { Lines& l = *(Lines*)user; if (l.n < 8) format(l.text[l.n++], 160, "%s", line); }
 
@@ -100,9 +94,8 @@ void test_asset_render(TestCtx& c) {
     KV_CHECK(c, write_png("a.png", 2, 2, 255, 0, 0));
     KV_CHECK(c, write_png("b.png", 4, 4, 0, 255, 0));
     KV_CHECK(c, write_text("m.material.json", "{ \"texture\": \"a.png\", \"blend\": \"alpha\" }"));
-    char root[600], from[700], to[700];
-    repo_root(root, sizeof root);
-    format(from, sizeof from, "%s/modules/dejavu/assets/DejaVuSans.ttf", root);
+    char from[700], to[700];
+    test_source_path(from, sizeof from, "modules/dejavu/assets/DejaVuSans.ttf"); // module.lua's test_files
     format(to, sizeof to, "%s/DejaVuSans.ttf", g_dir);
     KV_CHECK(c, io_copy_file(from, to));
 

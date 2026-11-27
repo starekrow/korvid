@@ -1019,6 +1019,18 @@ function M.run(c, g, opts)
       for _, p in ipairs(li.staged) do implicit[#implicit + 1] = p end
       -- A test's assets are cooked as a game's are, into a tree of its own.
       local cook_stamp = cook(inst, sym .. "_tests", false)
+      -- test_files: what the tests read of the source tree, by its path from the root (they
+      -- find it with test_source_path), listed beside the test after the root, for a
+      -- runner on a device that has no source tree (ios.lua copies each into the app).
+      if m.fields.test_files then
+        local lines = { c.base_dir }
+        for _, rel in ipairs(util.as_list(m.fields.test_files)) do
+          local abs = util.join(c.base_dir, rel)
+          if not kfs.isfile(abs) and not kfs.isdir(abs) then util.fail("%s: test_files names '%s', which is not in the source tree", m.name, rel) end
+          lines[#lines + 1] = rel
+        end
+        kfs.write(util.join(build, pre .. "bin/" .. sym .. "_tests.files"), table.concat(lines, "\n") .. "\n", true)
+      end
       if cook_stamp then implicit[#implicit + 1] = cook_stamp end
       if m.fields.output == "exe" and outputs_by_key[inst.key] then implicit[#implicit + 1] = outputs_by_key[inst.key][1] end
       w(string.format("build %s: %s %s%s", util.ninja_escape(pre .. "test/" .. sym .. ".ok"),

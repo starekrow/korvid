@@ -4,4 +4,5 @@
 module "svg" {
   deps      = { "core", "math", "xml", "patherizer" },
   test_deps = { "image" }, -- the tests read resvg's reference pictures
+  test_files = { "modules/svg/tests/references", "modules/svg/tests/files", "modules/krome/assets/icons", "modules/krome/icons/NAMES" },
 }

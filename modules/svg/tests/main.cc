@@ -19,10 +19,11 @@ namespace {
 
 using namespace kv;
 
+// `rel` from this directory, in the source tree (module.lua's test_files).
 void here(char* out, usize cap, const char* rel) {
-    const char* f = __FILE__;
-    const char* slash = strrchr(f, '/');
-    format(out, cap, "%.*s/%s", slash ? (int)(slash - f) : 1, slash ? f : ".", rel);
+    char path[600];
+    format(path, sizeof path, "modules/svg/tests/%s", rel);
+    test_source_path(out, cap, path);
 }
 
 bool read_file(const char* path, Array<u8>& out) {

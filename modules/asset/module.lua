@@ -6,4 +6,5 @@
 module "asset" {
   deps     = { "core", "platform", "math", "truetype", "patherizer" },
   engine_module = true,
+  test_files = { "modules/dejavu/assets/DejaVuSans.ttf", "examples/arcfire/assets/font/PublicPixel.ttf" }, -- the font test's two faces
 }

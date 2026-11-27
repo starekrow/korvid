@@ -7,4 +7,5 @@ module "gallery" {
   deps          = { "core", "math", "platform", "platform_hid", "render", "image", "patherizer" }, -- image: its tests read the pictures back
   tools         = { ["shader-compile"] = { install = "shaders" } },
   engine_module = true,
+  test_files    = { "examples/gallery/references/cpu", "examples/gallery/references/cpu-none", "examples/gallery/references/vulkan" }, -- what its tests compare with
 }

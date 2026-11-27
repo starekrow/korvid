@@ -31,11 +31,11 @@ Array<u8> read_all(const char* path) {
     return out;
 }
 
-// references/ beside this file's directory.
+// The gallery's references, of the source tree (module.lua's test_files).
 void reference_path(char* out, usize cap, const char* backend, const char* scene) {
-    const char* here = __FILE__;
-    const char* slash = strrchr(here, '/');
-    snprintf(out, cap, "%.*s/../references/%s/gallery_%s.png", slash ? (int)(slash - here) : 1, slash ? here : ".", backend, scene);
+    char rel[300];
+    snprintf(rel, sizeof rel, "examples/gallery/references/%s/gallery_%s.png", backend, scene);
+    test_source_path(out, cap, rel);
 }
 
 // The scene's picture against a reference: the pixels past `threshold` levels (any

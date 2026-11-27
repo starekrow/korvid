@@ -6,4 +6,5 @@
 module "patherizer" {
   deps      = { "core", "math" },
   test_deps = { "image" },
+  test_files = { "modules/patherizer/tests/references", "modules/krome/assets/icons", "modules/krome/icons/NAMES" },
 }

@@ -359,16 +359,9 @@ bool read_icon(const char* path, Icon& out) {
     return out.d[0] != 0;
 }
 
-void icons_dir(char* out, usize cap) {
-    const char* here = __FILE__;
-    const char* slash = strrchr(here, '/');
-    format(out, cap, "%.*s/../../krome/assets/icons", slash ? (int)(slash - here) : 1, slash ? here : ".");
-}
-void refs_dir(char* out, usize cap) {
-    const char* here = __FILE__;
-    const char* slash = strrchr(here, '/');
-    format(out, cap, "%.*s/references", slash ? (int)(slash - here) : 1, slash ? here : ".");
-}
+// Krome's icons and the reference pictures, of the source tree (module.lua's test_files).
+void icons_dir(char* out, usize cap) { test_source_path(out, cap, "modules/krome/assets/icons"); }
+void refs_dir(char* out, usize cap) { test_source_path(out, cap, "modules/patherizer/tests/references"); }
 
 u32 icon_names(char names[][64], u32 cap) {
     char dir[512], path[600];

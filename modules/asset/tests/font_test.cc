@@ -18,15 +18,10 @@ namespace {
 
 using namespace kv;
 
-// The repository's root, from this file's path (.../modules/asset/tests/font_test.cc).
-void repo_root(char* out, usize cap) {
-    format(out, cap, "%s", __FILE__);
-    for (int up = 0; up < 4; ++up) if (char* slash = strrchr(out, '/')) *slash = 0;
-}
-
-bool copy_in(const char* root, const char* from, const char* dir, const char* to) {
+// A font of the source tree (module.lua's test_files) into the mounted directory.
+bool copy_in(const char* from, const char* dir, const char* to) {
     char src[700], dst[700], d[700];
-    format(src, sizeof src, "%s/%s", root, from);
+    test_source_path(src, sizeof src, from);
     format(d, sizeof d, "%s/%s", dir, to);
     if (char* slash = strrchr(d, '/')) { *slash = 0; io_make_dirs(d); }
     format(dst, sizeof dst, "%s/%s", dir, to);
@@ -53,11 +48,10 @@ u32 pages_of(const FontAsset& f) { u32 g = 0, p = 0; font_counts(f, &g, &p); ret
 void test_font(kv::TestCtx& c) {
     using namespace kv;
     c.begin("font");
-    char root[600], dir[400];
-    repo_root(root, sizeof root);
+    char dir[400];
     KV_CHECK(c, io_make_temp_dir("kv-font-test", dir, sizeof dir));
-    KV_CHECK(c, copy_in(root, "modules/dejavu/assets/DejaVuSans.ttf", dir, "dejavu/DejaVuSans.ttf"));
-    KV_CHECK(c, copy_in(root, "examples/arcfire/assets/font/PublicPixel.ttf", dir, "pixel/PublicPixel.ttf"));
+    KV_CHECK(c, copy_in("modules/dejavu/assets/DejaVuSans.ttf", dir, "dejavu/DejaVuSans.ttf"));
+    KV_CHECK(c, copy_in("examples/arcfire/assets/font/PublicPixel.ttf", dir, "pixel/PublicPixel.ttf"));
     const ModuleDesc* const list[] = {&platform_module, &asset_module};
     Engine e;
     KV_CHECK(c, engine_init(e, list));
