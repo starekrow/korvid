@@ -70,7 +70,7 @@ struct Demo {
 
 
 // A step of the pilot: where the pointer goes and what it does there.
-enum class Act : u8 { Move, Click, Wheel, Shot, Check, Theme, Type, Key, Compose, Quit };
+enum class Act : u8 { Move, Click, Wheel, Shot, Check, Theme, Type, Key, Compose, Quit, Settle };
 struct Step { Act act; const char* id; f32 value; const char* expect; };
 
 // Positions are found when the step runs, so a reflow or a scroll is followed.
@@ -165,6 +165,10 @@ constinit const Step k_steps[] = {
     {Act::Click, "tab_split", 0, nullptr},
     {Act::Shot, "gallery_split", 0, nullptr},
     {Act::Click, "tab_skin", 0, nullptr},
+    {Act::Click, "spin", 0, nullptr},        // the spinner plays twice at 10 a second, then says so
+    {Act::Check, "last", 0, "spin"},
+    {Act::Settle, nullptr, 0, nullptr},
+    {Act::Check, "last", 0, "spun"},
     {Act::Shot, "gallery_skin", 0, nullptr},
     {Act::Click, "tab_split", 0, nullptr},
     {Act::Click, "split", 0, nullptr},       // the splitter takes the focus; the arrows move it
@@ -403,6 +407,10 @@ void kromedemo_tick(TickContext& ctx) {
             format(path, sizeof path, "%s/kromedemo_%s.ppm", d.shots, s.id);
             if (Renderer* r = renderer_get(e)) renderer_screenshot(r, path);
         }
+        break;
+    case Act::Settle:
+        // Until Krome has settled (a strip that plays twice has come to rest), shots or not.
+        if (!krome_settled(e)) return;
         break;
     case Act::Check: {
         const char* got = krome_model_text(e, d.form, s.id);

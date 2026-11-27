@@ -117,11 +117,39 @@ vec2 measure_image(void* user, Name path) {
 
 } // namespace
 
-bool krome_image_source(const KromeLook& l, f32 w, f32 h, rect2* out) {
+bool krome_image_source(const KromeLook& l, f32 w, f32 h, bool across, u32 frame, rect2* out) {
     *out = rect2{0, 0, w, h};
-    if (!(l.set & KROME_LOOK_REGION)) return true;
-    *out = rect2{l.region[0], l.region[1], l.region[2], l.region[3]};
-    return l.region[0] + l.region[2] <= w && l.region[1] + l.region[3] <= h;
+    bool inside = true;
+    if (l.set & KROME_LOOK_REGION) {
+        *out = rect2{l.region[0], l.region[1], l.region[2], l.region[3]};
+        inside = l.region[0] + l.region[2] <= w && l.region[1] + l.region[3] <= h;
+    }
+    if (l.frames > 1) {
+        u32 f = frame < l.frames ? frame : l.frames - 1;
+        if (across) { out->w /= (f32)l.frames; out->x += out->w * (f32)f; }
+        else { out->h /= (f32)l.frames; out->y += out->h * (f32)f; }
+    }
+    return inside;
+}
+
+u32 krome_still_frame(const KromeLook& l) {
+    if (l.frames <= 1 || !(l.set & KROME_LOOK_FRAME)) return 0;
+    f32 last = (f32)(l.frames - 1);
+    f32 at = l.frame_at ? (l.frame < 0.0f ? 0.0f : l.frame > 1.0f ? 1.0f : l.frame) * last + 0.5f : l.frame;
+    if (!(at > 0.0f)) return 0;
+    return at >= last ? l.frames - 1 : (u32)at;
+}
+
+u32 krome_strip_frame(u32 frames, u32 from, f32 fps, u32 loops, f64 elapsed, bool* done, f64* next) {
+    *done = false;
+    *next = 0.0;
+    if (frames <= 1 || !(fps > 0.0f)) return from;
+    f64 steps = elapsed > 0.0 ? elapsed * (f64)fps + 1e-9 : 0.0; // a frame due at the clock's time is shown at it
+    u64 k = (u64)steps;
+    u64 pos = (u64)from + k;
+    if (loops && pos >= (u64)loops * frames) { *done = true; return frames - 1; }
+    *next = (f64)(k + 1) / (f64)fps;
+    return (u32)(pos % frames);
 }
 
 KromeFit krome_fit_of(const KromeLook& l) {
@@ -475,6 +503,34 @@ void paint_shape(Paint& p, u32 node, const KromeNode& n, const KromeLook& l, rec
     p.list.box(b);
 }
 
+// The frame a strip node shows now. Still: the one its look names. Playing (fps > 0): where
+// its play record's clock says, the record begun now if it is new or what it plays changed.
+u32 strip_frame(Paint& p, u32 node, const KromeNode& n, const KromeLook& l) {
+    u32 still = krome_still_frame(l);
+    if (!(l.fps > 0.0f)) return still;
+    KromeModule& s = p.s;
+    u64 key = l.image.hash;
+    u32 fps_bits;
+    memcpy(&fps_bits, &l.fps, 4);
+    key = key * 1000003u ^ fps_bits;
+    key = key * 1000003u ^ l.loops;
+    key = key * 1000003u ^ l.frames;
+    key = key * 1000003u ^ still;
+    key = key * 1000003u ^ ((n.flags & KROME_ACROSS) ? 1u : 0u);
+    KromeModule::Play* pl = nullptr;
+    for (KromeModule::Play& x : s.plays) if (x.screen == p.sc.id && x.overlay == p.overlay && x.node == node) { pl = &x; break; }
+    if (!pl) { s.plays.alloc = s.general; s.plays.push(KromeModule::Play{}); pl = &s.plays.last(); }
+    if (pl->screen != p.sc.id || pl->id != n.id || pl->key != key)
+        *pl = KromeModule::Play{p.sc.id, p.overlay, node, n.id, key, s.clock, still, 0.0, false, false, false, l.loops == 0};
+    pl->seen = true;
+    bool done = false;
+    f64 next = 0.0;
+    u32 f = krome_strip_frame(l.frames, pl->from, l.fps, l.loops, s.clock - pl->start, &done, &next);
+    if (done && !pl->done) { pl->done = true; pl->tell = true; }
+    pl->due = next > 0.0 ? pl->start + next : 0.0;
+    return f;
+}
+
 // A region that reaches outside its file: said once, naming both sizes; the image draws nothing.
 void region_outside(Paint& p, u32, const KromeNode& n, const KromeLook& l, const TextureAsset* img) {
     u64 key = l.image.hash;
@@ -496,6 +552,8 @@ void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u3
     KromeImage* ki = n.type == KromeType::Image && (l.set & KROME_LOOK_IMAGE) ? image_for(p.s, l.image) : nullptr;
     const TextureAsset* img = ready_texture(p.s, ki);
     const ShapeAsset* shp = ready_shape(p.s, ki);
+    // A strip's frame: played on the clock whether its file is in yet or not.
+    u32 frame = n.type == KromeType::Image && l.frames > 1 ? strip_frame(p, node, n, l) : 0;
     bool fill = l.bg.a > 0.0f || ((l.set & KROME_LOOK_BG2) && l.bg2.a > 0.0f);
     bool edge = l.border > 0.0f && l.border_color.a > 0.0f;
     bool shade = l.shadow_color.a > 0.0f;
@@ -518,7 +576,7 @@ void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u3
         }
         rect2 src;
         f32 tw = img ? (f32)img->width : 0.0f, th = img ? (f32)img->height : 0.0f;
-        bool drawn = img && krome_image_source(l, tw, th, &src) && tw > 0.0f && th > 0.0f;
+        bool drawn = img && krome_image_source(l, tw, th, (n.flags & KROME_ACROSS) != 0, frame, &src) && tw > 0.0f && th > 0.0f;
         if (img && !drawn) region_outside(p, node, n, l, img);
         KromeImagePieces pieces;
         if (drawn) krome_image_pieces(l, src, tw, th, r, scale, n.align_x, n.align_y, pieces);
@@ -764,7 +822,13 @@ void paint_tree(KromeModule& s, KromeScreen& sc, const KromeTree& t, u32 overlay
     if (t.root == KROME_NONE) return;
     Paint p{s, sc, t, list, renderer_get(*s.e), overlay, {}, 0, KROME_NONE};
     pointer_states(p);
+    for (KromeModule::Play& pl : s.plays) if (pl.screen == sc.id && pl.overlay == overlay) pl.seen = false;
     paint_node(p, t.root, nullptr, k_everywhere, 0);
+    // A strip no longer painted playing (hidden, still, gone) forgets where it was.
+    u32 w = 0;
+    for (u32 i = 0; i < s.plays.len; ++i)
+        if (s.plays[i].seen || s.plays[i].screen != sc.id || s.plays[i].overlay != overlay) s.plays[w++] = s.plays[i];
+    s.plays.len = w;
 }
 
 // ---- the pointer ------------------------------------------------------------------------------------------
@@ -809,6 +873,10 @@ void krome_drop_anims(KromeModule& s, u32 screen, u32 overlay) {
     for (u32 i = 0; i < s.anims.len; ++i)
         if (!(s.anims[i].screen == screen && s.anims[i].overlay == overlay)) s.anims[w++] = s.anims[i];
     s.anims.len = w;
+    w = 0;
+    for (u32 i = 0; i < s.plays.len; ++i)
+        if (!(s.plays[i].screen == screen && s.plays[i].overlay == overlay)) s.plays[w++] = s.plays[i];
+    s.plays.len = w;
 }
 
 KromeScreen* krome_top_screen(KromeModule& s) {
@@ -1328,6 +1396,10 @@ void krome_view_frame(KromeModule& s) {
         for (KromeScreen* sc : s.screens) sc->repaint = true;
         engine_want_frame(*s.e);
     }
+    // A strip whose next frame is due paints its screen again.
+    for (const KromeModule::Play& pl : s.plays)
+        if (pl.due > 0.0 && s.clock + 1e-9 >= pl.due)
+            if (KromeScreen* sc = krome_screen_by_id(s, pl.screen)) sc->repaint = true;
     // A font or an image that has landed changes what text and images measure.
     bool landed = false;
     for (KromeFont& f : s.fonts)
@@ -1363,6 +1435,22 @@ void krome_view_frame(KromeModule& s) {
     }
     krome_window_enter(s, was);
     if (s.animating) engine_want_frame(*s.e);
+    // Strips that came to rest this paint say so, each to its node's event, once; outside the
+    // paint, since a handler may build its tree again.
+    KromeTarget told[16];
+    u32 nt = 0;
+    for (KromeModule::Play& pl : s.plays)
+        if (pl.tell && nt < 16) { pl.tell = false; told[nt++] = KromeTarget{pl.screen, pl.overlay, pl.node}; }
+    for (u32 i = 0; i < nt; ++i) {
+        KromeScreen* sc = nullptr;
+        KromeTree* tree = krome_target_tree(s, told[i], &sc);
+        if (tree && sc && told[i].node < tree->nodes.len && !tree->nodes[told[i].node].event.is_null()) krome_fire(s, *sc, *tree, told[i].node, 1.0);
+    }
+    // The next strip frame due, and nothing while every strip is still or at rest: an
+    // on-demand window wakes for each frame and no more often.
+    f64 due = 0.0;
+    for (const KromeModule::Play& pl : s.plays) if (pl.due > 0.0 && (due <= 0.0 || pl.due < due)) due = pl.due;
+    if (due > 0.0) engine_want_frame_at(*s.e, time_now() + (due > s.clock ? due - s.clock : 0.0));
 }
 
 namespace {

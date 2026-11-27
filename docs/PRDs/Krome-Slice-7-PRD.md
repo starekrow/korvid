@@ -285,3 +285,36 @@ In review of the draft (Nov 26):
   the tile at scale 1.5; natural centred, at the end, and clipped. `renderer_cpu_tests`
   draws a tile every 4 pixels and reads the row back from the rect's left edge.
 - **Not verified:** Metal and D3D12, as in milestone 1.
+
+**Milestone 3, Frames** (Nov 26).
+
+- **All a look's**: `frames`, `frame` and `frame-at` (one field; whichever was said last),
+  `fps`, `loops`; `across` is a node flag, as the PRD has it. So a state can play a strip
+  (`hover { fps=12 }`), and every one can be bound. `krome_image_source` takes the frame and
+  cuts the strip's cell out of the region; layout measures one frame.
+- **Playing is a record per node** (`KromeModule::plays`), kept as a transition's is: begun
+  on the Frame cycle's clock at the first paint that plays it, or again when what it plays
+  changes (the image, rate, loops, still frame, direction); dropped when its tree is built
+  again or a paint no longer finds it playing (a hidden node, `fps` back to 0). The
+  arithmetic is `krome_strip_frame`, pure: from the still frame, `loops` times through,
+  resting on the last frame.
+- **Wakes.** Each Frame cycle repaints the screens whose strip has a frame due, and asks
+  for the earliest due frame (`engine_want_frame_at`, the clock's due time turned into
+  `time_now`'s). A screen with nothing due asks nothing.
+- **The event comes after the paint.** A strip that rests marks its record, and the frame
+  fires its node's event once, past the windows' paints, since a handler may rebuild the
+  tree being painted. It goes through `e.events`, as paint's KromeView does: giving
+  `krome.paint` a context would make every emit from paint need declaring.
+- **`krome_settled` waits for a strip that plays a number of times** to rest (one that plays
+  for ever is not waited for), so kromedemo's pictures stay the same run to run.
+- **Shown.** kromedemo's Skin tab: a 64-frame knob (`knob.png`) on `frame-at=@dial`, beside a
+  slider; a 12-frame spinner (`spinner.png`, across) that Spin plays twice at 10 a second.
+  `--demo` presses Spin, waits for Krome to settle (a new step, `Settle`), and finds the
+  spinner's `spun`.
+- **Tested.** The still frame by number and by fraction, held inside; the cell down a region
+  and across a file; `krome_strip_frame` at and either side of its due times, from a frame
+  other than the first, for ever, still; a strip measured as one frame. Running: the knob
+  bound and moved with no rebuild; a still screen paints nothing and asks no frame; the
+  strip played at 10 a second, twice, is 24 paints over 2.4 seconds of 60 frames, a frame
+  asked on every frame while it plays and on none after, its event once, and nothing more
+  in a second at rest.

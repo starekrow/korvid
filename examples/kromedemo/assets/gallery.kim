@@ -166,6 +166,14 @@ screen gallery {
                                 image "kromedemo/skin.png" id=frame_large region=60,0,24,24 slice=8 w=400 h=200
                                 image "kromedemo/skin.png" region=0,0,20,20 fit=natural w=60 h=200 center middle
                             }
+                            // Strips: a knob of 64 frames following the slider, and a spinner
+                            // of 12 that Spin plays twice at 10 a second, then rests and says so.
+                            row gap=16 middle {
+                                image "kromedemo/knob.png" id=knob frames=64 frame-at=@dial w=48 h=48
+                                slider id=dial @dial 0..1 step=0.02 w=160
+                                image "kromedemo/spinner.png" id=spinner frames=12 across fps=@spin_fps loops=2 w=32 h=32 -> spun
+                                button "Spin" id=spin -> spin
+                            }
                         }
                     }
                 }

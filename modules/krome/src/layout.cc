@@ -71,6 +71,11 @@ struct Layout {
             // A region measures as its own size, the file's whatever it is.
             if (l.set & KROME_LOOK_REGION) c = vec2{l.region[2], l.region[3]};
             else if (m.image && (l.set & KROME_LOOK_IMAGE)) c = m.image(m.user, l.image);
+            // A strip, as one of its frames.
+            if (l.frames > 1) {
+                if (n.flags & KROME_ACROSS) c.x /= (f32)l.frames;
+                else c.y /= (f32)l.frames;
+            }
         }
         // Children: along the direction they add up, across it the largest; in a stack the
         // largest each way.

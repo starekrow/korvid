@@ -67,6 +67,15 @@ struct KromeLook {
     f32   region[4] = {};                  // x, y, w, h in the file's pixels: the part of it drawn (set: KROME_LOOK_REGION)
     KromeFit fit = KromeFit::Stretch;      // unset with `slice` set: Slice
     f32   slice[4] = {};                   // fit=slice's borders: left, top, right, bottom, in the file's pixels
+    // A strip: the image (or its region) is `frames` frames of one size, down (across with
+    // the node's flag `across`). Which: `frame` from 0, or with frame_at a fraction (0 the
+    // first, 1 the last). Playing at `fps` from where it is, `loops` times (0 for ever),
+    // resting on its last frame.
+    u32   frames = 1;
+    f32   frame = 0.0f;
+    bool  frame_at = false;
+    f32   fps = 0.0f;
+    u32   loops = 0;
     color tint{1, 1, 1, 1};
     f32   line_height = 0.0f;              // a text's lines, times its size; 0: the font's own
     color caret_color{0, 0, 0, 0};         // an edit's caret; unset: its text's color
@@ -103,6 +112,10 @@ constexpr u32 KROME_LOOK_TRANSITION = 1u << 20;
 constexpr u32 KROME_LOOK_REGION   = 1u << 21;
 constexpr u32 KROME_LOOK_FIT      = 1u << 22;
 constexpr u32 KROME_LOOK_SLICE    = 1u << 23;
+constexpr u32 KROME_LOOK_FRAMES   = 1u << 24;
+constexpr u32 KROME_LOOK_FRAME    = 1u << 25; // frame= or frame-at=, whichever was said last
+constexpr u32 KROME_LOOK_FPS      = 1u << 26;
+constexpr u32 KROME_LOOK_LOOPS    = 1u << 27;
 constexpr u32 KROME_LOOK_INHERITED = KROME_LOOK_COLOR | KROME_LOOK_FONT | KROME_LOOK_SIZE | KROME_LOOK_LINE_HEIGHT;
 
 // Node flags.
@@ -124,6 +137,7 @@ constexpr u32 KROME_NOFOCUS   = 1u << 14; // never takes it, though it has one
 constexpr u32 KROME_SECRET    = 1u << 15; // an edit drawn as bullets, never copied
 constexpr u32 KROME_TABS      = 1u << 16; // an edit that keeps Tab (a code editor's) rather than leaving on it
 constexpr u32 KROME_PIXEL     = 1u << 17; // its images, and those of everything under it, are sampled nearest: a skin's pixels stay square
+constexpr u32 KROME_ACROSS    = 1u << 18; // its strip's frames are laid across the image, not down it
 
 // Modifier keys, as a shortcut and a behaviour's key call see them.
 constexpr u32 KROME_MOD_SHIFT = 1u << 0;

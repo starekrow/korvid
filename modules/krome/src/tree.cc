@@ -163,6 +163,32 @@ bool look_prop(KromeLook& l, const char* prop, const KromeValue& v, const char**
         l.set |= KROME_LOOK_REGION;
         return true;
     }
+    if (!strcmp(prop, "frames")) {
+        if (v.kind != KromeValue::Number || v.n < 1 || v.n > 4096 || v.n != (f32)(u32)v.n) { *why = "frames takes a whole number from 1 to 4096"; return true; }
+        l.frames = (u32)v.n;
+        l.set |= KROME_LOOK_FRAMES;
+        return true;
+    }
+    if (!strcmp(prop, "frame") || !strcmp(prop, "frame-at")) {
+        bool at = prop[5] == '-';
+        if (v.kind != KromeValue::Number || !(v.n > -1e9f && v.n < 1e9f)) { *why = at ? "frame-at takes a number, 0 the first frame and 1 the last" : "frame takes a number, from 0"; return true; }
+        l.frame = v.n;
+        l.frame_at = at;
+        l.set |= KROME_LOOK_FRAME;
+        return true;
+    }
+    if (!strcmp(prop, "fps")) {
+        if (v.kind != KromeValue::Number || v.n < 0 || v.n > 240) { *why = "fps takes frames a second, 0 (still) to 240"; return true; }
+        l.fps = v.n;
+        l.set |= KROME_LOOK_FPS;
+        return true;
+    }
+    if (!strcmp(prop, "loops")) {
+        if (v.kind != KromeValue::Number || v.n < 0 || v.n > 1e6f || v.n != (f32)(u32)v.n) { *why = "loops takes a whole number, 0 for ever"; return true; }
+        l.loops = (u32)v.n;
+        l.set |= KROME_LOOK_LOOPS;
+        return true;
+    }
     if (!strcmp(prop, "fit")) {
         static const char* const names[] = {"stretch", "natural", "tile", "slice"};
         for (u8 i = 0; i < 4; ++i)
@@ -217,6 +243,10 @@ void overlay(KromeLook& to, const KromeLook& from) {
     if (s & KROME_LOOK_REGION) memcpy(to.region, from.region, sizeof to.region);
     if (s & KROME_LOOK_FIT) to.fit = from.fit;
     if (s & KROME_LOOK_SLICE) memcpy(to.slice, from.slice, sizeof to.slice);
+    if (s & KROME_LOOK_FRAMES) to.frames = from.frames;
+    if (s & KROME_LOOK_FRAME) { to.frame = from.frame; to.frame_at = from.frame_at; }
+    if (s & KROME_LOOK_FPS) to.fps = from.fps;
+    if (s & KROME_LOOK_LOOPS) to.loops = from.loops;
     if (s & KROME_LOOK_TINT) to.tint = from.tint;
     if (s & KROME_LOOK_LINE_HEIGHT) to.line_height = from.line_height;
     if (s & KROME_LOOK_CARET_COLOR) to.caret_color = from.caret_color;
@@ -388,7 +418,7 @@ const char* KromeTree::set(u32 node, const char* prop, const KromeValue& v, Krom
     if (why) return why;
     if (!at) { at = looks.len; looks.push(l); *slot = state == KromeState::Base ? at : at + 1; }
     else looks[at] = l;
-    if (!strcmp(prop, "font") || !strcmp(prop, "size") || !strcmp(prop, "image") || !strcmp(prop, "line-height") || !strcmp(prop, "region")) dirty = true;
+    if (!strcmp(prop, "font") || !strcmp(prop, "size") || !strcmp(prop, "image") || !strcmp(prop, "line-height") || !strcmp(prop, "region") || !strcmp(prop, "frames")) dirty = true;
     return nullptr;
 }
 
@@ -414,7 +444,7 @@ const char* KromeTree::flag(u32 node, const char* w) {
                                {"subpixel", KROME_SUBPIXEL}, {"nowrap", KROME_NOWRAP},
                                {"multiline", KROME_MULTILINE}, {"readonly", KROME_READONLY},
                                {"focusable", KROME_FOCUSABLE}, {"nofocus", KROME_NOFOCUS}, {"secret", KROME_SECRET}, {"tabs", KROME_TABS},
-                               {"pixel", KROME_PIXEL}};
+                               {"pixel", KROME_PIXEL}, {"across", KROME_ACROSS}};
     for (const Bit& b : bits) if (!strcmp(w, b.word)) { n.flags |= b.bit; dirty = true; return nullptr; }
     if (!strcmp(w, "left"))   { n.align_x = KromeAlign::Start; dirty = true; return nullptr; }
     if (!strcmp(w, "center")) { n.align_x = KromeAlign::Center; dirty = true; return nullptr; }

@@ -47,11 +47,14 @@ return {
   model = { level = 40, done = "40%", mode = "fast", wrap = true, kind = "texture", name = "", secret = "",
             tab = "tree", nodes = flatten(), rows = rows, rows_count = #rows, picked_row = "none picked",
             widths = { name = 200, size = 90, kind = 110 }, split = 240, rename = "", renamed = "not renamed",
-            last = "", icons = icons },
+            last = "", icons = icons, dial = 0.3, spin_fps = 0 },
 
   on = {
     nav = function() end, -- the game opens the page
     skin = function(id) model.last = id end,
+    -- A play begins when what it plays changes: the rate, between two that look alike.
+    spin = function() model.spin_fps = model.spin_fps == 10 and 10.5 or 10; model.last = "spin" end,
+    spun = function() model.last = "spun" end,
     more = function()
       local v = tonumber((model.done:gsub("%%", ""))) + 10
       if v > 100 then v = 0 end

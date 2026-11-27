@@ -305,7 +305,7 @@ Header `korvid/krome/krome.h`:
 | `krome_theme(e, name)`, `krome_current_theme(e, screen)` | functions | every screen in a theme; the one a screen is in |
 | `krome_provide(e, path, data, size)` | function | a file's bytes from memory, in place of reading it; given again, a reload |
 | `krome_errors(e)`, `krome_clear_errors(e)` | functions | the latest mistakes, with files and lines |
-| `krome_settled(e)` | function | nothing loading, fonts in, every change painted |
+| `krome_settled(e)` | function | nothing loading, fonts in, every change painted, no strip mid-play (but one that plays for ever) |
 | `krome_viewport(e, w, h, scale)` | function | the view's size without a window |
 | `krome_stats(e)` | function | layouts, paints, lists handed over, events, errors, regions and nodes rebuilt |
 | `KromeEvent`, `KromeSet` | events | out and in |
@@ -323,7 +323,8 @@ Properties: layout `w`, `h` (a number, a percentage, `hug`, `fill`, a range), `p
 `change`, `blur`; `cursor`; `grip` (`move`, an edge or corner by compass point, `none`); any of them `@key` (bound to the model); look `bg`, `bg2` (a gradient to it), `angle`, `radius` (one, two
 or four), `border`, `border-color`, `shadow` (x y blur [spread]), `shadow-color`, `color`,
 `opacity`, `font`, `size`, `line-height`, `image`, `region` (x, y, w, h), `fit` (`stretch`,
-`natural`, `tile`, `slice`), `slice` (one border or four), `tint`, `caret-color`, `selection-color`,
+`natural`, `tile`, `slice`), `slice` (one border or four), `frames`, `frame`, `frame-at`,
+`fps`, `loops`, `tint`, `caret-color`, `selection-color`,
 `scrollbar-color`, `scrollbar-track`, `scrollbar-size`, `transition` (seconds: the node's
 colors and opacity ease to what its look resolves to whenever that changes, by state,
 selection, theme or a bound value, on the Frame cycle's clock, turning around from where they
@@ -365,6 +366,20 @@ smaller than they are. Each applies to the region. Stretched or tiled, the image
 node's own box (its `bg`, if any, multiplies it, as before); natural and sliced, the box is
 drawn under the pieces and each piece is the `tint`.
 
+**Strips.** `frames=N` makes the image (or its region) N frames of one size, down it, or
+across with the flag `across`; the node measures as one frame. `frame=3` picks one from 0,
+`frame-at=0.5` one by a fraction (0 the first, 1 the last), both held inside the strip and
+either bound (`frame-at=@level`: a knob of 64 states following the model, with no rebuild).
+`fps=10` plays it from where it is on the Frame cycle's clock, `loops=2` times (0, the
+default, for ever), resting on its last frame; a strip that comes to rest fires its node's
+event once (`-> done`), after the paint. They are a look's, so `hover { fps=12 }` plays on
+hover. A playing strip asks for a frame when its next one is due (`engine_want_frame_at`),
+so a window paced on demand wakes for each frame and no more; one still or at rest costs
+nothing. Its place is kept by node, as a transition's is: a play begins when it is first
+painted so, or when what it plays changes (the image, the rate, the loops, its still
+frame), and is forgotten when the node is not painted (hidden) or its tree is built again.
+`krome_settled` waits for a strip that plays a number of times to rest.
+
 **Icons** (`krome/icons/<name>.svg`): Material Symbols, Outlined, weight 400, 20 px (Apache
 2.0, `icons/LICENSE`; the list and the pinned commit in `icons/README.md`): `check`,
 `remove`, `expand_more`, `expand_less`, `chevron_left`, `chevron_right`, `arrow_drop_down`,
@@ -375,7 +390,7 @@ kromescreens do). They are drawn on a 20 px grid: 20 is their size, and smaller 
 
 Flags: `fill`, `clip`, `scroll`, `disabled`, `selected`, `hidden`, the alignments,
 `subpixel`, `nowrap`, `multiline`, `readonly`, `focusable`, `nofocus`, `secret`, `tabs`,
-`pixel` (inherited). The
+`pixel` (inherited), `across`. The
 vocabulary is fixed (`modules/kimb`); `prop name type` in a prelude types a definition's
 parameter.
 

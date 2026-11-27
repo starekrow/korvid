@@ -62,10 +62,10 @@ void test_regions(TestCtx& c) {
 
     // The part of the file drawn: the region, the whole without one, refused past its edge.
     rect2 src;
-    KV_CHECK(c, krome_image_source(base, 200, 40, &src) && src.x == 40 && src.y == 0 && src.w == 20 && src.h == 20);
+    KV_CHECK(c, krome_image_source(base, 200, 40, false, 0, &src) && src.x == 40 && src.y == 0 && src.w == 20 && src.h == 20);
     KromeLook none = t.resolve_look(whole, KromeState::Base, nullptr);
-    KV_CHECK(c, krome_image_source(none, 200, 40, &src) && src.x == 0 && src.w == 200 && src.h == 40);
-    KV_CHECK(c, krome_image_source(base, 200, 40, &src) && !krome_image_source(base, 59, 40, &src) && !krome_image_source(base, 200, 19, &src));
+    KV_CHECK(c, krome_image_source(none, 200, 40, false, 0, &src) && src.x == 0 && src.w == 200 && src.h == 40);
+    KV_CHECK(c, krome_image_source(base, 200, 40, false, 0, &src) && !krome_image_source(base, 59, 40, false, 0, &src) && !krome_image_source(base, 200, 19, false, 0, &src));
 
     // `pixel` inherits: set at the root, every image under it is sampled nearest.
     KV_CHECK(c, !t.resolve_look(cut, KromeState::Base, nullptr).pixel);
@@ -208,10 +208,149 @@ void test_fit(TestCtx& c) {
     t.free();
 }
 
+// Frames (KR29): which frame of a strip, still or playing, and where it is in the file.
+void test_frames(TestCtx& c) {
+    c.begin("krome pictures: frames");
+    KromeTree t;
+    t.init(mem_general());
+    u32 root = t.add(KromeType::Box);
+    t.set(root, "dir", KromeValue::str("row"));
+    u32 knob = t.add(KromeType::Image, root);
+    t.set(knob, "image", KromeValue::str("t/knob.png"));
+    KV_CHECK(c, t.set(knob, "frames", KromeValue::num(0)) != nullptr && t.set(knob, "frames", KromeValue::num(2.5f)) != nullptr);
+    KV_CHECK(c, t.set(knob, "fps", KromeValue::num(-1)) != nullptr && t.set(knob, "loops", KromeValue::num(1.5f)) != nullptr);
+    KV_CHECK(c, t.set(knob, "frames", KromeValue::num(64)) == nullptr);
+    auto still = [&](const char* prop, f32 v) {
+        t.set(knob, prop, KromeValue::num(v));
+        return krome_still_frame(t.resolve_look(knob, KromeState::Base, nullptr));
+    };
+    KV_CHECK(c, krome_still_frame(t.resolve_look(knob, KromeState::Base, nullptr)) == 0);
+    // frame-at: 0 the first, 1 the last, held inside; frame: by number, held inside.
+    KV_CHECK(c, still("frame-at", 0.5f) == 32 && still("frame-at", 0.0f) == 0 && still("frame-at", 1.0f) == 63 && still("frame-at", 1.5f) == 63 && still("frame-at", -1.0f) == 0);
+    KV_CHECK(c, still("frame", 3) == 3 && still("frame", 99) == 63 && still("frame", -2) == 0);
+
+    // A strip down a region, and across a file: the frame's cell.
+    rect2 src;
+    KromeTree u;
+    u.init(mem_general());
+    u32 a = u.add(KromeType::Image);
+    u.set(a, "region", KromeValue::nums(Nums<4>{{100, 0, 20, 240}}.v, 4));
+    u.set(a, "frames", KromeValue::num(12));
+    KromeLook down = u.resolve_look(a, KromeState::Base, nullptr);
+    KV_CHECK(c, krome_image_source(down, 200, 240, false, 3, &src) && rect_is(src, 100, 60, 20, 20));
+    KV_CHECK(c, krome_image_source(down, 200, 240, false, 40, &src) && rect_is(src, 100, 220, 20, 20)); // held to the last
+    KromeTree v;
+    v.init(mem_general());
+    u32 b = v.add(KromeType::Image);
+    v.set(b, "frames", KromeValue::num(12));
+    KV_CHECK(c, krome_image_source(v.resolve_look(b, KromeState::Base, nullptr), 240, 20, true, 3, &src) && rect_is(src, 60, 0, 20, 20));
+
+    // Playing: 12 frames at 10 a second, twice, resting on the last; for ever, round and round.
+    bool done = false;
+    f64 next = 0.0;
+    KV_CHECK(c, krome_strip_frame(12, 0, 10, 2, 0.0, &done, &next) == 0 && !done && next > 0.0999 && next < 0.1001);
+    KV_CHECK(c, krome_strip_frame(12, 0, 10, 2, 0.35, &done, &next) == 3 && !done && next > 0.3999 && next < 0.4001);
+    KV_CHECK(c, krome_strip_frame(12, 0, 10, 2, 0.1, &done, &next) == 1); // due at the clock's time: shown at it
+    KV_CHECK(c, krome_strip_frame(12, 0, 10, 2, 1.25, &done, &next) == 0 && !done);
+    KV_CHECK(c, krome_strip_frame(12, 0, 10, 2, 2.39, &done, &next) == 11 && !done && next > 2.3999 && next < 2.4001);
+    KV_CHECK(c, krome_strip_frame(12, 0, 10, 2, 2.4, &done, &next) == 11 && done && next == 0.0);
+    KV_CHECK(c, krome_strip_frame(12, 0, 10, 2, 50.0, &done, &next) == 11 && done && next == 0.0);
+    KV_CHECK(c, krome_strip_frame(12, 0, 10, 0, 100.05, &done, &next) == 4 && !done);
+    KV_CHECK(c, krome_strip_frame(12, 5, 10, 1, 0.65, &done, &next) == 11 && !done); // from where it was: 5 to 11, once
+    KV_CHECK(c, krome_strip_frame(12, 5, 10, 1, 0.7, &done, &next) == 11 && done);
+    KV_CHECK(c, krome_strip_frame(12, 7, 0, 1, 9.0, &done, &next) == 7 && !done && next == 0.0); // still
+
+    // A strip measures as one frame: the region's down, the file's across.
+    t.set(root, "dir", KromeValue::str("row"));
+    u32 strip = t.add(KromeType::Image, root);
+    t.set(strip, "image", KromeValue::str("t/sheet.png"));
+    t.set(strip, "frames", KromeValue::num(10));
+    t.flag(strip, "across");
+    u32 tall = t.add(KromeType::Image, root);
+    t.set(tall, "region", KromeValue::nums(Nums<4>{{100, 0, 20, 240}}.v, 4));
+    t.set(tall, "frames", KromeValue::num(12));
+    krome_layout(t, root, rect2{0, 0, 640, 480}, k_measure, false);
+    KV_CHECK(c, rect_is(t.nodes[knob].rect, 0, 0, 200, 40.0f / 64) && rect_is(t.nodes[strip].rect, 200, 0, 20, 40) && t.nodes[tall].rect.w == 20 && t.nodes[tall].rect.h == 20);
+    t.free();
+    u.free();
+    v.free();
+}
+
+// A knob bound to the model, and a strip played: what wakes the window while it plays and
+// after, and its event, once.
+void test_frames_playing(TestCtx& c) {
+    c.begin("krome pictures: frames playing");
+    const char* text =
+        "script \"t/p.lua\"\n"
+        "screen main { box dir=row {\n"
+        "  image \"t/knob.png\" id=knob frames=64 frame-at=@level\n"
+        "  image \"t/strip.png\" id=spin frames=12 fps=@fps loops=2 across -> spun\n"
+        "} }\n";
+    const char* script = "return { model = { level = 0.5, fps = 0, spun = 0 }, on = { spun = function() model.spun = model.spun + 1 end } }";
+    Array<u8> k{};
+    KimErrors errs;
+    KV_CHECK(c, kim_compile(text, strlen(text), "t/p.kim", k, errs) && errs.count == 0);
+    const ModuleDesc* const list[] = {&platform_module, &platform_hid_module, &asset_module, &krome_module};
+    Engine e;
+    KV_CHECK(c, engine_init(e, list));
+    KromeModule& s = *krome_state(e);
+    krome_viewport(e, 400, 300, 1.0f);
+    krome_provide(e, "t/p.kimb", k.data, k.len);
+    krome_provide(e, "t/p.lua", script, strlen(script));
+    Name scn = krome_open(e, "t/p.kimb", "main");
+    for (u32 i = 0; i < 200 && !(krome_ready(e, scn) && krome_settled(e)); ++i) frames(e, 1);
+    KV_CHECK(c, krome_ready(e, scn) && krome_settled(e));
+    KromeScreen& sc = *krome_screen(s, scn);
+    u32 knob = krome_find(sc.tree, name_intern("knob"));
+    KV_CHECK(c, knob != KROME_NONE && krome_still_frame(sc.tree.resolve_look(knob, KromeState::Base, nullptr)) == 32);
+    // Bound: the model moves the knob, with no rebuild.
+    u64 nodes = krome_stats(e).rebuilt_nodes;
+    krome_set(e, scn, "level", 1.0);
+    frames(e, 2);
+    KV_CHECK(c, krome_still_frame(sc.tree.resolve_look(knob, KromeState::Base, nullptr)) == 63 && krome_stats(e).rebuilt_nodes == nodes);
+    // Still, it costs nothing: no frame asked for, no paint.
+    u64 paints = krome_stats(e).paints;
+    e.frame_due = 0.0;
+    frames(e, 30);
+    KV_CHECK(c, krome_stats(e).paints == paints && e.frame_due == 0.0 && s.plays.len == 0);
+
+    // Played at 10 a second, twice: a paint for each of its 24 frames, and one for the rest
+    // where it says so; a frame asked for while it plays, never after.
+    krome_set(e, scn, "fps", 10.0);
+    frames(e, 1);
+    paints = krome_stats(e).paints;
+    KV_CHECK(c, s.plays.len == 1 && s.plays[0].due > 0.0);
+    u32 asked = 0, asked_after = 0, playing = 0;
+    for (u32 i = 0; i < 60 * 4; ++i) {
+        e.frame_due = 0.0;
+        frames(e, 1);
+        bool rests = s.plays.len == 1 && s.plays[0].done;
+        if (e.frame_due > 0.0) (rests ? asked_after : asked) += 1;
+        if (!rests) ++playing;
+    }
+    u64 painted = krome_stats(e).paints - paints;
+    KV_CHECK(c, painted == 24 && asked == playing && asked_after == 0);
+    if (painted != 24 || asked != playing || asked_after) KV_ERROR("test", "paints %llu, frames asked %u while playing %u, %u after", (unsigned long long)painted, asked, playing, asked_after);
+    KV_CHECK(c, playing > 140 && playing < 146); // 2.4 seconds at 60 a second
+    KV_CHECK(c, !strcmp(krome_model_text(e, scn, "spun"), "1"));
+    // At rest it stays: nothing painted, nothing asked, no second event.
+    paints = krome_stats(e).paints;
+    frames(e, 60);
+    KV_CHECK(c, krome_stats(e).paints == paints && !strcmp(krome_model_text(e, scn, "spun"), "1"));
+    // Still again (fps 0): the record goes with the play.
+    krome_set(e, scn, "fps", 0.0);
+    frames(e, 2);
+    KV_CHECK(c, s.plays.len == 0);
+    k.free();
+    engine_shutdown(e);
+}
+
 } // namespace
 
 void test_pictures(kv::TestCtx& c) {
     test_regions(c);
     test_regions_kim(c);
     test_fit(c);
+    test_frames(c);
+    test_frames_playing(c);
 }

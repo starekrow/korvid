@@ -192,9 +192,17 @@ struct KromeFont { Name path; u32 px; Handle asset; bool ready; };
 // An image node's asset: a texture, or a shape (a path to an .svg or a .kshape), which is
 // rasterized at the size it is drawn (shapes.cc).
 struct KromeImage { Name path; Handle asset; bool ready; bool shape = false; };
-// The part of a w x h image (the file's pixels) a look draws: its region, else the whole.
-// False when the region reaches outside the file.
-bool krome_image_source(const KromeLook& l, f32 w, f32 h, rect2* out);
+// The part of a w x h image (the file's pixels) a look draws: its region, else the whole;
+// of a strip (KromeLook::frames), frame `frame` of it, down or `across`. False when the
+// region reaches outside the file.
+bool krome_image_source(const KromeLook& l, f32 w, f32 h, bool across, u32 frame, rect2* out);
+// The frame a strip's look names while still: `frame` held inside the strip, or frame-at's
+// fraction of it (0 the first, 1 the last); 0 when it names none.
+u32 krome_still_frame(const KromeLook& l);
+// The frame of a strip of `frames` playing at `fps` from frame `from`, `elapsed` seconds
+// since it began, `loops` times (0 for ever): *done once it rests on its last frame; *next
+// the elapsed time its next frame is due (0 at rest, or still).
+u32 krome_strip_frame(u32 frames, u32 from, f32 fps, u32 loops, f64 elapsed, bool* done, f64* next);
 // What an image's look draws of `src` (the file's pixels, from a tw x th file) over `r`
 // (physical pixels) at `scale`, by its fit: one piece stretched, or tiled every `tile`
 // pixels, one at its own size placed by (ax, ay) and clipped to r when larger, or up to nine
@@ -376,6 +384,12 @@ struct KromeModule {
     struct Colors { color bg, bg2, border, shadow, text; f32 opacity; };
     struct Anim { u32 screen, overlay, node; Name id; Colors from, to; f64 start; f32 dur; };
     Array<Anim>         anims;
+    // A strip playing (fps > 0) or come to rest, by node, kept like a transition: begun on the
+    // clock when first painted so (or when what it plays changed: `key`), from its still frame.
+    // `due` is the clock's time of its next frame (0 at rest); `tell` its event, owed once it
+    // rests, fired after the paint; `seen` marks the ones a paint of their tree still found.
+    struct Play { u32 screen, overlay, node; Name id; u64 key; f64 start; u32 from; f64 due; bool done, tell, seen, forever; };
+    Array<Play>         plays;
     f64                 clock = 0.0;      // the Frame cycle's dt summed
     bool                animating = false; // a transition was mid-way when last painted
     vec2                drag_at{-1.0f, -1.0f}; // where a behaviour's drag was last told

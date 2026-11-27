@@ -338,6 +338,7 @@ void krome_shutdown(Engine&, ModuleInstance& self) {
     krome_lua_close(*s);
     krome_free_behaviours(*s);
     s->anims.free();
+    s->plays.free();
 }
 
 // ---- /krome in the CLI --------------------------------------------------------------------------
@@ -595,6 +596,9 @@ bool krome_settled(Engine& e) {
     for (const KromeFont& f : s->fonts) if (!f.ready && !f.asset.is_null()) return false;
     for (const KromeImage& i : s->images) if (!i.ready && !i.asset.is_null()) return false;
     if (s->shape_jobs.len) return false;
+    // A strip that plays some number of times is still changing until it rests; one that
+    // plays for ever never would, and does not hold a picture back.
+    for (const KromeModule::Play& p : s->plays) if (p.due > 0.0 && !p.forever) return false;
     return true;
 }
 

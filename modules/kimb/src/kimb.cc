@@ -227,6 +227,10 @@ constinit const KimbKernelProp k_props[] = {
     {"cursor", KimbType::String, true},
     {"dir", KimbType::Dir, true},
     {"fit", KimbType::String, false},
+    {"fps", KimbType::Number, false},
+    {"frame", KimbType::Number, false},
+    {"frame-at", KimbType::Number, false},
+    {"frames", KimbType::Number, false},
     {"font", KimbType::String, false},
     {"gap", KimbType::Number, true},
     {"grip", KimbType::String, true},
@@ -234,6 +238,7 @@ constinit const KimbKernelProp k_props[] = {
     {"image", KimbType::String, false},
     {"key", KimbType::String, true},
     {"line-height", KimbType::Number, false},
+    {"loops", KimbType::Number, false},
     {"opacity", KimbType::Number, false},
     {"pad", KimbType::Box4, true},
     {"part", KimbType::String, true},
@@ -260,7 +265,7 @@ constinit const KimbKernelProp k_props[] = {
 
 const char* const k_nodes[] = {"box", "text", "image", "hit", "edit"};
 const char* const k_flags[] = {"fill", "clip", "scroll", "disabled", "selected", "hidden", "left", "center", "right", "top", "middle", "bottom",
-                               "subpixel", "nowrap", "multiline", "readonly", "focusable", "nofocus", "secret", "tabs", "pixel"};
+                               "subpixel", "nowrap", "multiline", "readonly", "focusable", "nofocus", "secret", "tabs", "pixel", "across"};
 const char* const k_states[] = {"hover", "pressed", "focused", "disabled", "selected"};
 
 bool in(const char* w, const char* const* list, u32 n) {
