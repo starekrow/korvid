@@ -110,6 +110,10 @@ module "toolchain.android" {
       tag  = "androidemu",
       arch = "x86_64",
       abi  = "x86_64",
+      -- Instruction sets a module's isa_sources are built again for, chosen at start-up, as
+      -- on Linux: x86-64's AVX2, where the guest's CPU has it. No FMA (the pictures would
+      -- differ by machine).
+      isa  = { avx2 = { "-mavx2", "-mno-fma" } },
       test_runner = { "sh", "%{root}/tools/android/emu_test.sh" },
       test_jobs   = 4,
     },

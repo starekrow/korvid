@@ -18,7 +18,28 @@
 void test_user_dirs(kv::TestCtx& c) {
     using namespace kv;
     c.begin("user dirs");
-#if defined(__linux__)
+#if defined(__ANDROID__)
+    // An app's are its files and cache directories; a program under adb's shell (a test)
+    // has no app, and they are under TMPDIR (paths_android.cc).
+    char root[200], want[400];
+    KV_CHECK(c, io_make_temp_dir("korvid-dirs", root, sizeof root));
+    char tmp_copy[512] = {};
+    if (const char* t = getenv("TMPDIR")) format(tmp_copy, sizeof tmp_copy, "%s", t);
+    setenv("TMPDIR", root, 1);
+    {
+        const ModuleDesc* const list[] = {&platform_module};
+        Engine e;
+        KV_CHECK(c, engine_init(e, list));
+        format(want, sizeof want, "%s/Org/App/", root);
+        KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Settings, "Org", "App"), want) && io_is_dir(want));
+        KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Data, "Org", "App"), want));
+        format(want, sizeof want, "%s/cache/Org/App/", root);
+        KV_CHECK(c, !strcmp(platform_user_dir(e, UserDir::Cache, "Org", "App"), want) && io_is_dir(want));
+        engine_shutdown(e);
+    }
+    if (tmp_copy[0]) setenv("TMPDIR", tmp_copy, 1); else unsetenv("TMPDIR");
+    KV_CHECK(c, io_remove_tree(root));
+#elif defined(__linux__)
     char root[200], want[400];
     KV_CHECK(c, io_make_temp_dir("korvid-dirs", root, sizeof root));
     const char* saved_home = getenv("HOME");

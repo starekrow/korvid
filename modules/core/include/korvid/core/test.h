@@ -42,6 +42,9 @@
 #include <mach-o/dyld.h>
 #define KV_TEST_SOURCE_BUNDLED 1
 #endif
+#elif defined(__ANDROID__)
+#include <unistd.h>
+#define KV_TEST_SOURCE_BUNDLED 1
 #endif
 
 namespace kv {
@@ -76,14 +79,19 @@ inline int test_report(const TestCtx& c, const char* exe) {
 
 // The path of `rel`, a file or directory of the source tree by its path from the root
 // ("modules/dejavu/assets/DejaVuSans.ttf"). The root is where this header is: the build
-// names headers by their full paths. An iOS device has no source tree: the test runner
-// copies what the module's test_files lists into source/ beside the executable, and the
-// path is there.
+// names headers by their full paths. An iOS device and Android have no source tree: the
+// test runner copies what the module's test_files lists into source/ beside the
+// executable, and the path is there.
 inline void test_source_path(char* out, usize cap, const char* rel) {
 #if defined(KV_TEST_SOURCE_BUNDLED)
     char exe[1024];
+#if defined(__ANDROID__)
+    ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    exe[n > 0 ? n : 0] = 0;
+#else
     uint32_t n = sizeof exe;
     if (_NSGetExecutablePath(exe, &n) != 0) exe[0] = 0;
+#endif
     if (char* slash = strrchr(exe, '/')) *slash = 0;
     format(out, cap, "%s/source/%s", exe, rel);
 #else

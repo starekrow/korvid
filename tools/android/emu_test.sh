@@ -65,6 +65,19 @@ if [ -f "$bin/$name.assets" ]; then
     done
   fi
 fi
+# What it reads of the source tree (module.lua's test_files), named by <suite>.files beside
+# it, the root on its first line: into bin/source/, beside the executable, where
+# test_source_path looks on Android. Suites that list the same file send it once (the lock).
+if [ -f "$bin/$name.files" ]; then
+  root=$(head -n 1 "$bin/$name.files" | tr -d '\r')
+  tail -n +2 "$bin/$name.files" | tr -d '\r' | while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    [ -e "$root/$rel" ] || { echo "emu_test: $name.files names $rel, which is not in $root" >&2; exit 2; }
+    to=$dir/bin/source/$(dirname "$rel")
+    ( flock 9; "$adb" shell -n "mkdir -p $to" && "$adb" push --sync "$root/$rel" "$to/" >/dev/null 2>&1 ) </dev/null 9>"$bin/.emu_test.source.lock" ||
+      { echo "emu_test: could not push $rel" >&2; exit 2; }
+  done || exit 2
+fi
 "$adb" push "$exe" "$dir/bin/$name" >/dev/null 2>&1 || { echo "emu_test: could not push $name" >&2; exit 2; }
 
 log=$(mktemp "${TMPDIR:-/tmp}/emu_test.XXXXXX")

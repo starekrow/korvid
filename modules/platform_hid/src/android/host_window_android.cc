@@ -89,6 +89,7 @@ struct DroidApp {
     JNIEnv*        env = nullptr; // the game's thread, attached
     bool           opened = false; // a HostWindow is open
     HostWindow*    host = nullptr; // it, for its surface hook
+    ANativeWindow* soft_window = nullptr; // the surface a software frame's format was set on
 
     // Typed text from Java (KorvidActivity), under the lock: UTF-8 and a count of
     // backspaces, taken by drain. text_on is the game's thread's: a text field wants typing.
@@ -374,6 +375,8 @@ void take_handoffs() {
         // return (and destroy it), and takes the new one after it is ours.
         HostWindow* host = app.opened ? app.host : nullptr;
         if (host && app.window && host->surface_fn_) host->surface_fn_(host->surface_ctx_, nullptr);
+        if (host && host->software_) host->present_software(); // a software frame is not kept across a pump, but never let one dangle
+        app.soft_window = nullptr; // the next surface is set up afresh
         app.window = next;
         if (host) host->native_ = next;
         if (host && next && host->surface_fn_) host->surface_fn_(host->surface_ctx_, next);
@@ -554,6 +557,8 @@ bool HostWindow::open(const WindowDesc& desc) {
 
 void HostWindow::close() {
     if (!native_ && !g_app.opened) return;
+    present_software(); // a frame still locked goes back to its surface
+    g_app.soft_window = nullptr;
     g_app.opened = false;
     g_app.host   = nullptr;
     native_ = nullptr;
@@ -566,9 +571,42 @@ void HostWindow::close() {
 }
 
 void HostWindow::present_blank() {} // the system shows the activity's background
-bool HostWindow::software_frame(SoftwareFrame*) { return false; } // not yet on this host (the CPU renderer PRD's SR21)
-void HostWindow::present_software() {}
-bool HostWindow::software_vsync(bool) { return false; }
+
+// A software window's frames (renderer-cpu): the surface's own buffers, locked for the CPU.
+// The surface is set to RGBX_8888 at the window's size once each time it arrives, and each
+// lock dequeues another buffer of its queue, so last frame's pixels are not in it (rotates).
+// unlockAndPost queues it for the compositor; the next lock waits for a free buffer, which
+// paces the frames by the display's as a swapchain does.
+bool HostWindow::software_frame(SoftwareFrame* out) {
+    DroidApp& app = g_app;
+    if (surface_ != WindowSurface::Software || !app.window || software_) return false;
+    ANativeWindow* w = app.window;
+    if (app.soft_window != w) {
+        if (ANativeWindow_setBuffersGeometry(w, 0, 0, AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM) != 0) {
+            KV_WARN("window", "the surface takes no RGBX_8888 buffers: no software frames");
+            return false;
+        }
+        app.soft_window = w;
+    }
+    ANativeWindow_Buffer b;
+    if (ANativeWindow_lock(w, &b, nullptr) != 0) return false;
+    if (b.format != AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM && b.format != AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM) {
+        ANativeWindow_unlockAndPost(w);
+        KV_WARN("window", "the surface's buffer is format %d, not RGBX_8888: no software frames", b.format);
+        return false;
+    }
+    software_ = w;
+    *out = SoftwareFrame{(u8*)b.bits, (u32)b.width, (u32)b.height, (u32)b.stride * 4u, true, true};
+    return true;
+}
+
+void HostWindow::present_software() {
+    if (!software_) return;
+    ANativeWindow_unlockAndPost((ANativeWindow*)software_);
+    software_ = nullptr;
+}
+
+bool HostWindow::software_vsync(bool on) { return on; } // the buffer queue paces, and cannot be told not to
 // The on-screen keyboard up or down, and typed text wanted or not: KorvidActivity's
 // textInput, which does its work on the UI thread. A package without the class (built
 // without a JDK) has keys and no text.

@@ -20,7 +20,8 @@ configs   { "debug", "dev", "ship" }
 -- beside the GPU backend as its fallback (on iOS, it is what the Simulator's GPU draws with) (docs/PRDs/CPU-Renderer-PRD.md): render's dispatcher takes
 -- the first in the list that can draw here, so the GPU comes first.
 bind "render" { linux = { "renderer-vulkan", "renderer-cpu" }, windows = { "renderer-d3d12", "renderer-cpu" }, macos = { "renderer-metal", "renderer-cpu" },
-                ios = { "renderer-metal", "renderer-cpu" }, iossim = { "renderer-metal", "renderer-cpu" } }
+                ios = { "renderer-metal", "renderer-cpu" }, iossim = { "renderer-metal", "renderer-cpu" },
+                android = { "renderer-vulkan", "renderer-cpu" }, androidemu = { "renderer-vulkan", "renderer-cpu" } }
 
 root "examples" { paths = "examples", platforms = { "linux" } }
 root "tests"    { modules = "*", tests = true, platforms = { "linux" } }
@@ -66,15 +67,16 @@ root "ios" {
 }
 
 -- Android is slice 8 (docs/PRDs/Engine-Slice-8-PRD.md): a phone's arm64 (`android`) and the
--- emulator's x86-64 (`androidemu`), native as iOS is. Brought up a milestone at a time:
--- these are the modules below the window, with their tests, which run inside the running
--- emulator (kormake test androidemu-dev).
+-- emulator's x86-64 (`androidemu`), native as iOS is: the modules the iOS root holds, with
+-- their tests, which run inside the running emulator (kormake test androidemu-dev).
 root "android" {
   modules   = { "lua", "tool", "core", "math", "inflate", "image", "pack", "xml", "platform", "cli", "save", "bulletml",
                 "platform_hid", "window",
                 "render", "asset", "asset_render", "sprite", "scene", "sprite_text", "touchpad", "frameloop", "renderer-vulkan",
                 "platform_audio", "audio", "anim", "collision", "tilemap", "level", "sprite_ui",
-                "testbed", "gallery", "stones", "rocks", "arcanum", "arcfire", "cpukiller", "sockit2m" },
+                "testbed", "gallery", "stones", "rocks", "arcanum", "arcfire", "cpukiller", "sockit2m",
+                "renderer-cpu", "renderer-cpu-raster", "script", "truetype", "dejavu", "typeset", "kim", "kimb", "patherizer",
+                "krome", "kromedemo", "kromescreens" },
   tests     = true,
   platforms = { "android", "androidemu" },
 }

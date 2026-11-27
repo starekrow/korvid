@@ -409,7 +409,9 @@ can use these placeholders:
 - `%{tool}`, `%{in}`, `%{out}`, `%{depfile}`;
 - `%{shader_includes}`: an `-I` for the `shaders/` directory of every module in the
   build, so a game's shader can include the renderer's `sprite_fragment.slangh` by name;
-- `%{triple}`: the consuming toolchain's target triple.
+- `%{triple}`: the consuming toolchain's target triple;
+- `%{dir}`: the directory of the module that exports the rule, for a file of its own
+  the command reads (slang's `cpu_prelude.awk`).
 
 `deps = "depfile"` reads a gcc-style depfile. `platforms = { apple = { ... } }` replaces
 fields for one platform, or for one toolchain family, or for wherever a module is bound to

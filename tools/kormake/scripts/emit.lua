@@ -333,6 +333,8 @@ function M.run(c, g, opts)
         cmd = cmd:gsub("%%{tool}", (util.ninja_escape(program(util.native(tool))):gsub("%%", "%%%%"))):gsub("%%{in}", "$in")
           :gsub("%%{out}", "$out"):gsub("%%{depfile}", "$out.d"):gsub("%%{rsp}", "$out.rsp"):gsub("%%{assets}", "$assets")
           :gsub("%%{shader_includes}", (table.concat(shader_includes, " "):gsub("%%", "%%%%")))
+          -- The exporting tool's own directory, for a file of its that the command reads (a script).
+          :gsub("%%{dir}", (util.ninja_escape(q(util.native(t.instance.module.dir))):gsub("%%", "%%%%")))
         -- The consuming platform's target ("apple-ios26.0-simulator"), for a compiler that
         -- writes code for it (Metal's, through slangc).
         if cmd:find("%{triple}", 1, true) then

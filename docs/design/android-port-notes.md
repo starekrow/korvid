@@ -566,3 +566,54 @@ Not met, or not provable here: anything on arm64 or a real GPU ("What only a dev
 settle", above); pre-rotation (P1, deferred); Windows, macOS and iOS were not built after
 these changes (the two renderer stubs, `probe_xcode`'s `arch`, core's output sink and
 io.cc's mounts all compile on Linux, and none of them was compiled anywhere else).
+
+## Catching up: slices 9 to 13
+
+Android was last brought up in slice 8. What it took to build and run what came after,
+in the emulator as before (Android 16, x86-64).
+
+- **The root** holds what the iOS root does: the CPU renderer and its kernels, script, the
+  text stack (truetype, dejavu, typeset), kim and kimb, patherizer, krome, kromedemo and
+  kromescreens. `render` is bound to renderer-vulkan, then renderer-cpu, as on every other
+  platform; androidemu builds the kernels again for AVX2 as Linux does (`isa` in its
+  per_platform), chosen at start-up.
+- **The I/O ring's sentinel** was named `kNone`, which slice 12's handle table also defined:
+  one unity file holds both now. Renamed `kNoOp`, as the Apple ring's is.
+- **The CPU renderer's game shaders.** slangc's C++ prelude is pasted text with the C
+  headers it includes already expanded, as the libc slangc was built against had them:
+  glibc's `<math.h>` and the rest, from this Linux host's slangc. On Linux they sit behind
+  guards that shader_glue.h's own includes have set; bionic's guards are other names and
+  glibc's text does not compile. slang's shader_cpu rule has an Android variant that runs
+  `modules/slang/cpu_prelude.awk` over the output, putting back the prelude's `#include`s
+  in place of the pasted text. kormake's tool rules gained `%{dir}`, the exporting module's
+  directory, to name the script.
+- **A software window.** `software_frame` locks the surface's next buffer
+  (`ANativeWindow_lock`, RGBX_8888 at the window's size, set once each time a surface
+  arrives) and `present_software` posts it. Each lock is another buffer of the queue, so
+  the frames rotate; the queue's wait for a free buffer paces them by the display. A
+  surface taken away while a frame is locked gets it back first.
+- **Tests that read the source tree** (fonts, reference pictures, krome's icons): the runner
+  pushes what `<suite>.files` lists into `bin/source/` beside the executable, and
+  `test_source_path` looks there on Android, as on an iOS device.
+- **user_dir_test** checked Linux's XDG directories on Android (`__linux__` is defined
+  there too); it checks Android's own now: under `TMPDIR` for a program with no app.
+
+### What ran
+
+- `kormake test androidemu-dev`: all 37 suites. patherizer's corpus hash is Linux's
+  (`866c2af2152dfe1b`). `android-dev` (arm64) builds.
+- testbed with `--renderer cpu`: 60 fps at 2424x1080, drawn at half the pixels and scaled
+  up; the screen matches the Vulkan one, colours included. arcfire's menu with its game
+  shaders and post pass on the CPU: 57 to 60 fps.
+- kromedemo and kromescreens on Vulkan: 60 fps, 0 validation errors.
+- window `--round` draws its disc (the window takes no shape: it is the screen). `--two`,
+  `--two-script` and `--snap` are refused, as on iOS: a phone has one window, and the OS
+  places it.
+
+### Not done
+
+- krome on a phone: the game's touchpad overlay is drawn over krome's UI, and krome lays
+  out under the camera cutout rather than inside `safe_insets`.
+- The software path honours no `software_size`: the surface could be set smaller and
+  scaled up by the compositor, but that scaling is filtered, not nearest-neighbour.
+- `HostWindow::wait` is still slice 12's 4 ms poll here.

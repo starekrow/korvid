@@ -56,6 +56,15 @@ module "slang" {
       bound   = "renderer-cpu",
       command = "%{tool} %{in} %{shader_includes} -target cpp -entry cs_span -stage compute -depfile %{depfile} -o %{out}",
       deps    = "depfile",
+      platforms = {
+        -- Android (toolchain.android's family): slangc's prelude carries the C headers of
+        -- the libc it was built against, pasted in, and bionic is not that libc.
+        -- cpu_prelude.awk puts the prelude's #includes back in their place.
+        android = {
+          command = "%{tool} %{in} %{shader_includes} -target cpp -entry cs_span -stage compute -depfile %{depfile} -o %{out} " ..
+                    "&& awk -f %{dir}/cpu_prelude.awk %{out} > %{out}.tmp && mv %{out}.tmp %{out}",
+        },
+      },
       wrap    = {
         { match = "post_fragment.slangh", text = '#include "cpu_begin.slangh"\n#include "%{in}"\n#include "cpu_post.slangh"\n' },
         { text = '#include "cpu_begin.slangh"\n#include "%{in}"\n#include "cpu_sprite.slangh"\n' },
