@@ -73,7 +73,7 @@ void test_runtime_types(kv::TestCtx& c) {
     KV_CHECK(c, engine_add_event_type(e, "nobody", bad) == 0); // no such module
 
     Heard h;
-    Traced tr;
+    [[maybe_unused]] Traced tr; // the hook is a dev build's
     KV_CHECK(c, engine_listen(e, id, on_line, &h));
 #if KV_DEV
     engine_set_event_hook(e, trace_hook, &tr);

@@ -20,9 +20,24 @@
 static const uint kStarts = kBucketCount;
 static const uint kVisible = 2 * kBucketCount;
 
+#if defined(KV_TARGET_METAL)
+// Metal: slang's Metal library gives every kernel in this file every groupshared array,
+// and its GPU validation (MTL_SHADER_VALIDATION with MTL_DEBUG_LAYER) counts them all,
+// twice over: 59 KB a kernel, past the 32 KB a threadgroup may have. The kernels share
+// two pools instead, 16 KB in all, sliced as each uses them: A is the histogram or the key
+// sort's keys; B is the scatter's keys and then the scan's sums, or the key sort's rows.
+// Every other target keeps its arrays apart, as each kernel there is given only its own.
+groupshared uint sPoolA[kKeySortMax]; // kBucketCount
+groupshared uint sPoolB[kKeySortMax]; // kBlockRows + kGroup
+#define sHist   sPoolA
+#define sKeys   sPoolB
+#define SCAN(i) sPoolB[kBlockRows + (i)]
+#else
 groupshared uint sHist[kBucketCount];
 groupshared uint sScan[kGroup];
 groupshared uint sKeys[kBlockRows];
+#define SCAN(i) sScan[i]
+#endif
 
 // The bucket of a row, or kCulled when dead, out of range, or outside the view.
 uint bucket_of_row(uint i) {
@@ -45,15 +60,15 @@ void scan_hist(uint t) {
     uint a[kPerThread];
     uint sum = 0;
     for (uint j = 0; j < kPerThread; ++j) { a[j] = sHist[kPerThread * t + j]; sum += a[j]; }
-    sScan[t] = sum;
+    SCAN(t) = sum;
     GroupMemoryBarrierWithGroupSync();
     for (uint off = 1; off < kGroup; off <<= 1) {
-        uint v = t >= off ? sScan[t - off] : 0;
+        uint v = t >= off ? SCAN(t - off) : 0;
         GroupMemoryBarrierWithGroupSync();
-        sScan[t] += v;
+        SCAN(t) += v;
         GroupMemoryBarrierWithGroupSync();
     }
-    uint run = sScan[t] - sum;
+    uint run = SCAN(t) - sum;
     for (uint j = 0; j < kPerThread; ++j) { sHist[kPerThread * t + j] = run; run += a[j]; }
     GroupMemoryBarrierWithGroupSync();
 }
@@ -152,8 +167,13 @@ void cs_scatter(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID) {
 
 // ---- the key sort: within a bucket, by each row's key, then by row ------------------------------
 
+#if defined(KV_TARGET_METAL)
+#define sKeyK sPoolA // the pools above
+#define sKeyR sPoolB
+#else
 groupshared uint sKeyK[kKeySortMax];
 groupshared uint sKeyR[kKeySortMax];
+#endif
 
 // A float as a uint that sorts the same way.
 uint orderable(float f) {

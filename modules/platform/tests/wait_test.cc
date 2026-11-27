@@ -115,6 +115,10 @@ void test_wait(kv::TestCtx& c) {
         client.write_str("y");
         client.flush();
         KV_CHECK(c, platform_wait(e, 0.1) == PlatformWoken::Time);
+        // Read here, not left for a later read to take with what follows: loopback on macOS
+        // can deliver the next byte after the wait it ends, and one left over spoils the
+        // standing watch's counts below.
+        KV_CHECK(c, server.read(buf, sizeof buf) == 1);
         // A handle knows what it names, and a watch takes each kind as this OS can. A
         // real file (a lock's) and a real child's pipes: every handle here is one the
         // platform issued, as any holder's is.

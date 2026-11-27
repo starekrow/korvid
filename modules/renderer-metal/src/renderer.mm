@@ -84,6 +84,7 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     r->start_time  = time_now();
     r->validation  = desc.validation;
     r->vsync       = desc.vsync;
+    r->transparent = desc.transparent;
     r->want_width  = desc.width;
     r->want_height = desc.height;
 
@@ -97,6 +98,9 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
         if (ok) r->layer = mt_platform_layer(r->window, &r->metal_view);
         if (ok && !r->layer) ok = false;
         if (ok) configure_layer(r, r->layer);
+        // A transparent window (slice 13, KR39): Core Animation composites a layer that is not
+        // opaque with its alpha, premultiplied, as the sprite and UI blends keep the frame.
+        if (ok && r->transparent) r->layer.opaque = NO;
         ok = ok && rb_gpu_profile_create(r);
         ok = ok && rc_create_pools(r);
         ok = ok && rb_create_tables(r, desc.sprite_rows > kInitialSpriteRows ? desc.sprite_rows : kInitialSpriteRows);
@@ -116,9 +120,10 @@ Renderer* renderer_create(Engine& engine, const RendererDesc& desc) {
     // Validation is the environment's on Metal (MTL_DEBUG_LAYER, MTL_SHADER_VALIDATION, read
     // when the device is made); say whether it is on, so a debug run knows.
     const char* layer_env = getenv("MTL_DEBUG_LAYER");
-    KV_INFO("metal", "renderer up on '%s': %u frames in flight, %u texture slots, %u material rows, %u buckets; API validation %s",
+    KV_INFO("metal", "renderer up on '%s': %u frames in flight, %u texture slots, %u material rows, %u buckets; API validation %s%s",
             r->device.name.UTF8String, kFramesInFlight, kMaxTextures, kMaxMaterials, kBucketCount,
-            layer_env && layer_env[0] == '1' ? "on" : "off (MTL_DEBUG_LAYER=1 turns it on)");
+            layer_env && layer_env[0] == '1' ? "on" : "off (MTL_DEBUG_LAYER=1 turns it on)",
+            r->transparent ? "; the layer is not opaque: its alpha shows what is behind" : "");
     return r;
 }
 

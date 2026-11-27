@@ -102,6 +102,7 @@ bool sdl_composited(SDL_Window* w, bool x11_alpha) {
     if (!(SDL_GetWindowFlags(w) & SDL_WINDOW_TRANSPARENT)) return false;
     if (strcmp(SDL_GetCurrentVideoDriver(), "x11") != 0) return true;
 #if defined(__APPLE__)
+    (void)x11_alpha;
     return true;
 #else
     SDL_PropertiesID props = SDL_GetWindowProperties(w);

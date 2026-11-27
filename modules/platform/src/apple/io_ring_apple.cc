@@ -38,14 +38,14 @@ struct RingOp {
 
 struct RingCompletion { u64 user; i32 res; u32 op; };
 
-constexpr u32 kNone = 0xFFFFFFFFu;
+constexpr u32 kNoOp = 0xFFFFFFFFu;
 
 } // namespace
 
 struct IoRing {
     u32                  entries = 0;
     RingOp*              ops = nullptr;          // `entries` of them, free or in flight
-    u32                  free_head = kNone;
+    u32                  free_head = kNoOp;
     u32*                 pending = nullptr;      // ops pushed since the last enter
     u32                  pending_count = 0;
     u32                  in_flight = 0;          // pushed and not yet popped
@@ -74,11 +74,11 @@ void ring_work(void* ctx) {
 }
 
 void ring_push(IoRing* r, Handle fd, void* buf, u32 len, u64 offset, u64 user, bool write) {
-    KV_ASSERT(r->free_head != kNone); // the queue asks can_push first
+    KV_ASSERT(r->free_head != kNoOp); // the queue asks can_push first
     u32 i = r->free_head;
     RingOp& op = r->ops[i];
     r->free_head = op.next_free;
-    op = RingOp{r, (int)os_handle_value(fd), buf, len, write, offset, user, kNone};
+    op = RingOp{r, (int)os_handle_value(fd), buf, len, write, offset, user, kNoOp};
     r->pending[r->pending_count++] = i;
     ++r->in_flight;
 }
@@ -94,7 +94,7 @@ IoRing* io_ring_create(u32 entries) {
     r->pending = alloc_items<u32>(mem_general(), entries);
     r->completions = alloc_items<RingCompletion>(mem_general(), entries);
     if (!r->ops || !r->pending || !r->completions) { io_ring_destroy(r); return nullptr; }
-    for (u32 i = 0; i < entries; ++i) r->ops[i].next_free = i + 1 < entries ? i + 1 : kNone;
+    for (u32 i = 0; i < entries; ++i) r->ops[i].next_free = i + 1 < entries ? i + 1 : kNoOp;
     r->free_head = 0;
     // User-initiated: a game is waiting on these (a level, a texture), more than utility work.
     dispatch_queue_attr_t attr = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_CONCURRENT, QOS_CLASS_USER_INITIATED, 0);

@@ -30,9 +30,9 @@ struct RendererDesc {
     // The window is a transparent one (HostWindow::transparent()): the frame's alpha is
     // presented, premultiplied, and what is clear shows what is behind. The clear colour
     // is taken as premultiplied: {0, 0, 0, 0} is nothing. Where the backend or the surface
-    // cannot, the frame is opaque and the backend logs it once. Vulkan does it, and D3D12
-    // (through DirectComposition); the CPU renderer and Metal do not yet
-    // (docs/PRDs/Engine-Slice-13-PRD.md).
+    // cannot, the frame is opaque and the backend logs it once. Vulkan does it, D3D12
+    // (through DirectComposition) and Metal (a layer that is not opaque); the CPU renderer
+    // does not yet (docs/PRDs/Engine-Slice-13-PRD.md).
     bool  transparent   = false;
     bool  validation    = KV_DEBUG != 0; // request the validation layers when present
     u32   sprite_rows   = 0;       // the sprite tables' first size, a hint (0: the backend's default); they grow past it
