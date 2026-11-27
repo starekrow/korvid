@@ -341,7 +341,7 @@ In Lua: the helpers (and `edit`, with `bind = "key"`), `model`, `emit(name, valu
 
 Properties: layout `w`, `h` (a number, a percentage, `hug`, `fill`, a range), `pad`, `gap`,
 `dir`, `anchor`, `l`, `t`, `r`, `b` (a stack child's edges), `x`, `y` (its offset), `scroll` (`x`, `y` or `xy`), `tooltip`, `context`, `behave`, `taborder`,
-`key` (a shortcut), `step`, `range` (Lua's form of a node's `1..99`), `arrived` (an event), `marquee`, `marquee-step`, `marquee-mode`, `marquee-gap`, `marquee-pause`; an edit's `placeholder`,
+`key` (a shortcut), `step`, `range` (Lua's form of a node's `1..99`), `arrived` (an event), `marquee`, `marquee-step`, `marquee-mode`, `marquee-gap`, `marquee-pause`, `mask`, `mask-color`, `mask-value`, `mask-index`; an edit's `placeholder`,
 `change`, `blur`; `cursor`; `grip` (`move`, an edge or corner by compass point, `none`); any of them `@key` (bound to the model); look `bg`, `bg2` (a gradient to it), `angle`, `radius` (one, two
 or four), `border`, `border-color`, `shadow` (x y blur [spread]), `shadow-color`, `color`,
 `opacity`, `font`, `size`, `line-height`, `image`, `region` (x, y, w, h), `fit` (`stretch`,
@@ -366,6 +366,22 @@ its ancestors, can be seen in a window that is seen. Hidden, it starts again fro
 when shown; its text changed, likewise. The flag `marquee-drag` lets the pointer drag it; it
 moves on from where it was left when released. Anywhere but a one-line text, `marquee=` is an
 error.
+
+**Masks** (slice 8, KR33). A press, a hover and a tooltip go by a node's shape, not its
+rect, two ways. The flag `mask-alpha` on an image node: a point is in it only where its
+image's alpha there, through its region, frame and fit, is over a half, so a press on a round
+button's clear corner falls to what is under it. A shared mask: `mask="skin/map.png"` on any
+node stretches that image over its rect for the nodes inside, and each says which part is its
+own, `mask-color=#ff0000` (its colour there, exactly), `mask-value=12` (its red channel, for a
+mask that numbers its regions as greys) or `mask-index=12` (a palette PNG's index, as XMPlay
+draws its maps); such a node is hit where the mask matches, whatever its own rect, and needs
+no size. Each mask is read as a blob and decoded by the image module into bytes Krome keeps,
+one copy a path however many nodes name it (an image's own alpha alone, a byte a pixel, for
+`mask-alpha`: the asset module keeps no pixels once a texture is up, so that is a second
+decode). Asked for when its node is first painted; until it lands, a `mask-alpha` node is its
+rect and a mask's share is nowhere. A share with no `mask=` above it, and `mask-alpha` on
+what is not an image, are errors. Capture, the release and Tab follow the node as before;
+the window's grips still see rects.
 
 **Images and shapes.** `image="hero.png"` draws a texture. A path ending `.svg` (or
 `.kshape`) draws a shape: the svg module's cook of it, rasterized by patherizer at the node's
@@ -446,7 +462,7 @@ kromescreens do). They are drawn on a 20 px grid: 20 is their size, and smaller 
 
 Flags: `fill`, `clip`, `scroll`, `disabled`, `selected`, `hidden`, the alignments,
 `subpixel`, `nowrap`, `multiline`, `readonly`, `focusable`, `nofocus`, `secret`, `tabs`,
-`pixel` (inherited), `across`, `marquee-drag`. The
+`pixel` (inherited), `across`, `marquee-drag`, `mask-alpha`. The
 vocabulary is fixed (`modules/kimb`); `prop name type` in a prelude types a definition's
 parameter.
 

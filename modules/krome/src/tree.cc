@@ -423,6 +423,25 @@ const char* KromeTree::set(u32 node, const char* prop, const KromeValue& v, Krom
                 return nullptr;
             }
         }
+        if (!strcmp(prop, "mask")) {
+            if (v.kind != KromeValue::String) return "mask takes an image's asset path, or none";
+            n.mask = !strcmp(v.s, "none") ? Name{} : name_intern(v.s);
+            return nullptr;
+        }
+        if (!strcmp(prop, "mask-color")) {
+            color c;
+            if (!color_value(v, &c)) return "mask-color takes a color";
+            auto byte = [](f32 f) { return (u32)(f * 255.0f + 0.5f); };
+            n.mask_match = KromeMaskMatch::Color;
+            n.mask_key = byte(c.r) << 16 | byte(c.g) << 8 | byte(c.b);
+            return nullptr;
+        }
+        if (!strcmp(prop, "mask-value") || !strcmp(prop, "mask-index")) {
+            if (v.kind != KromeValue::Number || v.n < 0 || v.n > 255 || v.n != (f32)(u32)v.n) return prop[5] == 'v' ? "mask-value takes a whole number from 0 to 255" : "mask-index takes a whole number from 0 to 255";
+            n.mask_match = prop[5] == 'v' ? KromeMaskMatch::Value : KromeMaskMatch::Index;
+            n.mask_key = (u32)v.n;
+            return nullptr;
+        }
         if (!strcmp(prop, "arrived")) {
             if (v.kind != KromeValue::String) return "an event takes a name";
             n.arrived = name_intern(v.s);
@@ -530,7 +549,8 @@ const char* KromeTree::flag(u32 node, const char* w) {
                                {"subpixel", KROME_SUBPIXEL}, {"nowrap", KROME_NOWRAP},
                                {"multiline", KROME_MULTILINE}, {"readonly", KROME_READONLY},
                                {"focusable", KROME_FOCUSABLE}, {"nofocus", KROME_NOFOCUS}, {"secret", KROME_SECRET}, {"tabs", KROME_TABS},
-                               {"pixel", KROME_PIXEL}, {"across", KROME_ACROSS}, {"marquee-drag", KROME_MARQUEE_DRAG}};
+                               {"pixel", KROME_PIXEL}, {"across", KROME_ACROSS}, {"marquee-drag", KROME_MARQUEE_DRAG},
+                               {"mask-alpha", KROME_MASK_ALPHA}};
     for (const Bit& b : bits) if (!strcmp(w, b.word)) { n.flags |= b.bit; dirty = true; return nullptr; }
     if (!strcmp(w, "left"))   { n.align_x = KromeAlign::Start; dirty = true; return nullptr; }
     if (!strcmp(w, "center")) { n.align_x = KromeAlign::Center; dirty = true; return nullptr; }

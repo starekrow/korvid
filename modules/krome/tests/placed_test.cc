@@ -9,6 +9,8 @@
 #include "korvid/core/kbor.h"
 #include "korvid/core/time.h"
 #include "korvid/kim/kim.h"
+#include "korvid/image/png.h"
+#include "../../image/tests/png_data.h" // k_png_pal4: a palette image whose indexes are known
 #include "korvid/platform/module.h"
 #include "korvid/platform_hid/module.h"
 #include <stdlib.h>
@@ -503,6 +505,125 @@ void test_marquee_kim(TestCtx& c) {
     engine_shutdown(e);
 }
 
+// Masks (KR33): presses by coordinate on a shared mask's colours, a value and a palette's
+// index, and on an image's own alpha.
+void provide_png(Engine& e, const char* path, const u8* rgba, u32 w, u32 h) {
+    Array<u8> png{};
+    const char* why = nullptr;
+    if (!png_encode(rgba, w, h, 4, png, &why)) KV_ERROR("test", "%s: %s", path, why);
+    krome_provide(e, path, png.data, png.len);
+    png.free();
+}
+
+const char* k_masks = R"lua(
+return {
+  model = { pressed = "" },
+  on = { hit = function(id) model.pressed = id end },
+  root = box { dir = "stack",
+    box { id = "under", event = "hit", w = 200, h = 200 },
+    box { id = "map", mask = "t/map.png", w = 40, h = 20, dir = "stack",
+      hit { id = "play", ["mask-color"] = "#ff0000", event = "hit", w = 40, h = 20 },
+      hit { id = "stop", ["mask-color"] = "#00ff00", event = "hit", w = 40, h = 20 },
+      hit { id = "seek", ["mask-value"] = 200, event = "hit" },
+    },
+    box { id = "pal", mask = "t/pal.png", y = 40, w = 50, h = 30, dir = "stack",
+      hit { id = "five", ["mask-index"] = 5, event = "hit" },
+    },
+    box { id = "again", mask = "t/map.png", y = 100, w = 40, h = 20,
+      hit { id = "play2", ["mask-color"] = "#ff0000", event = "hit" },
+    },
+    image { id = "round", image = "t/round.png", ["mask-alpha"] = true, event = "hit", x = 100, w = 40, h = 40,
+            hover = { gain = 1.2 } },
+  },
+}
+)lua";
+
+void test_masks(TestCtx& c) {
+    c.begin("krome placed: masks for the pointer");
+    Engine e;
+    KV_CHECK(c, engine_init(e, k_list));
+    KromeModule& s = *krome_state(e);
+    krome_viewport(e, 300, 200, 1.0f);
+    // The map: 4 x 2, two columns red, one green, one (200, 10, 10) for mask-value.
+    u8 map[4 * 2 * 4];
+    for (u32 y = 0; y < 2; ++y)
+        for (u32 x = 0; x < 4; ++x) {
+            u8* p = map + (y * 4 + x) * 4;
+            p[0] = x < 2 ? 255 : x == 2 ? 0 : 200; p[1] = x == 2 ? 255 : x == 3 ? 10 : 0; p[2] = x == 3 ? 10 : 0; p[3] = 255;
+        }
+    provide_png(e, "t/map.png", map, 4, 2);
+    // A palette image, 5 x 3, its indexes 0 1 2 3 4 / 3 4 5 6 7 / 6 7 8 9 10.
+    krome_provide(e, "t/pal.png", k_png_pal4, sizeof k_png_pal4);
+    // A round button's image, 4 x 4: its corners clear.
+    u8 round[4 * 4 * 4];
+    for (u32 i = 0; i < 16; ++i) {
+        u32 x = i % 4, y = i / 4;
+        bool corner = (x == 0 || x == 3) && (y == 0 || y == 3);
+        round[i * 4] = 200; round[i * 4 + 1] = 200; round[i * 4 + 2] = 200; round[i * 4 + 3] = corner ? 0 : 255;
+    }
+    provide_png(e, "t/round.png", round, 4, 4);
+    krome_provide(e, "t/masks.lua", k_masks, strlen(k_masks));
+    Name scn = krome_open(e, "t/masks.lua");
+    for (u32 i = 0; i < 100 && !krome_ready(e, scn); ++i) frames(e, 1);
+    frames(e, 3);
+    KV_CHECK(c, krome_ready(e, scn));
+    KromeScreen& sc = *krome_screen(s, scn);
+    auto under = [&](f32 x, f32 y) -> const char* {
+        krome_pointer(s, x, y, false, 0.0f, false);
+        u32 n = s.under.node;
+        return s.under.screen == sc.id && n != KROME_NONE && !sc.tree.nodes[n].id.is_null() ? name_str(sc.tree.nodes[n].id) : "";
+    };
+    auto press = [&](f32 x, f32 y) -> const char* {
+        krome_pointer(s, x, y, false, 0.0f, false);
+        krome_pointer(s, x, y, true, 0.0f, false);
+        krome_pointer(s, x, y, false, 0.0f, false);
+        return krome_model_text(e, scn, "pressed");
+    };
+    // Two buttons with the same rect, and one with none: each takes what its colour covers.
+    KV_CHECK(c, !strcmp(press(5, 5), "play") && !strcmp(press(15, 15), "play"));
+    KV_CHECK(c, !strcmp(press(25, 5), "stop"));
+    KV_CHECK(c, !strcmp(press(35, 15), "seek"));
+    // A palette's index: texel (2, 1) of the 50 x 30 is index 5; (1, 1) is 4, no one's.
+    KV_CHECK(c, !strcmp(press(25, 55), "five"));
+    KV_CHECK(c, !strcmp(under(15, 55), "pal") && !strcmp(press(15, 55), "five")); // the mask's own box: nothing pressed
+    // One copy a path, however many nodes name it; the image's alpha its own.
+    KV_CHECK(c, !strcmp(press(5, 105), "play2"));
+    u32 maps = 0;
+    for (const KromeModule::Mask& m : s.masks) if (m.path == name_intern("t/map.png")) ++maps;
+    KV_CHECK(c, maps == 1 && s.masks.len == 3);
+    // A press on the round button's clear corner goes to what is under it.
+    KV_CHECK(c, !strcmp(press(104, 4), "under"));
+    KV_CHECK(c, !strcmp(press(120, 20), "round"));
+    KV_CHECK(c, !strcmp(press(136, 36), "under"));
+    // Hovered over its shape, not its rect: the brightened look only there.
+    KV_CHECK(c, !strcmp(under(120, 20), "round"));
+    u32 rn = krome_find(sc.tree, name_intern("round"));
+    KV_CHECK(c, sc.tree.resolve_look(rn, KromeState::Hover, nullptr).gain[0] > 1.19f);
+    KV_CHECK(c, !strcmp(under(103, 37), "under"));
+    engine_shutdown(e);
+}
+
+// Mistakes: a share of a mask with none above it, and mask-alpha on what is not an image.
+void test_masks_kim(TestCtx& c) {
+    c.begin("krome placed: masks in .kim");
+    Engine e;
+    KV_CHECK(c, engine_init(e, k_list));
+    krome_viewport(e, 300, 200, 1.0f);
+    krome_clear_errors(e);
+    const char* good =
+        "screen main { box dir=stack {\n"
+        "  box mask=\"t/map.png\" { hit mask-color=#ff0000 -> play }\n"
+        "  hit mask-value=7\n"
+        "  box mask-alpha\n"
+        "} }\n";
+    Name scn = open_kim(c, e, "t/mk.kim", good, "main");
+    frames(e, 3);
+    KV_CHECK(c, krome_ready(e, scn));
+    KV_CHECK(c, has_error(e, "t/mk.kim:3: mask-value= is a share of a mask, and no node above this one has mask="));
+    KV_CHECK(c, has_error(e, "t/mk.kim:4: mask-alpha is an image's own alpha, and this is not an image"));
+    engine_shutdown(e);
+}
+
 } // namespace
 
 void test_placed(TestCtx& c) {
@@ -513,4 +634,6 @@ void test_placed(TestCtx& c) {
     test_marquee_offsets(c);
     test_marquee(c);
     test_marquee_kim(c);
+    test_masks(c);
+    test_masks_kim(c);
 }

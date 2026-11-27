@@ -18,7 +18,7 @@ bool fail(const char** error, const char* why) { if (error) *error = why; return
 
 } // namespace
 
-bool png_decode(const void* data, usize size, Allocator* pixels, PngImage& out, const char** error) {
+bool png_decode(const void* data, usize size, Allocator* pixels, PngImage& out, const char** error, bool indexes) {
     const u8* p = (const u8*)data;
     static const u8 sig[8] = {0x89, 'P', 'N', 'G', 13, 10, 26, 10};
     if (size < 8 + 25 || memcmp(p, sig, 8) != 0) return fail(error, "not a PNG");
@@ -108,6 +108,10 @@ bool png_decode(const void* data, usize size, Allocator* pixels, PngImage& out, 
     usize out_len = (usize)w * h * 4;
     u8* rgba = (u8*)alloc_in(pa, out_len);
     if (!rgba) return fail(error, "out of memory");
+    usize index_len = (usize)w * h;
+    u8* index = indexes && ctype == 3 ? (u8*)alloc_in(pa, index_len) : nullptr;
+    if (indexes && ctype == 3 && !index) { free_in(pa, rgba, out_len); return fail(error, "out of memory"); }
+    auto bad_index = [&] { free_in(pa, rgba, out_len); if (index) free_in(pa, index, index_len); return fail(error, "palette index out of range"); };
     for (u32 y = 0; y < h; ++y) {
         const u8* src = raw + y * (stride + 1) + 1;
         u8* dst = rgba + (usize)y * w * 4;
@@ -116,7 +120,8 @@ bool png_decode(const void* data, usize size, Allocator* pixels, PngImage& out, 
             for (u32 x = 0; x < w; ++x, dst += 4) {
                 u32 v = (src[x / per] >> (8 - depth * (x % per + 1))) & mask;
                 if (ctype == 0) { dst[0] = dst[1] = dst[2] = (u8)(v * 255 / mask); dst[3] = 255; continue; }
-                if (v >= plte_n) { free_in(pa, rgba, out_len); return fail(error, "palette index out of range"); }
+                if (v >= plte_n) return bad_index();
+                if (index) index[(usize)y * w + x] = (u8)v;
                 dst[0] = plte[v * 3]; dst[1] = plte[v * 3 + 1]; dst[2] = plte[v * 3 + 2];
                 dst[3] = v < trns_n ? trns[v] : 255;
             }
@@ -128,7 +133,8 @@ bool png_decode(const void* data, usize size, Allocator* pixels, PngImage& out, 
             case 2: dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2]; dst[3] = 255; break;
             case 3: {
                 u32 i = src[0];
-                if (i >= plte_n) { free_in(pa, rgba, out_len); return fail(error, "palette index out of range"); }
+                if (i >= plte_n) return bad_index();
+                if (index) index[(usize)y * w + x] = (u8)i;
                 dst[0] = plte[i * 3]; dst[1] = plte[i * 3 + 1]; dst[2] = plte[i * 3 + 2];
                 dst[3] = i < trns_n ? trns[i] : 255;
                 break;
@@ -141,6 +147,7 @@ bool png_decode(const void* data, usize size, Allocator* pixels, PngImage& out, 
     out.width  = w;
     out.height = h;
     out.rgba   = rgba;
+    out.index  = index;
     return true;
 }
 

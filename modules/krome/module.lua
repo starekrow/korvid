@@ -2,7 +2,7 @@
 -- Screens are trees of four kernel node types laid out with rows, columns and stacks,
 -- drawn on the renderer's UI primitive, wired up in a Lua state of Krome's own.
 module "krome" {
-  deps          = { "core", "math", "platform", "platform_hid", "cli", "render", "asset", "asset_render", "lua", "kimb", "typeset", "dejavu", "patherizer" },
+  deps          = { "core", "math", "platform", "platform_hid", "cli", "render", "asset", "asset_render", "lua", "kimb", "typeset", "dejavu", "patherizer", "image" }, -- image: a mask's PNG decoded on the CPU (slice 8)
   test_deps     = { "kim" }, -- a test compiles .kim text, as goldberg does
   test_files    = { "modules/dejavu/assets/DejaVuSans.ttf" }, -- the edit test's face
   engine_module = true,

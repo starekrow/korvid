@@ -381,3 +381,33 @@ In review of the draft (Nov 26):
   view has a record that asks for nothing; stepped by 8, 15 wakes in 4 s on multiples of 8;
   hidden, no record and no wakes in 3 s, and shown again from its rest; dragged 25 pixels,
   held, released and on from there. The `.kim` words, and the two mistakes by line.
+
+**Milestone 5, Masks for the pointer** (Nov 26).
+
+- **For review, 3: `mask-index` is built.** The image module's PNG decoder read palettes and
+  handed back only RGBA; asked (`png_decode(..., indexes)`), it now gives a palette image's
+  indexes too, a byte a pixel (`PngImage::index`), and none for any other image.
+- **For review, 5: the second decode stays.** `asset_render` frees a texture's pixels as soon
+  as they are uploaded (`texture.cc`), so nothing on the CPU has them: `mask-alpha` reads the
+  file again as a blob and keeps its alpha alone. Keeping every texture's pixels for the few
+  masked ones was not worth it.
+- **Held once** (`KromeModule::Mask`): by path and kind (an image's alpha, or a mask's RGBA
+  with its indexes), from what `krome_provide` gave or a blob, decoded when it lands and kept
+  until shutdown. A file that will not decode is said once, `as a mask: ...`. Asked for when
+  its node is first painted.
+- **`hit_node`** carries the nearest `mask=` above it and its rect down the tree (`HitCtx`). A
+  node with `mask-color`, `mask-value` or `mask-index` is in where the mask's pixel under the
+  point matches, whatever its rect; one with `mask-alpha` is in its rect only where the alpha
+  under the point, through `krome_image_source` (its region and the frame shown) and
+  `krome_image_pieces` (its fit, a tile's repeat), is over 127. Everything above the hit (the
+  press, the release, hover, tooltips, the cursor) follows from `s.under` as it did.
+- **Mistakes**: a share with no `mask=` above it, `mask-alpha` on what is not an image.
+- **Not done:** the window's grips are still rects, so a masked button inside a `grip=move`
+  area is the program's only over its rect, and a mask's share with no rect of its own is in
+  no grip list. A mask is not reloaded when its file changes.
+- **Tested** (`placed_test.cc`), with presses by coordinate: two buttons with the same rect on
+  a 4 x 2 map, each taking its colour; a third with no rect by `mask-value`; a palette PNG's
+  index 5 (the image module's own 4-bit fixture), and index 4 next to it, which is no one's;
+  the same map named twice, one copy; a 4 x 4 round button whose clear corners fall through
+  to the box under it, the middle its own; hovered on its shape and not its corner, with its
+  `hover { gain=1.2 }`. `image_tests`: the indexes of the 4-bit palette fixture, none for gray.

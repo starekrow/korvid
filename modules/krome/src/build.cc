@@ -744,6 +744,14 @@ void node(Build& b, const KimbFile& f, const JsonValue& n, u32 parent, const Kro
         else error(b, fr, f.file, line, "%s= places a child of a stack, and this one's parent is a %s", said, t.nodes[parent].dir == KromeDir::Row ? "row" : "col");
         t.nodes[id].tied = 0;
     }
+    // A node's share of a mask needs a mask above it; its own alpha needs an image.
+    if (t.nodes[id].mask_match != KromeMaskMatch::None) {
+        bool above = false;
+        for (u32 a = parent; a != KROME_NONE && !above; a = t.nodes[a].parent) above = !t.nodes[a].mask.is_null();
+        static const char* const words[] = {"", "mask-color", "mask-value", "mask-index"};
+        if (!above) error(b, fr, f.file, line, "%s= is a share of a mask, and no node above this one has mask=", words[(u32)t.nodes[id].mask_match]);
+    }
+    if ((t.nodes[id].flags & KROME_MASK_ALPHA) && type != KromeType::Image) error(b, fr, f.file, line, "mask-alpha is an image's own alpha, and this is not an image");
     // A marquee is a one-line text's.
     if (t.nodes[id].marquee > 0.0f && (type != KromeType::Text || !(t.nodes[id].flags & KROME_NOWRAP))) {
         error(b, fr, f.file, line, "marquee= moves a one-line text, and this is %s", type != KromeType::Text ? "not a text" : "a text without nowrap");

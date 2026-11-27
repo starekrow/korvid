@@ -4,6 +4,8 @@
 // (docs/PRDs/Krome-Slice-1-PRD.md, "Paint and the display list", "Input and overlays").
 #include "internal.h"
 #include "korvid/asset/shape.h"
+#include "korvid/asset/blob.h"
+#include "korvid/image/png.h"
 #include "korvid/typeset/typeset.h"
 #include "korvid/core/arena.h"
 #include "korvid/asset/font.h"
@@ -683,6 +685,9 @@ void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u3
     f32 scale = p.s.scale;
     rect2 r = krome_pixel_rect(n.rect, scale);
     KromeImage* ki = n.type == KromeType::Image && (l.set & KROME_LOOK_IMAGE) ? image_for(p.s, l.image) : nullptr;
+    // Masks are asked for when first painted, so they are in before the pointer comes.
+    if (!n.mask.is_null()) krome_mask(p.s, n.mask, false);
+    if ((n.flags & KROME_MASK_ALPHA) && ki) krome_mask(p.s, l.image, true);
     const TextureAsset* img = ready_texture(p.s, ki);
     const ShapeAsset* shp = ready_shape(p.s, ki);
     // A strip's frame: played on the clock whether its file is in yet or not.
@@ -975,19 +980,94 @@ void paint_tree(KromeModule& s, KromeScreen& sc, const KromeTree& t, u32 overlay
 
 // ---- the pointer ------------------------------------------------------------------------------------------
 
-// The deepest node under (x, y), physical pixels; later children are over earlier ones.
-u32 hit_node(const KromeTree& t, u32 node, f32 x, f32 y, f32 scale, rect2 clip) {
+// ---- masks (KR33) ----------------------------------------------------------------------------------------
+
+// What a hit test carries down a tree: the module (for masks and strips), whose tree it is,
+// and the nearest shared mask above, with the rect it is stretched over.
+struct HitCtx {
+    KromeModule& s;
+    u32 screen, overlay;
+    Name mask;
+    rect2 mask_rect;
+};
+
+// Whether (x, y) is in a node by its share of the mask above it: the mask's pixel there,
+// stretched over its owner's rect, is its colour, value or index. Nowhere until it has landed.
+bool in_shared_mask(HitCtx& h, const KromeNode& n, f32 x, f32 y) {
+    if (h.mask.is_null()) return false;
+    const KromeModule::Mask* m = krome_mask(h.s, h.mask, false);
+    rect2 r = h.mask_rect;
+    if (!m || !(r.w > 0.0f && r.h > 0.0f)) return false;
+    i32 tx = (i32)floor((x - r.x) / r.w * (f32)m->w), ty = (i32)floor((y - r.y) / r.h * (f32)m->h);
+    if (tx < 0 || ty < 0 || tx >= (i32)m->w || ty >= (i32)m->h) return false;
+    usize at = (usize)ty * m->w + (usize)tx;
+    const u8* p = m->px + at * 4;
+    switch (n.mask_match) {
+    case KromeMaskMatch::Color: return ((u32)p[0] << 16 | (u32)p[1] << 8 | p[2]) == n.mask_key;
+    case KromeMaskMatch::Value: return p[0] == n.mask_key;
+    case KromeMaskMatch::Index: return m->index && m->index[at] == n.mask_key;
+    case KromeMaskMatch::None: break;
+    }
+    return false;
+}
+
+// Whether (x, y), inside an image node's rect, is on its image's opaque part (`mask-alpha`):
+// its alpha there, through its region, frame and fit, over a half. Its rect while the
+// pixels have not landed.
+bool in_own_alpha(HitCtx& h, const KromeTree& t, u32 node, const KromeNode& n, rect2 r, f32 x, f32 y) {
+    KromeLook l = t.resolve_look(node, KromeState::Base, nullptr);
+    if (n.type != KromeType::Image || !(l.set & KROME_LOOK_IMAGE)) return true;
+    const KromeModule::Mask* m = krome_mask(h.s, l.image, true);
+    if (!m) return true;
+    f32 tw = (f32)m->w, th = (f32)m->h;
+    // The frame shown: a playing strip's, else its still one.
+    u32 frame = krome_still_frame(l);
+    for (const KromeModule::Play& pl : h.s.plays)
+        if (pl.screen == h.screen && pl.overlay == h.overlay && pl.node == node && l.fps > 0.0f) {
+            bool done = false;
+            f64 next = 0.0;
+            frame = krome_strip_frame(l.frames, pl.from, l.fps, l.loops, h.s.clock - pl.start, &done, &next);
+        }
+    rect2 src;
+    if (!krome_image_source(l, tw, th, (n.flags & KROME_ACROSS) != 0, frame, &src)) return false;
+    KromeImagePieces pieces;
+    krome_image_pieces(l, src, tw, th, r, h.s.scale, n.align_x, n.align_y, pieces);
+    for (u32 i = 0; i < pieces.count; ++i) {
+        rect2 pr = pieces.rect[i];
+        if (!inside(pr, x, y)) continue;
+        f32 u = (x - pr.x) / pr.w, v = (y - pr.y) / pr.h;
+        if (pieces.tile.x > 0.0f && pieces.tile.y > 0.0f) {
+            u = fmod(x - pr.x, pieces.tile.x) / pieces.tile.x;
+            v = fmod(y - pr.y, pieces.tile.y) / pieces.tile.y;
+        }
+        const rect2& uv = pieces.uv[i];
+        i32 tx = (i32)floor((uv.x + u * uv.w) * tw), ty = (i32)floor((uv.y + v * uv.h) * th);
+        if (tx < 0 || ty < 0 || tx >= (i32)m->w || ty >= (i32)m->h) return false;
+        return m->px[(usize)ty * m->w + (usize)tx] > 127;
+    }
+    return false; // outside every piece: a natural image smaller than its rect
+}
+
+// The deepest node under (x, y), physical pixels; later children are over earlier ones. A
+// node's own place is its rect, but for one that is its share of a mask above it (whatever
+// its rect), and one with `mask-alpha`, its image's opaque part.
+u32 hit_node(HitCtx& h, const KromeTree& t, u32 node, f32 x, f32 y, f32 scale, rect2 clip) {
     const KromeNode& n = t.nodes[node];
     if ((n.flags & KROME_HIDDEN) || !inside(clip, x, y)) return KROME_NONE;
     rect2 r = krome_pixel_rect(n.rect, scale);
     rect2 inner = (n.flags & (KROME_CLIP | KROME_SCROLL)) ? intersect(clip, r) : clip;
+    HitCtx below = h;
+    if (!n.mask.is_null()) { below.mask = n.mask; below.mask_rect = r; }
     u32 best = KROME_NONE;
     for (u32 ch = n.first; ch != KROME_NONE; ch = t.nodes[ch].next) {
-        u32 h = hit_node(t, ch, x, y, scale, inner);
-        if (h != KROME_NONE) best = h;
+        u32 hn = hit_node(below, t, ch, x, y, scale, inner);
+        if (hn != KROME_NONE) best = hn;
     }
     if (best != KROME_NONE) return best;
-    return inside(r, x, y) ? node : KROME_NONE;
+    if (n.mask_match != KromeMaskMatch::None) return in_shared_mask(h, n, x, y) ? node : KROME_NONE;
+    if (!inside(r, x, y)) return KROME_NONE;
+    if ((n.flags & KROME_MASK_ALPHA) && !in_own_alpha(h, t, node, n, r, x, y)) return KROME_NONE;
+    return node;
 }
 
 // Screens top first: a higher layer, then the later opened.
@@ -1173,12 +1253,14 @@ KromeTarget hit(KromeModule& s, f32 x, f32 y) {
         for (u32 k = sc.overlays.len; k > 0; --k) {
             KromeOverlay& o = *sc.overlays[k - 1];
             if (o.passive) continue; // a tooltip: the pointer goes through it
-            u32 h = o.tree.root != KROME_NONE ? hit_node(o.tree, o.tree.root, x, y, s.scale, k_everywhere) : KROME_NONE;
+            HitCtx ctx{s, sc.id, o.id, Name{}, rect2{}};
+            u32 h = o.tree.root != KROME_NONE ? hit_node(ctx, o.tree, o.tree.root, x, y, s.scale, k_everywhere) : KROME_NONE;
             if (h != KROME_NONE) return KromeTarget{sc.id, o.id, h};
             if (o.modal) return KromeTarget{sc.id, o.id, KROME_NONE};
         }
         if (sc.tree.root == KROME_NONE) continue;
-        u32 h = hit_node(sc.tree, sc.tree.root, x, y, s.scale, k_everywhere);
+        HitCtx ctx{s, sc.id, 0, Name{}, rect2{}};
+        u32 h = hit_node(ctx, sc.tree, sc.tree.root, x, y, s.scale, k_everywhere);
         if (h != KROME_NONE) return KromeTarget{sc.id, 0, h};
     }
     return KromeTarget{};
@@ -1698,8 +1780,11 @@ void krome_view_frame(KromeModule& s) {
     // A large shape a job has finished: its node draws now (its size was known all along).
     if (krome_shapes_land(s, renderer_get(*s.e)))
         for (KromeScreen* sc : s.screens) sc->repaint = true;
+    // A mask that has landed: decoded for the pointer.
+    krome_masks_pump(s);
     // Something still on its way keeps a loop that paces on demand ticking until it lands.
     bool waiting = false;
+    for (const KromeModule::Mask& m : s.masks) if (m.state == 0) waiting = true;
     for (KromeFont& f : s.fonts) if (!f.ready && !f.asset.is_null()) waiting = true;
     for (KromeImage& i : s.images) if (!i.ready && !i.asset.is_null()) waiting = true;
     for (KromeScreen* sc : s.screens) if (sc->loading) waiting = true;
@@ -2019,7 +2104,78 @@ void krome_context_press(KromeModule& s, f32 x, f32 y) {
     }
 }
 
+// ---- masks' pixels (KR33) ------------------------------------------------------------------------------
+
+namespace {
+
+// A mask's bytes decoded into what it keeps: an image's alpha alone, or its RGBA and (a
+// palette image) its indexes. False, said once, when they are no PNG.
+bool take_mask(KromeModule& s, KromeModule::Mask& m, const void* data, usize size) {
+    PngImage img;
+    const char* why = nullptr;
+    if (!png_decode(data, size, s.general, img, &why, !m.alpha)) {
+        krome_error(s, name_str(m.path), 0, nullptr, 0, "as a mask: %s", why ? why : "not a PNG");
+        return false;
+    }
+    usize n = (usize)img.width * img.height;
+    if (m.alpha) {
+        u8* a = (u8*)alloc_in(s.general, n ? n : 1, 1);
+        for (usize i = 0; i < n; ++i) a[i] = img.rgba[i * 4 + 3];
+        free_in(s.general, img.rgba, n * 4);
+        m.px = a;
+    } else {
+        m.px = img.rgba;
+        m.index = img.index;
+    }
+    m.w = img.width;
+    m.h = img.height;
+    return true;
+}
+
+void free_mask(KromeModule& s, KromeModule::Mask& m) {
+    usize n = (usize)m.w * m.h;
+    if (m.px) free_in(s.general, m.px, m.alpha ? (n ? n : 1) : n * 4);
+    if (m.index) free_in(s.general, m.index, n);
+    m.px = m.index = nullptr;
+}
+
+} // namespace
+
+const KromeModule::Mask* krome_mask(KromeModule& s, Name path, bool alpha) {
+    if (path.is_null() || !name_str(path)[0]) return nullptr;
+    for (KromeModule::Mask& m : s.masks) if (m.path == path && m.alpha == alpha) return m.state == 1 ? &m : nullptr;
+    s.masks.alloc = s.general;
+    s.masks.push(KromeModule::Mask{path, alpha, Handle{}, 0, 0, 0, nullptr, nullptr});
+    krome_masks_pump(s); // given from memory, or already read: at once
+    KromeModule::Mask& m = s.masks.last();
+    return m.state == 1 ? &m : nullptr;
+}
+
+void krome_masks_pump(KromeModule& s) {
+    for (KromeModule::Mask& m : s.masks) {
+        if (m.state != 0) continue;
+        bool given = false;
+        for (const KromeModule::Provided& p : s.provided)
+            if (p.path == m.path) { m.state = take_mask(s, m, p.data, p.size) ? 1 : 2; given = true; break; }
+        if (given || !s.e) continue;
+        if (m.blob.is_null()) {
+            m.blob = asset_load_blob(*s.e, name_str(m.path));
+            if (m.blob.is_null()) { krome_error(s, name_str(m.path), 0, nullptr, 0, "as a mask: cannot read it"); m.state = 2; continue; }
+        }
+        const BlobAsset* b = asset_blob(*s.e, m.blob);
+        if (!b) continue;
+        if (b->state == AssetState::Failed) { krome_error(s, name_str(m.path), 0, nullptr, 0, "as a mask: cannot read it (%s)", asset_error_name(b->error)); m.state = 2; continue; }
+        if (b->state == AssetState::Ready) m.state = take_mask(s, m, b->data, b->size) ? 1 : 2;
+    }
+}
+
+void krome_free_masks(KromeModule& s) {
+    for (KromeModule::Mask& m : s.masks) free_mask(s, m);
+    s.masks.free();
+}
+
 void krome_free_view(KromeModule& s) {
+    krome_free_masks(s);
     krome_shapes_free(s, s.e ? renderer_get(*s.e) : nullptr);
     s.fonts.free();
     s.images.free();

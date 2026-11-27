@@ -423,6 +423,12 @@ struct KromeModule {
     // `w` and `room` its text's width and its inside's, logical pixels.
     struct Marquee { u32 screen, overlay, node; Name id; u64 key; f64 start, due; f32 off, w, room, grab_x, grab_off; bool seen, held; };
     Array<Marquee>      marquees;
+    // Masks (KR33): an image's pixels on the CPU, one copy a path however many nodes name it:
+    // a shared mask's RGBA (and a palette image's indexes), or an image's own alpha alone for
+    // `mask-alpha` (`alpha`). Read as a blob, or from what krome_provide gave; `state` 0 while
+    // it loads, 1 ready, 2 failed (said once).
+    struct Mask { Name path; bool alpha; Handle blob; u8 state; u32 w, h; u8* px; u8* index; };
+    Array<Mask>         masks;
     u32                 next_timer = 1;
     u32                 lua_screen = 0; // the screen a behaviour's call (or a timer's) is for, while it runs
     f64                 clock = 0.0;      // the Frame cycle's dt summed
@@ -691,6 +697,12 @@ void krome_wheel(KromeModule& s, f32 dx, f32 dy);
 // the nearest node under it with a `context` event fires it.
 void krome_context_press(KromeModule& s, f32 x, f32 y);
 void krome_free_view(KromeModule& s);
+
+// A mask's pixels (KR33), asked for now if they are not yet; null until they have landed.
+// `alpha`: an image's own alpha, a byte a pixel; else RGBA and, for a palette image, indexes.
+const KromeModule::Mask* krome_mask(KromeModule& s, Name path, bool alpha);
+void krome_masks_pump(KromeModule& s); // what has landed, decoded
+void krome_free_masks(KromeModule& s);
 
 // ---- shapes (shapes.cc) ----
 struct ShapeAsset;

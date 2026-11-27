@@ -75,7 +75,7 @@ Header `korvid/image/png.h`:
 | name | kind | what |
 |---|---|---|
 | `PngImage` | record | `width`, `height`, `rgba` (caller frees) |
-| `png_decode(data, size, alloc, out, &error)` | function | tightly packed RGBA8, or false with a reason |
+| `png_decode(data, size, alloc, out, &error, indexes)` | function | tightly packed RGBA8, or false with a reason; with `indexes`, a palette image's indexes too (`out.index`) |
 | `png_encode(pixels, width, height, channels, out, &error)` | function | appends a PNG of RGB (3) or RGBA (4) pixels to an `Array<u8>`; false for a size or channel count it cannot write |
 
 Header `korvid/image/jpeg.h`:

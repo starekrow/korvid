@@ -22,11 +22,22 @@ void test_png(kv::TestCtx& c) {
     KV_CHECK(c, pal.width == k_png_pal4_w && pal.height == k_png_pal4_h);
     KV_CHECK(c, pal.rgba && memcmp(pal.rgba, k_png_pal4_rgba, sizeof k_png_pal4_rgba) == 0);
     mem_free(pal.rgba);
+    // Asked for, a palette image's indexes too (a mask numbering its regions); none for gray.
+    PngImage idx;
+    KV_CHECK(c, png_decode(k_png_pal4, sizeof k_png_pal4, nullptr, idx, &why, true) && idx.index);
+    static const unsigned char k_indexes[15] = {0, 1, 2, 3, 4, 3, 4, 5, 6, 7, 6, 7, 8, 9, 10};
+    KV_CHECK(c, idx.index && memcmp(idx.index, k_indexes, sizeof k_indexes) == 0);
+    KV_CHECK(c, idx.rgba && memcmp(idx.rgba, k_png_pal4_rgba, sizeof k_png_pal4_rgba) == 0);
+    mem_free(idx.rgba);
+    mem_free(idx.index);
     PngImage gray;
     KV_CHECK(c, png_decode(k_png_gray2, sizeof k_png_gray2, nullptr, gray, &why));
     KV_CHECK(c, gray.width == k_png_gray2_w && gray.height == k_png_gray2_h);
     KV_CHECK(c, gray.rgba && memcmp(gray.rgba, k_png_gray2_rgba, sizeof k_png_gray2_rgba) == 0);
     mem_free(gray.rgba);
+    PngImage gray_idx;
+    KV_CHECK(c, png_decode(k_png_gray2, sizeof k_png_gray2, nullptr, gray_idx, &why, true) && !gray_idx.index);
+    mem_free(gray_idx.rgba);
 
     // Rejections name their reason and allocate nothing.
     MemStats before = mem_stats();

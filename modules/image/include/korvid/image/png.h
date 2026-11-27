@@ -2,7 +2,8 @@
 //
 // Decoding: 8-bit samples, every color type (gray, gray+alpha, RGB, RGBA, palette with or
 // without tRNS), and 1, 2 and 4-bit gray and palette; no 16-bit samples, no interlace;
-// always produces tightly packed RGBA8, top row first. CRCs are not verified. The PRD
+// always produces tightly packed RGBA8, top row first, and for a palette image, when asked,
+// its indexes too (a mask that numbers its regions). CRCs are not verified. The PRD
 // names libpng; this stands in until it is vendored, and the call does not change.
 //
 // Encoding: 8-bit RGB or RGBA, one IDAT, every row filtered by whichever of the five
@@ -18,13 +19,15 @@ struct PngImage {
     u32 width  = 0;
     u32 height = 0;
     u8* rgba   = nullptr; // width * height * 4 bytes, from the allocator given; the caller frees it
+    u8* index  = nullptr; // a palette image's indexes, width * height bytes, when asked for; the caller frees it too
 };
 
 // Decodes [data, data + size) into `out`, whose pixels come from `pixels` (null: the
 // general allocator). Temporaries use the calling thread's scratch and are released
 // before return. On failure returns false, allocates nothing, and sets *error to a
-// static string naming the reason ("not a PNG", "corrupt image data", ...).
-bool png_decode(const void* data, usize size, Allocator* pixels, PngImage& out, const char** error);
+// static string naming the reason ("not a PNG", "corrupt image data", ...). `indexes`: a
+// palette image's indexes as well, a byte a pixel (out.index); null for any other image.
+bool png_decode(const void* data, usize size, Allocator* pixels, PngImage& out, const char** error, bool indexes = false);
 
 // Encodes `width` x `height` pixels of `channels` bytes each (3: RGB, 4: RGBA), tightly
 // packed, top row first, appending the file to `out` (whose allocator it uses). The

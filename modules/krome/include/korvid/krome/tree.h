@@ -148,6 +148,11 @@ constexpr u32 KROME_TABS      = 1u << 16; // an edit that keeps Tab (a code edit
 constexpr u32 KROME_PIXEL     = 1u << 17; // its images, and those of everything under it, are sampled nearest: a skin's pixels stay square
 constexpr u32 KROME_ACROSS    = 1u << 18; // its strip's frames are laid across the image, not down it
 constexpr u32 KROME_MARQUEE_DRAG = 1u << 19; // a marquee the pointer drags; it moves on again when released
+constexpr u32 KROME_MASK_ALPHA = 1u << 20; // an image node is in only where its image is more than half opaque (KR33)
+
+// What part of a shared mask a node is (KR33): its colour there, its red channel, or (a palette
+// image) its index.
+enum class KromeMaskMatch : u8 { None, Color, Value, Index };
 
 // Modifier keys, as a shortcut and a behaviour's key call see them.
 constexpr u32 KROME_MOD_SHIFT = 1u << 0;
@@ -193,6 +198,11 @@ struct KromeNode {
     // each end and before it starts.
     f32        marquee = 0.0f, marquee_step = 0.0f, marquee_gap = 40.0f, marquee_pause = 0.0f;
     bool       marquee_bounce = false;
+    // Masks (KR33): `mask` an image stretched over this node's rect for the nodes inside it;
+    // a node inside is hit where the mask matches `mask_key` (0xRRGGBB, or a value, an index).
+    Name       mask;
+    KromeMaskMatch mask_match = KromeMaskMatch::None;
+    u32        mask_key = 0;
     u32        parent = KROME_NONE, first = KROME_NONE, last = KROME_NONE, next = KROME_NONE;
     u32        text = KROME_NONE;  // content: an offset into KromeTree::strings, as written
     u32        shown = KROME_NONE; // the content with {name} filled in, when someone filled it
