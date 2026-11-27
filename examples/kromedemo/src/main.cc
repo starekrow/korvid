@@ -164,6 +164,9 @@ constinit const Step k_steps[] = {
     {Act::Shot, "gallery_icons", 0, nullptr},
     {Act::Click, "tab_split", 0, nullptr},
     {Act::Shot, "gallery_split", 0, nullptr},
+    {Act::Click, "tab_skin", 0, nullptr},
+    {Act::Shot, "gallery_skin", 0, nullptr},
+    {Act::Click, "tab_split", 0, nullptr},
     {Act::Click, "split", 0, nullptr},       // the splitter takes the focus; the arrows move it
     {Act::Key, "right", 0, ""},
     {Act::Check, "split", 0, "256"},

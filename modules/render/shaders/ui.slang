@@ -5,10 +5,12 @@
 //   region: items, clips, clips' start, 0 | item offsets (bytes from the region) | clips | items
 //   glyph:  head, slot, color, rect x y w h, uv0, uv1                         (9 words)
 //   box:    head, slot, fill, fill2, border color, shadow color, rect x y w h,
-//           radii tl tr br bl, border, angle, shadow x y, blur, spread, uv0 x y, uv1 x y  (24 words)
+//           radii tl tr br bl, border, angle, shadow x y, blur, spread, uv0 x y, uv1 x y,
+//           tile x y  (26 words)
 //
 // head: bits 0-1 the kind (0 box, 1 glyph), 2-17 the clip, 18 a gradient, 19 textured,
-// 20 sampled nearest. Colors are RGBA8 sRGB with straight alpha; a glyph's uvs two unorm16s,
+// 20 sampled nearest, 21 tiled (the uv rect repeated every `tile` pixels from the rect's
+// top left). Colors are RGBA8 sRGB with straight alpha; a glyph's uvs two unorm16s,
 // a box's floats. Pixels have their origin at
 // the window's top left, y down; the window's size is the push block's screen_cull.zw.
 // The output is premultiplied: the pipeline blends one, one minus source alpha.
@@ -28,7 +30,7 @@ static const float2 kQuad[6] = {
 };
 
 static const uint kKindBox = 0u, kKindGlyph = 1u;
-static const uint kBoxGradient = 1u << 18, kBoxTextured = 1u << 19, kBoxNearest = 1u << 20;
+static const uint kBoxGradient = 1u << 18, kBoxTextured = 1u << 19, kBoxNearest = 1u << 20, kBoxTile = 1u << 21;
 
 struct UiVaryings {
     float4 pos : SV_Position;
@@ -152,6 +154,7 @@ float4 fs_ui(UiVaryings i) : SV_Target {
         float4 uvs = ui_float4(i.item + 80u);
         float2 uv0 = uvs.xy, uv1 = uvs.zw;
         float2 at = (i.px - r.xy) / max(r.zw, float2(1e-6, 1e-6));
+        if ((head & kBoxTile) != 0u) at = frac((i.px - r.xy) / ui_float2(i.item + 96u));
         // Held half a texel inside the uv rect: linear sampling at a region's edge would read
         // the texel beside it, which in a sheet is another picture.
         uint tw, th;

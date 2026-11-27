@@ -45,6 +45,9 @@ struct UiBox {
     // The part of the texture drawn over the rect, 0 to 1. Every sample is held half a texel
     // inside it, so a region of a sheet never reads its neighbour.
     rect2 uv{0, 0, 1, 1};
+    // Above 0: the uv rect is drawn this many pixels across and down, repeated from the rect's
+    // top left, the last row and column cut (a tiled background, one box however many tiles).
+    vec2  tile;
     u32   clip = 0;             // UiList::clip's index; 0 is no clip
 };
 

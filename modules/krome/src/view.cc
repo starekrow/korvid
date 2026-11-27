@@ -124,6 +124,58 @@ bool krome_image_source(const KromeLook& l, f32 w, f32 h, rect2* out) {
     return l.region[0] + l.region[2] <= w && l.region[1] + l.region[3] <= h;
 }
 
+KromeFit krome_fit_of(const KromeLook& l) {
+    if (l.set & KROME_LOOK_FIT) return l.fit;
+    return (l.set & KROME_LOOK_SLICE) ? KromeFit::Slice : KromeFit::Stretch;
+}
+
+void krome_image_pieces(const KromeLook& l, rect2 src, f32 tw, f32 th, rect2 r, f32 scale, KromeAlign ax, KromeAlign ay, KromeImagePieces& out) {
+    out = KromeImagePieces{};
+    if (!(tw > 0.0f && th > 0.0f && src.w > 0.0f && src.h > 0.0f)) return;
+    auto uv_of = [&](f32 x, f32 y, f32 w, f32 h) { return rect2{x / tw, y / th, w / tw, h / th}; };
+    auto place = [](KromeAlign a, f32 room, f32 size) { return a == KromeAlign::Start ? 0.0f : a == KromeAlign::Center ? floor((room - size) * 0.5f + 0.5f) : room - size; };
+    switch (krome_fit_of(l)) {
+    case KromeFit::Stretch:
+        out.rect[0] = r; out.uv[0] = uv_of(src.x, src.y, src.w, src.h); out.count = 1;
+        return;
+    case KromeFit::Tile:
+        out.rect[0] = r; out.uv[0] = uv_of(src.x, src.y, src.w, src.h); out.count = 1;
+        out.tile = vec2{src.w * scale, src.h * scale};
+        return;
+    case KromeFit::Natural: {
+        f32 w = floor(src.w * scale + 0.5f), h = floor(src.h * scale + 0.5f);
+        out.rect[0] = rect2{r.x + place(ax, r.w, w), r.y + place(ay, r.h, h), w, h};
+        out.uv[0] = uv_of(src.x, src.y, src.w, src.h);
+        out.count = 1;
+        out.clip = w > r.w || h > r.h;
+        return;
+    }
+    case KromeFit::Slice: break;
+    }
+    // Nine: the borders in the file's pixels, held inside the source; on screen at the scale,
+    // shrunk in proportion where the rect is smaller than they are.
+    f32 b[4];
+    for (u32 i = 0; i < 4; ++i) b[i] = (l.set & KROME_LOOK_SLICE) ? l.slice[i] : 0.0f;
+    if (b[0] + b[2] > src.w) { f32 k = src.w / (b[0] + b[2]); b[0] *= k; b[2] = src.w - b[0]; }
+    if (b[1] + b[3] > src.h) { f32 k = src.h / (b[1] + b[3]); b[1] *= k; b[3] = src.h - b[1]; }
+    f32 d[4];
+    for (u32 i = 0; i < 4; ++i) d[i] = floor(b[i] * scale + 0.5f);
+    if (d[0] + d[2] > r.w) { f32 k = r.w / (d[0] + d[2]); d[0] = floor(d[0] * k + 0.5f); d[2] = r.w - d[0]; }
+    if (d[1] + d[3] > r.h) { f32 k = r.h / (d[1] + d[3]); d[1] = floor(d[1] * k + 0.5f); d[3] = r.h - d[1]; }
+    const f32 dx[4] = {r.x, r.x + d[0], r.x + r.w - d[2], r.x + r.w};
+    const f32 dy[4] = {r.y, r.y + d[1], r.y + r.h - d[3], r.y + r.h};
+    const f32 sx[4] = {src.x, src.x + b[0], src.x + src.w - b[2], src.x + src.w};
+    const f32 sy[4] = {src.y, src.y + b[1], src.y + src.h - b[3], src.y + src.h};
+    for (u32 j = 0; j < 3; ++j)
+        for (u32 i = 0; i < 3; ++i) {
+            f32 w = dx[i + 1] - dx[i], h = dy[j + 1] - dy[j], sw = sx[i + 1] - sx[i], sh = sy[j + 1] - sy[j];
+            if (!(w > 0.0f && h > 0.0f && sw > 0.0f && sh > 0.0f)) continue; // a border of 0: no piece
+            out.rect[out.count] = rect2{dx[i], dy[j], w, h};
+            out.uv[out.count] = uv_of(sx[i], sy[j], sw, sh);
+            ++out.count;
+        }
+}
+
 namespace {
 
 // ---- rects -------------------------------------------------------------------------------------------
@@ -464,22 +516,39 @@ void paint_node(Paint& p, u32 node, const KromeLook* parent, rect2 clip_rect, u3
             b.shadow_spread = l.shadow_spread * scale;
             b.shadow_color = faded(l.shadow_color, l.opacity);
         }
-        if (img) {
-            rect2 src;
-            f32 tw = (f32)img->width, th = (f32)img->height;
-            if (krome_image_source(l, tw, th, &src) && tw > 0.0f && th > 0.0f) {
-                b.textured = true;
-                b.texture = p.r ? renderer_texture_slot(p.r, img->texture) : 0;
-                b.uv = rect2{src.x / tw, src.y / th, src.w / tw, src.h / th};
-                b.nearest = l.pixel;
-                if (!fill) b.fill = faded(l.tint, l.opacity);
-            } else {
-                region_outside(p, node, n, l, img);
-                if (!fill && !edge && !shade) b.fill = color{0, 0, 0, 0};
-            }
+        rect2 src;
+        f32 tw = img ? (f32)img->width : 0.0f, th = img ? (f32)img->height : 0.0f;
+        bool drawn = img && krome_image_source(l, tw, th, &src) && tw > 0.0f && th > 0.0f;
+        if (img && !drawn) region_outside(p, node, n, l, img);
+        KromeImagePieces pieces;
+        if (drawn) krome_image_pieces(l, src, tw, th, r, scale, n.align_x, n.align_y, pieces);
+        // Stretched or tiled, the image is the node's own box, its fill times the texel. In
+        // pieces (natural, slice), the box is drawn under them, and each piece is the tint.
+        bool one = drawn && pieces.count == 1 && (krome_fit_of(l) == KromeFit::Stretch || krome_fit_of(l) == KromeFit::Tile);
+        if (one) {
+            b.textured = true;
+            b.texture = p.r ? renderer_texture_slot(p.r, img->texture) : 0;
+            b.uv = pieces.uv[0];
+            b.tile = pieces.tile;
+            b.nearest = l.pixel;
+            if (!fill) b.fill = faded(l.tint, l.opacity);
         }
         b.clip = clip;
-        if (b.textured || fill || edge || shade) p.list.box(b);
+        if (one || fill || edge || shade) p.list.box(b);
+        if (drawn && !one && pieces.count) {
+            u32 pc = pieces.clip ? p.list.clip(intersect(clip_rect, r)) : clip;
+            for (u32 i = 0; i < pieces.count; ++i) {
+                UiBox pb;
+                pb.rect = pieces.rect[i];
+                pb.uv = pieces.uv[i];
+                pb.textured = true;
+                pb.texture = p.r ? renderer_texture_slot(p.r, img->texture) : 0;
+                pb.nearest = l.pixel;
+                pb.fill = faded(l.tint, l.opacity);
+                pb.clip = pc;
+                p.list.box(pb);
+            }
+        }
     }
     // A shape over the node's own box (its background, border and shadow).
     if (shp && r.w >= 1.0f && r.h >= 1.0f) paint_shape(p, node, n, l, r, *ki, *shp, clip);

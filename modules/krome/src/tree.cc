@@ -163,6 +163,22 @@ bool look_prop(KromeLook& l, const char* prop, const KromeValue& v, const char**
         l.set |= KROME_LOOK_REGION;
         return true;
     }
+    if (!strcmp(prop, "fit")) {
+        static const char* const names[] = {"stretch", "natural", "tile", "slice"};
+        for (u8 i = 0; i < 4; ++i)
+            if (v.kind == KromeValue::String && !strcmp(v.s, names[i])) { l.fit = (KromeFit)i; l.set |= KROME_LOOK_FIT; return true; }
+        *why = "fit takes stretch, natural, tile or slice";
+        return true;
+    }
+    if (!strcmp(prop, "slice")) {
+        // One border all round, or left, top, right, bottom: the file's pixels.
+        if (!numbers(v, f, 4, &n) || (n != 1 && n != 4)) { *why = "slice takes one border, or left, top, right and bottom"; return true; }
+        if (n == 1) f[1] = f[2] = f[3] = f[0];
+        if (f[0] < 0 || f[1] < 0 || f[2] < 0 || f[3] < 0) { *why = "slice takes borders of 0 or more"; return true; }
+        memcpy(l.slice, f, sizeof l.slice);
+        l.set |= KROME_LOOK_SLICE;
+        return true;
+    }
     if (!strcmp(prop, "radius")) {
         if (!numbers(v, f, 4, &n) || n == 3) { *why = "radius takes one, two or four numbers"; return true; }
         if (n == 1) f[1] = f[2] = f[3] = f[0];
@@ -199,6 +215,8 @@ void overlay(KromeLook& to, const KromeLook& from) {
     if (s & KROME_LOOK_SIZE) to.size = from.size;
     if (s & KROME_LOOK_IMAGE) to.image = from.image;
     if (s & KROME_LOOK_REGION) memcpy(to.region, from.region, sizeof to.region);
+    if (s & KROME_LOOK_FIT) to.fit = from.fit;
+    if (s & KROME_LOOK_SLICE) memcpy(to.slice, from.slice, sizeof to.slice);
     if (s & KROME_LOOK_TINT) to.tint = from.tint;
     if (s & KROME_LOOK_LINE_HEIGHT) to.line_height = from.line_height;
     if (s & KROME_LOOK_CARET_COLOR) to.caret_color = from.caret_color;

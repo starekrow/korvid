@@ -103,6 +103,7 @@ screen gallery {
                     tab "Table" id=tab_table @tab=table
                     tab "Split" id=tab_split @tab=split
                     tab "Icons" id=tab_icons @tab=icons
+                    tab "Skin" id=tab_skin @tab=skin
                 }
                 if tab=tree {
                     tree h=fill {
@@ -151,6 +152,21 @@ screen gallery {
                             }
                         }
                         image image="krome/icons/settings.svg" w=280 h=280 color=accent
+                    }
+                }
+                if tab=skin {
+                    // A skin's pictures (Krome slice 7), all from skin.png: its 8 x 8 tile
+                    // repeated from the page's top left, its 24 x 24 frame stretched between
+                    // 8-pixel borders at two sizes, and a button at its own size, centred.
+                    box dir=stack w=fill h=fill pixel {
+                        image "kromedemo/skin.png" region=60,24,8,8 fit=tile w=fill h=fill
+                        col pad=16 gap=16 {
+                            image "kromedemo/skin.png" id=frame_small region=60,0,24,24 slice=8 w=200 h=100
+                            row gap=16 {
+                                image "kromedemo/skin.png" id=frame_large region=60,0,24,24 slice=8 w=400 h=200
+                                image "kromedemo/skin.png" region=0,0,20,20 fit=natural w=60 h=200 center middle
+                            }
+                        }
                     }
                 }
                 if tab=split {

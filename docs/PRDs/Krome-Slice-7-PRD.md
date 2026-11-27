@@ -256,3 +256,32 @@ In review of the draft (Nov 26):
   can be asked for a scale, so the tests stand for them.
 - **Not verified:** Metal and D3D12 (`GetDimensions` on their bindless arrays is untried);
   their `ui` references are stale.
+
+**Milestone 2, Fit** (Nov 26).
+
+- **`fit` and `slice` are a look's**, like `region`, so a state may change them; `slice=`
+  alone slices. What an image draws is one pure function, `krome_image_pieces` (the source
+  rect, the file's size, the node's rect, the scale and its alignment in; up to nine pieces,
+  a tile size and whether to clip out), which paint draws and the test measures without a
+  texture.
+- **`tile` in the shader**, as decided: `UiBox::tile` (head bit 21, two more words: a box is
+  26) is the size of one repeat in pixels; the shader and the CPU renderer take the
+  fraction of the pixel's place over it before the half-texel hold, so a tile's edge never
+  reads its neighbour either. The `ui` scene tiles the sheet over a 150 x 40 box.
+- **`slice` and `natural` are boxes made on the CPU.** Borders are rounded to whole pixels
+  at the scale, so pieces share their edges; a rect smaller than its borders shrinks them in
+  proportion, and the middle goes when it has no room. Each piece is sampled held inside
+  itself, so a border and the middle never blend across their seam. `natural` places the
+  image by the node's own alignment flags and gives it a clip only when it is larger than
+  the rect.
+- **Stretched and tiled images stay the node's box** (its `bg` multiplying the texel, as
+  before: nothing that drew before draws differently); natural and sliced ones draw the box
+  under their pieces, each piece the tint.
+- **Shown.** kromedemo's gallery has a Skin tab: skin.png's tile over the page, its frame at
+  200 x 100 and 400 x 200, a button at its natural size centred in a taller rect; `--demo`
+  takes its picture. The 640 x 480 frame is the test's.
+- **Tested.** The pieces at 200 x 100, 640 x 480 and at scale 2 (corners 8 and 16 pixels), in
+  a rect smaller than the borders (four corners, shrunk), with borders of 0 (three bands);
+  the tile at scale 1.5; natural centred, at the end, and clipped. `renderer_cpu_tests`
+  draws a tile every 4 pixels and reads the row back from the rect's left edge.
+- **Not verified:** Metal and D3D12, as in milestone 1.

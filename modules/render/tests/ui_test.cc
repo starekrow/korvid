@@ -34,6 +34,7 @@ void test_ui_lists(kv::TestCtx& c) {
     b.clip = clip;
     b.nearest = true;
     b.uv = rect2{0.25f, 0.5f, 0.125f, 0.25f};
+    b.tile = vec2{5, 5};
     list.box(b);
     UiGlyph g;
     g.rect = rect2{12, 22, 8, 10};
@@ -42,7 +43,7 @@ void test_ui_lists(kv::TestCtx& c) {
     g.tint = color{1, 1, 1, 1};
     g.clip = 99; // no such clip: none
     list.glyph(g);
-    KV_CHECK(c, list.count() == 2 && list.words.len == 24 + 9 && list.offsets[1] == 24);
+    KV_CHECK(c, list.count() == 2 && list.words.len == 26 + 9 && list.offsets[1] == 26);
 
     RenderWorld w;
     KV_CHECK(c, rw_init(w, mem_general()));
@@ -54,7 +55,7 @@ void test_ui_lists(kv::TestCtx& c) {
     u32 clips_at = word(l, 8);
     KV_CHECK(c, word(l, 0) == 2 && word(l, 4) == 2 && clips_at % 16 == 0 && clips_at >= 16 + 8);
     u32 box = word(l, 16), glyph = word(l, 20);
-    KV_CHECK(c, box == clips_at + 32 && glyph == box + 96);
+    KV_CHECK(c, box == clips_at + 32 && glyph == box + 104);
     KV_CHECK(c, fword(l, clips_at + 16) == 10.0f && fword(l, clips_at + 28) == 200.0f);
     u32 head = word(l, box);
     KV_CHECK(c, (head & 3) == 0 && ((head >> 2) & 0xFFFF) == 1 && (head & (1u << 18)) && !(head & (1u << 19)));
@@ -62,6 +63,7 @@ void test_ui_lists(kv::TestCtx& c) {
     KV_CHECK(c, fword(l, box + 24) == 10.0f && fword(l, box + 36) == 30.0f && fword(l, box + 40) == 15.0f && fword(l, box + 56) == 2.0f);
     KV_CHECK(c, fword(l, box + 72) == 6.0f && word(l, box + 20) >> 24 == 64);
     // Nearest sampling, and the uv rect as floats, its corners.
+    KV_CHECK(c, !(head & (1u << 21)) && fword(l, box + 96) == 0.0f); // untextured: no tile, whatever it says
     KV_CHECK(c, (head & (1u << 20)) && fword(l, box + 80) == 0.25f && fword(l, box + 84) == 0.5f && fword(l, box + 88) == 0.375f && fword(l, box + 92) == 0.75f);
     KV_CHECK(c, word(l, glyph) == 1u && word(l, glyph + 4) == 7 && fword(l, glyph + 12) == 12.0f);
     KV_CHECK(c, word(l, glyph + 28) == (32768u | 16384u << 16) && word(l, glyph + 32) == (40959u | 24576u << 16));

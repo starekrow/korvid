@@ -195,6 +195,21 @@ struct KromeImage { Name path; Handle asset; bool ready; bool shape = false; };
 // The part of a w x h image (the file's pixels) a look draws: its region, else the whole.
 // False when the region reaches outside the file.
 bool krome_image_source(const KromeLook& l, f32 w, f32 h, rect2* out);
+// What an image's look draws of `src` (the file's pixels, from a tw x th file) over `r`
+// (physical pixels) at `scale`, by its fit: one piece stretched, or tiled every `tile`
+// pixels, one at its own size placed by (ax, ay) and clipped to r when larger, or up to nine
+// between its slice's borders, the corners at their own size times the scale (shrunk in
+// proportion when r is smaller than its borders). Pieces' rects are physical pixels, their
+// uvs 0 to 1.
+struct KromeImagePieces {
+    rect2 rect[9];
+    rect2 uv[9];
+    u32   count = 0;
+    vec2  tile{0, 0};
+    bool  clip = false;
+};
+KromeFit krome_fit_of(const KromeLook& l);
+void krome_image_pieces(const KromeLook& l, rect2 src, f32 tw, f32 th, rect2 r, f32 scale, KromeAlign ax, KromeAlign ay, KromeImagePieces& out);
 
 // The shapes' pages (shapes.cc): rasterized shapes packed as glyphs are, a texture each.
 struct KromeShapePage {

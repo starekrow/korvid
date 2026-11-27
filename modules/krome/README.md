@@ -322,7 +322,8 @@ Properties: layout `w`, `h` (a number, a percentage, `hug`, `fill`, a range), `p
 `key` (a shortcut), `step`, `range` (Lua's form of a node's `1..99`); an edit's `placeholder`,
 `change`, `blur`; `cursor`; `grip` (`move`, an edge or corner by compass point, `none`); any of them `@key` (bound to the model); look `bg`, `bg2` (a gradient to it), `angle`, `radius` (one, two
 or four), `border`, `border-color`, `shadow` (x y blur [spread]), `shadow-color`, `color`,
-`opacity`, `font`, `size`, `line-height`, `image`, `region` (x, y, w, h), `tint`, `caret-color`, `selection-color`,
+`opacity`, `font`, `size`, `line-height`, `image`, `region` (x, y, w, h), `fit` (`stretch`,
+`natural`, `tile`, `slice`), `slice` (one border or four), `tint`, `caret-color`, `selection-color`,
 `scrollbar-color`, `scrollbar-track`, `scrollbar-size`, `transition` (seconds: the node's
 colors and opacity ease to what its look resolves to whenever that changes, by state,
 selection, theme or a bound value, on the Frame cycle's clock, turning around from where they
@@ -352,6 +353,17 @@ both sizes, once, when the texture lands, and the image draws nothing. One textu
 every node cut from it. Shapes take no region. The flag `pixel` samples a node's images,
 and those of everything under it, nearest: a skin's pixels stay square at any scale. It is
 the one flag that inherits; a skin sets it at its root.
+
+`fit=` says how an image fills a rect that is not its size: `stretch` (the default) over
+it; `natural` at its own size times the window's scale, placed by the node's alignment
+(`center`, `bottom`, ...), clipped to the rect; `tile` repeated from the rect's top left, the
+last row and column cut, as one box (the shader wraps the sample, so a large rect of a small
+tile costs nothing more); `slice` stretched between fixed borders, `slice=8` or left, top,
+right, bottom in the file's pixels (`slice=` alone slices): up to nine boxes, the corners at
+their own size times the scale, none where a border is 0, all shrunk in proportion in a rect
+smaller than they are. Each applies to the region. Stretched or tiled, the image is the
+node's own box (its `bg`, if any, multiplies it, as before); natural and sliced, the box is
+drawn under the pieces and each piece is the `tint`.
 
 **Icons** (`krome/icons/<name>.svg`): Material Symbols, Outlined, weight 400, 20 px (Apache
 2.0, `icons/LICENSE`; the list and the pinned commit in `icons/README.md`): `check`,

@@ -143,9 +143,75 @@ void test_regions_kim(TestCtx& c) {
     engine_shutdown(e);
 }
 
+bool rect_is(rect2 r, f32 x, f32 y, f32 w, f32 h) {
+    if (r.x == x && r.y == y && r.w == w && r.h == h) return true;
+    KV_ERROR("test", "rect (%g, %g, %g, %g), wanted (%g, %g, %g, %g)", r.x, r.y, r.w, r.h, x, y, w, h);
+    return false;
+}
+
+// Fit (KR31): how an image fills a rect that is not its size, as the pieces paint draws.
+// The sheet is 84 x 40: a 24 x 24 frame at (60, 0) with 8-pixel borders, a 20 x 20 button
+// at (0, 0).
+void test_fit(TestCtx& c) {
+    c.begin("krome pictures: fit");
+    KromeTree t;
+    t.init(mem_general());
+    u32 img = t.add(KromeType::Image);
+    KV_CHECK(c, t.set(img, "fit", KromeValue::str("tiles")) != nullptr);
+    KV_CHECK(c, t.set(img, "slice", KromeValue::nums(Nums<2>{{8, 8}}.v, 2)) != nullptr);
+    KV_CHECK(c, t.set(img, "slice", KromeValue::num(-1)) != nullptr);
+    KV_CHECK(c, krome_fit_of(t.resolve_look(img, KromeState::Base, nullptr)) == KromeFit::Stretch);
+    KV_CHECK(c, t.set(img, "slice", KromeValue::num(8)) == nullptr);
+    KromeLook frame = t.resolve_look(img, KromeState::Base, nullptr);
+    KV_CHECK(c, krome_fit_of(frame) == KromeFit::Slice); // slice= alone slices
+    const rect2 src{60, 0, 24, 24};
+    KromeImagePieces p;
+
+    // The frame at 200 x 100 and at 640 x 480: the corners 8 x 8, the edges and middle stretched.
+    krome_image_pieces(frame, src, 84, 40, rect2{10, 20, 200, 100}, 1.0f, KromeAlign::Start, KromeAlign::Start, p);
+    KV_CHECK(c, p.count == 9 && !p.clip && p.tile.x == 0.0f);
+    KV_CHECK(c, rect_is(p.rect[0], 10, 20, 8, 8) && rect_is(p.rect[2], 202, 20, 8, 8) && rect_is(p.rect[6], 10, 112, 8, 8) && rect_is(p.rect[8], 202, 112, 8, 8));
+    KV_CHECK(c, rect_is(p.rect[4], 18, 28, 184, 84) && rect_is(p.rect[1], 18, 20, 184, 8));
+    KV_CHECK(c, rect_is(p.uv[0], 60.0f / 84, 0, 8.0f / 84, 8.0f / 40) && rect_is(p.uv[4], 68.0f / 84, 8.0f / 40, 8.0f / 84, 8.0f / 40));
+    krome_image_pieces(frame, src, 84, 40, rect2{0, 0, 640, 480}, 1.0f, KromeAlign::Start, KromeAlign::Start, p);
+    KV_CHECK(c, p.count == 9 && rect_is(p.rect[0], 0, 0, 8, 8) && rect_is(p.rect[8], 632, 472, 8, 8) && rect_is(p.rect[4], 8, 8, 624, 464));
+    // At twice the scale the corners are twice the pixels: the same logical size.
+    krome_image_pieces(frame, src, 84, 40, rect2{0, 0, 400, 200}, 2.0f, KromeAlign::Start, KromeAlign::Start, p);
+    KV_CHECK(c, p.count == 9 && rect_is(p.rect[0], 0, 0, 16, 16) && rect_is(p.rect[8], 384, 184, 16, 16));
+    // Smaller than its borders: they shrink in proportion, and the middle is gone.
+    krome_image_pieces(frame, src, 84, 40, rect2{0, 0, 10, 6}, 1.0f, KromeAlign::Start, KromeAlign::Start, p);
+    KV_CHECK(c, p.count == 4 && rect_is(p.rect[0], 0, 0, 5, 3) && rect_is(p.rect[3], 5, 3, 5, 3));
+    // Borders of 0 make no piece: top and bottom only, three bands.
+    KV_CHECK(c, t.set(img, "slice", KromeValue::nums(Nums<4>{{0, 8, 0, 8}}.v, 4)) == nullptr);
+    krome_image_pieces(t.resolve_look(img, KromeState::Base, nullptr), src, 84, 40, rect2{0, 0, 100, 50}, 1.0f, KromeAlign::Start, KromeAlign::Start, p);
+    KV_CHECK(c, p.count == 3 && rect_is(p.rect[0], 0, 0, 100, 8) && rect_is(p.rect[1], 0, 8, 100, 34) && rect_is(p.rect[2], 0, 42, 100, 8));
+
+    // Tiled: one piece, the tile at the scale, from the rect's top left.
+    KV_CHECK(c, t.set(img, "fit", KromeValue::str("tile")) == nullptr);
+    krome_image_pieces(t.resolve_look(img, KromeState::Base, nullptr), rect2{60, 24, 8, 8}, 84, 40, rect2{0, 0, 640, 480}, 1.5f, KromeAlign::Start, KromeAlign::Start, p);
+    KV_CHECK(c, p.count == 1 && rect_is(p.rect[0], 0, 0, 640, 480) && p.tile.x == 12.0f && p.tile.y == 12.0f);
+    KV_CHECK(c, rect_is(p.uv[0], 60.0f / 84, 24.0f / 40, 8.0f / 84, 8.0f / 40));
+
+    // Natural: its own size at the scale, placed by the node's alignment, clipped when larger.
+    KV_CHECK(c, t.set(img, "fit", KromeValue::str("natural")) == nullptr);
+    KromeLook nat = t.resolve_look(img, KromeState::Base, nullptr);
+    krome_image_pieces(nat, rect2{0, 0, 20, 20}, 84, 40, rect2{10, 10, 100, 50}, 2.0f, KromeAlign::Center, KromeAlign::Center, p);
+    KV_CHECK(c, p.count == 1 && !p.clip && rect_is(p.rect[0], 40, 15, 40, 40));
+    krome_image_pieces(nat, rect2{0, 0, 20, 20}, 84, 40, rect2{10, 10, 100, 50}, 2.0f, KromeAlign::End, KromeAlign::Start, p);
+    KV_CHECK(c, rect_is(p.rect[0], 70, 10, 40, 40));
+    krome_image_pieces(nat, rect2{0, 0, 20, 20}, 84, 40, rect2{10, 10, 30, 30}, 2.0f, KromeAlign::Start, KromeAlign::Start, p);
+    KV_CHECK(c, p.clip && rect_is(p.rect[0], 10, 10, 40, 40));
+    // Stretched, the default: one piece over the rect.
+    KV_CHECK(c, t.set(img, "fit", KromeValue::str("stretch")) == nullptr);
+    krome_image_pieces(t.resolve_look(img, KromeState::Base, nullptr), src, 84, 40, rect2{0, 0, 33, 44}, 1.0f, KromeAlign::Start, KromeAlign::Start, p);
+    KV_CHECK(c, p.count == 1 && rect_is(p.rect[0], 0, 0, 33, 44) && p.tile.x == 0.0f);
+    t.free();
+}
+
 } // namespace
 
 void test_pictures(kv::TestCtx& c) {
     test_regions(c);
     test_regions_kim(c);
+    test_fit(c);
 }

@@ -31,6 +31,9 @@ enum class KromeType  : u8 { Box, Text, Image, Hit, Edit };
 enum class KromeDir   : u8 { Row, Col, Stack };
 enum class KromeSize  : u8 { Hug, Fill, Fixed, Percent }; // Percent: `value` percent of the parent's inside
 enum class KromeAlign : u8 { Start, Center, End };
+// How an image fills a rect that is not its size (`fit=`): stretched over it, at its own size
+// at the node's alignment, repeated from its top left, or stretched between fixed borders.
+enum class KromeFit   : u8 { Stretch, Natural, Tile, Slice };
 
 // The states a look may differ in. Base is the node's own look.
 enum class KromeState : u8 { Base, Hover, Pressed, Focused, Disabled, Selected, Count };
@@ -62,6 +65,8 @@ struct KromeLook {
     f32   size = 0.0f;                     // font size, logical pixels
     Name  image;                           // an image node's texture, by asset path
     f32   region[4] = {};                  // x, y, w, h in the file's pixels: the part of it drawn (set: KROME_LOOK_REGION)
+    KromeFit fit = KromeFit::Stretch;      // unset with `slice` set: Slice
+    f32   slice[4] = {};                   // fit=slice's borders: left, top, right, bottom, in the file's pixels
     color tint{1, 1, 1, 1};
     f32   line_height = 0.0f;              // a text's lines, times its size; 0: the font's own
     color caret_color{0, 0, 0, 0};         // an edit's caret; unset: its text's color
@@ -96,6 +101,8 @@ constexpr u32 KROME_LOOK_SCROLLBAR_TRACK = 1u << 18;
 constexpr u32 KROME_LOOK_SCROLLBAR_SIZE = 1u << 19;
 constexpr u32 KROME_LOOK_TRANSITION = 1u << 20;
 constexpr u32 KROME_LOOK_REGION   = 1u << 21;
+constexpr u32 KROME_LOOK_FIT      = 1u << 22;
+constexpr u32 KROME_LOOK_SLICE    = 1u << 23;
 constexpr u32 KROME_LOOK_INHERITED = KROME_LOOK_COLOR | KROME_LOOK_FONT | KROME_LOOK_SIZE | KROME_LOOK_LINE_HEIGHT;
 
 // Node flags.

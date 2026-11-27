@@ -322,6 +322,8 @@ bool prepare_ui(Renderer* r, const UiView& v, const u8* region, const u8* item, 
             u.uvd[1] = uv1[1] - u.uv0[1];
             u.tex = texture_of(r, word_at(item + 4));
             u.nearest = (head & (1u << 20)) != 0;
+            u.tiled = (head & (1u << 21)) != 0;
+            if (u.tiled) { u.tile[0] = float_at(item + 96); u.tile[1] = float_at(item + 100); }
             // fs_ui's hold: half a texel inside the uv rect.
             f32 hw = 0.5f / (f32)(u.tex.width ? u.tex.width : 1), hh = 0.5f / (f32)(u.tex.height ? u.tex.height : 1);
             for (u32 k = 0; k < 2; ++k) {

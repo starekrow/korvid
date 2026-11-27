@@ -171,6 +171,29 @@ void test_region(TestCtx& c) {
                 blue += px[0] != 0;
             }
     KV_CHECK(c, red == 36 + 64 + 121 + 36 + 121 && blue == 0);
+    // Tiled (KR31): two blue texels and two red, every 4 pixels from the rect's left edge,
+    // the last cut: blue, blue, red, red, blue, blue, red, red, blue, blue, red.
+    ui.clear();
+    UiBox tb;
+    tb.rect = rect2{3, 2, 11, 4};
+    tb.fill = color{1, 1, 1, 1};
+    tb.textured = true;
+    tb.nearest = true;
+    tb.texture = rb_cpu::renderer_texture_slot(r, t);
+    tb.uv = rect2{2.0f / 12.0f, 0, 4.0f / 12.0f, 1};
+    tb.tile = vec2{4, 4};
+    ui.box(tb);
+    rb_cpu::renderer_ui_set(r, 0, ui);
+    KV_CHECK(c, rb_cpu::renderer_render(r, v));
+    char row[12] = {};
+    for (u32 x = 0; x < 11; ++x) {
+        const u8* px = r->headless.data + (3 * 64 + 3 + x) * 4;
+        row[x] = px[0] == 255 && px[2] == 0 ? 'b' : px[2] == 255 && px[0] == 0 ? 'r' : '?';
+    }
+    KV_CHECK(c, !strcmp(row, "bbrrbbrrbbr"));
+    if (strcmp(row, "bbrrbbrrbbr")) KV_ERROR("test", "the tiled row: %s", row);
+    const u8* past = r->headless.data + (3 * 64 + 14) * 4; // the rect ends: the clear
+    KV_CHECK(c, past[0] == 0 && past[2] == 0);
     ui.free();
     rb_cpu::renderer_destroy(r);
     engine_shutdown(e);

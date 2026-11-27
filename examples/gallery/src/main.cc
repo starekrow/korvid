@@ -561,6 +561,12 @@ void scene_ui(Gallery& g, UiList& l) {
         cell.uv = rect2{4.0f / 12.0f, 0, 4.0f / 12.0f, 1};
         l.box(cell);
     }
+    // Tiled (Krome slice 7): the sheet's two blue columns and two of the checker, every 12
+    // pixels from the box's top left, nearest, the last column and row cut.
+    UiBox tiled = ui_box(384, 432, 150, 40, white);
+    tiled.textured = true; tiled.nearest = true; tiled.texture = renderer_texture_slot(g.r, g.sheet);
+    tiled.uv = rect2{2.0f / 12.0f, 0, 4.0f / 12.0f, 1}; tiled.tile = vec2{12, 12};
+    l.box(tiled);
     UiBox badge = ui_box(800, 280, 120, 120, white);
     badge.textured = true; badge.texture = renderer_texture_slot(g.r, g.badge); badge.uv = rect2{0, 0, 1, 1};
     l.box(badge);
