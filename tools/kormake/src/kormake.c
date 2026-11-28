@@ -12,7 +12,7 @@
 #include "os.h"
 #include "scripts.inc"
 
-#define KORMAKE_VERSION "1.2"
+#define KORMAKE_VERSION "1.3"
 
 /* The platform this kormake runs on: what "host" means in a target or a module's platforms. */
 #if defined(__linux__)

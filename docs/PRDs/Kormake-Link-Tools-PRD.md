@@ -595,3 +595,28 @@ Settled Nov 27, 2026, before the work began:
 - **Building engine tools in each project.** Kept as designed: each project builds the
   engine's tools it runs in its own `build/`. One central build of the tools that every
   project shared would be more surprising than one more build of kpack.
+
+## Status
+
+Built Nov 27, 2026 on branch `toolpaths`, milestones 0, 1, 2, 4 and 5, on Linux. Kormake is
+1.3, and the master file requires it (module files use `publish`).
+
+- **Not done: milestone 3, Windows.** There was no Windows compiler on the machine the work
+  was done on, so none of it was compiled. `os_win32.c`'s new functions (hard links,
+  `LockFileEx`, `SetEnvironmentVariableW`) are written but not built. In the shim,
+  `run_child`, `run_instead` and `lock_build` are stubs on Windows, marked "milestone 3".
+  Still to do: `CreateProcess` with a job object, Ctrl-C and the exit code, the shim's
+  replace-aside, `--path` (R17), and the test's link half under Git Bash (it is skipped on
+  Windows).
+- **macOS** is written for (`_NSGetExecutablePath`, the Library locations) but not run.
+- **R14.** On this repository, median of 20 runs on a hot cache: `kbor help` directly
+  1.8 ms; through the shim 9.6 ms, of which Ninja's no-op run is 4.4 ms; through the shim
+  with `KORVID_LINK_BUILD=never` 5.0 ms. That is far below 150 ms, so `always` stays the
+  default everywhere.
+- **Settled while building.** The shim is `kvbinlink` (more specific than kvlink). Its home
+  is the directory it is in. The table's file name is an FNV-1a hash, and its fields are
+  tab-separated. `_link write` and `_link engine` take the anchor as an argument. In a
+  project every tool needs the project linked (see Trust). A build that holds the lock sets
+  `KORVID_LINK_HELD`, which keeps a linked tool called from inside a build from deadlocking.
+- **Not yet in the root README.** Its line about adding `tools/kormake/bin/<platform>` to
+  `PATH` is the author's to change.

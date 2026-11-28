@@ -15,6 +15,7 @@ kormake — build Korvid modules and the programs and tools made from them
     kormake graph   [NAME...] [TARGET] [--dot] [--why MODULE] [OPTIONS]
     kormake clean   [TARGET] [OPTIONS]
     kormake run     SCRIPT.lua [ARGS...]
+    kormake link    tools|list|which|default|remove [NAME...] [--bin DIR] [--system] [--force] [--forget] [--clear]
     kormake help | --help | -h
     kormake --version | -v
 
@@ -31,7 +32,7 @@ Everything is a module: engine libraries, backends, games, build-time tools, and
 toolchains. A tool that a module uses at build time (a shader compiler, the packer) is
 built for the machine running the build, in the same Ninja graph, ahead of the module
 that uses it. The model is laid out in `docs/PRDs/Kormake-v1-Dev-PRD.md`, and this
-version's changes in `docs/PRDs/Kormake-1.1-Dev-PRD.md` and, for 1.2, `docs/PRDs/Engine-Slice-10-PRD.md`. See `BUILDING.md` beside this
+version's changes in `docs/PRDs/Kormake-1.1-Dev-PRD.md`, for 1.2 `docs/PRDs/Engine-Slice-10-PRD.md`, and for 1.3, linked tools, `docs/PRDs/Kormake-Link-Tools-PRD.md`. See `BUILDING.md` beside this
 file for how to bootstrap kormake and how it works inside.
 
 Each command line is made of a command, some module names, and one target. These can come
@@ -100,6 +101,33 @@ in any order, except that the command has to be the first word.
   word after the script is the script's, options and targets alike. The exit status is
   the script's.
 
+**link**
+: Puts the tools this directory's engine and project publish on your path (see Linked
+  tools). Every name is a link to one small program, the shim `kvbinlink`, which works out
+  where you are each time it runs. It walks up to the `korvid.config` or `kormake.lua`,
+  builds this directory's binary of the tool with Ninja, and runs it. So `kpack` in one
+  checkout is that checkout's kpack, and in a game that publishes its own packer it is the
+  game's.
+
+  - `link tools [NAME...]` installs the shim in the link home (never over a newer one),
+    vouches for this engine and, in a project, the project, and links every command they
+    publish, kormake included, or only the NAMEs. It leaves a file in the bin directory that
+    is not one of its links alone unless given `--force`, and says when the bin directory
+    is not on `PATH`. `--bin DIR` links into DIR; `--system` uses `/usr/local/bin` and
+    `/usr/local/lib/korvid-link` (Linux and macOS, run as root).
+  - `link list` prints the shim, the links, and the engines, projects and defaults vouched
+    for.
+  - `link which NAME...` prints, from here, what NAME would run, and why: the walk, the
+    engine and project found, the table, trust, every candidate and the one chosen. It is
+    the shim's own report, `NAME --diagnose-tool-lookup`. It builds and runs nothing.
+  - `link default [NAME...]` makes this directory's tool what NAME runs outside every tree
+    (every name published here, with no NAME). A NAME not published here is an error. With
+    `--clear`, the defaults go and the names run the next program of the name on `PATH`
+    again.
+  - `link remove [NAME...]` removes the links (all of them, with no NAME). With
+    `--forget`, it also stops vouching for this engine or project. When no link is left the
+    link home goes too.
+
 **clean**
 : Removes the target's build directory, and its sanitized builds (`build/<target>+...`). With no TARGET, it removes every target's
   directory, `compile_commands.json`, and what goldberg cooked and remembers (`assets/`,
@@ -107,7 +135,7 @@ in any order, except that the command has to be the first word.
   empty. It removes nothing else it finds there, and never `dist/`. This command takes no NAMEs.
 
 **help**, **--version**
-: Print the usage summary, or the version (`kormake 1.2 (Lua 5.5)`).
+: Print the usage summary, or the version (`kormake 1.3 (Lua 5.5)`).
 
 ## TARGETS
 
@@ -232,6 +260,7 @@ as the master file, and its paths are relative to the file's own directory.
     target "linux-dev"         -- the default TARGET
     cook "copy_assets {in} {out}"   -- what cooks assets (see Assets); the default is goldberg
     requires_kormake "1.2"     -- a kormake older than this, down to the minor version, is an error
+    command "mkatlas" { script = "tools/mkatlas.lua" }   -- a script published as a command (see Linked tools)
     external "sqlite" {        -- an external the project defines, per platform (see Externals)
       linux = { pkg_config = "sqlite3", fetch = "sudo apt install libsqlite3-dev" },
     }
@@ -265,6 +294,54 @@ same `build/`, `dist/` and Ninja files. If they do, it is a project of its own:
 config's directory or the engine root, since `clean` removes what kormake writes under it. The engine root is still
 where the master file's paths, a toolchain's external `dir`s (such as `vendor/`) and
 `%{root}` are resolved, and where `package` gets `LICENSE` and `NOTICE` from.
+
+### Linked tools
+
+A command is published by a module (`publish`) or by a `korvid.config` (`command`, a Lua
+script that the engine's `kvscript` runs, as `kormake run` does). `kormake link tools`
+links each name to the shim, `kvbinlink`. The bootstrap builds the shim beside kormake, in
+`tools/kormake/bin/<host>/`. When you run a name, the shim:
+
+1. walks up from the current directory (or `KORVID_LINK_DIR`, or for `kormake` its `-C DIR`)
+   to the first `korvid.config` or `kormake.lua`, as kormake does: the anchor;
+2. with no anchor, runs the name's `link default` if it has one, and otherwise the next
+   program of the name on `PATH`, or exits 127;
+3. reads the anchor's tool table, and has the engine's kormake write it again when it is
+   missing, out of date or lacks the name;
+4. runs only what was vouched for. In an engine's tree, the engine must be linked. In a
+   project, the project must be linked too, since the engine's tools are built in the
+   project's graph there. Anything else is treated as no anchor (step 2);
+5. builds the tool, `ninja --quiet -C <build> <module>`, holding the build directory's lock,
+   with Ninja's output on standard error;
+6. replaces itself with the tool, `argv[0]` being the binary's path. A script command runs
+   as `kvscript run SCRIPT ARGS`.
+
+Which binary a name means: a project's module that publishes it, otherwise the engine's.
+Either one is built in the anchor's own build directory, in the host target in
+`host_config` (`build/linux-dev/bin/kpack`), which is the binary the build itself runs. The
+engine's private modules (Korvid's `tools/`) that publish are seen by a project as tools:
+named and run, never depended on, and never used as a project module's `tools`.
+
+    <home>/kvbinlink              the shim; kvbinlink.version beside it
+    <home>/registry.txt           engines and projects vouched for, links, defaults (tab-separated)
+    <bin>/<name>                  a symbolic link to the shim (on Windows, a hard link <name>.exe)
+    <cache>/roots/<hash>.txt      an anchor's tool table, <hash> the FNV-1a of its real path
+
+| | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| home | `$XDG_DATA_HOME/korvid-link` (`~/.local/share/korvid-link`) | `~/Library/Application Support/korvid-link` | `%LOCALAPPDATA%\korvid-link` |
+| bin | `~/.local/bin` | `~/.local/bin` | `%LOCALAPPDATA%\korvid-link\bin` |
+| cache | `$XDG_CACHE_HOME/korvid-link` (`~/.cache/korvid-link`) | `~/Library/Caches/korvid-link` | `%LOCALAPPDATA%\korvid-link\cache` |
+
+The shim's home is the directory it is in. Every `gen` of the host target in `host_config`
+writes the anchor's table (the regenerate rule's too), and the first `gen` where linked
+tools are in use notes the published names that have no link. A tool table is a cache:
+deleting it costs one slower run. `docs/PRDs/Kormake-Link-Tools-PRD.md` gives the table's and
+the registry's formats.
+
+kormake holds the same lock (`<build>/.korvid.lock`) around its own Ninja runs, and sets
+`KORVID_LINK_HELD` to the build directory while one runs: a linked tool that the build runs
+itself (a cook that calls `kpack`) then skips its own build instead of waiting for the lock.
 
 ### kormake.lua
 
@@ -358,6 +435,7 @@ the build directory, never in the source tree.
 | `engine_module` | The module registers a `ModuleDesc`. Each executable gets a generated `gen/<exe>/modules.gen.cc` listing every engine module in its closure, in dependency order |
 | `module_list` | `false`: the executable writes its own module list |
 | `exe` | The executable's file name, when it differs from the module's (`exe = "mygame"` for a module called `mygame.core`) |
+| `publish` | The commands a host executable (`output = "exe"`, `platforms = { "host" }`) puts on the path through `kormake link tools`: `true` (its executable's name), a name, or a list. A name is a letter, then letters, digits, `-`, `_` or `.`, and not `kormake`. Two modules of one side that publish one name are an error; a project's wins over the engine's (see Linked tools) |
 | `licenses` | Files under the module that `package` copies into `licenses/` as `<module>-<file>` |
 | `system` | A tool that is found on `PATH` rather than built (`slang`: `system = "slangc"`) |
 | `prebuilt` | A tool binary vendored per host: `{ linux = "bin/linux/slangc" }` |
@@ -552,6 +630,24 @@ test and what it runs, built, not run), and one phony per module, named for the 
   of Xcode's that covers the identifier and the device when unset). Variables named
   `DEVICECTL_CHILD_<NAME>` reach a test on the device as `<NAME>`.
 
+**KORVID_LINK_HOME**, **KORVID_LINK_BIN**, **KORVID_LINK_CACHE**
+: Where the shim and registry, the links, and the tool tables are (see Linked tools).
+
+**KORVID_LINK_DIR**
+: Where a linked tool's walk starts, instead of the current directory.
+
+**KORVID_LINK_BUILD**
+: `never`: a linked tool runs as it is built, without Ninja first. The default, `always`,
+  builds it first.
+
+**KORVID_LINK_DEBUG**
+: A linked tool says what it does on standard error: the table it read and why it wrote one,
+  the Ninja command, the binary.
+
+**KORVID_LINK_HELD**, **KORVID_LINK_NAME**, **KORVID_LINK_DEPTH**
+: Set for what they run, not by you: the build directory kormake is running Ninja in, the
+  name a tool was run by, and how deep shims run shims (more than 8 is an error).
+
 **HOME**, **USERPROFILE**
 : What a leading `~` in a path expands to.
 
@@ -562,6 +658,11 @@ test and what it runs, built, not run), and one phony per module, named for the 
 
 0 on success. Otherwise, the exit status of Ninja or of the test that failed, or 1 for an
 error of kormake's own, which is printed as `kormake: <message>`.
+
+A linked tool exits with the tool's status, or Ninja's when the rebuild failed. Its own are
+127 (the name is not published here, or there is no anchor and nothing else on `PATH`), 126
+(it cannot be built here, or the binary is not there to run) and 1, printed as
+`<name>: <message>`.
 
 ## EXAMPLES
 
@@ -579,6 +680,8 @@ error of kormake's own, which is printed as `kormake: <message>`.
     kormake graph arcfire --dot | dot -Tsvg > arcfire.svg
     kormake check windows-dev            # does the Windows graph resolve (on any host)
     kormake -C ~/code/mygame             # a project outside the engine, built from anywhere
+    tools/kormake/bin/linux/kormake link tools   # once: kormake, kpack, goldberg, ... on your path
+    kpack --diagnose-tool-lookup         # which kpack, and why, from here
 
 The 1.0 forms still work: `kormake build linux-debug`, `kormake test linux-dev collision`,
 `kormake package linux-ship arcfire`.

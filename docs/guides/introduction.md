@@ -11,7 +11,11 @@ steer it, and Space makes it pulse large and orange for a third of a second.
 ![The ball at rest, pulsing, and calm again](introduction/6-pulse.png)
 
 You need the engine built once, as [the project README](../../README.md#quick-start)
-describes, and `kormake` on your path. The guide assumes C++ and nothing about the engine.
+describes, and `kormake` on your path. To put it there, run
+`tools/kormake/bin/linux/kormake link tools` from the engine once (`macos` or `windows` for
+those hosts). The `kormake` and the tools you then type are always the ones of the engine
+your directory builds against ([linked tools](../../tools/kormake/README.md#linked-tools)).
+The guide assumes C++ and nothing about the engine.
 
 **To type it in as you go**, make a directory beside the engine (`~/code/mygame/` next to
 `~/code/korvid/`) with a one-line `korvid.config` that says where the engine is:

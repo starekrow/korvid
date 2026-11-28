@@ -27,6 +27,9 @@ Both scripts can be run from any directory, and both do the same three steps:
 3. **The host.** They compile `src/kormake.c` with the OS layer (`src/os_posix.c` or
    `src/os_win32.c`) and link everything into one executable.
 
+Then they compile the linked tools' shim, `src/kvbinlink.c`, on its own: plain C, no Lua,
+into `bin/<host>/kvbinlink` beside kormake (see Linked tools).
+
 `bootstrap.sh` builds with `-O2 -std=gnu99 -DLUA_USE_POSIX`. `bootstrap.bat` builds with
 `/O2 /std:c17 /W3 /utf-8`. If there is no `cl` on `PATH`, `bootstrap.bat` looks for the
 newest Visual Studio, or the Build Tools with the C++ workload, through `vswhere`, and runs
@@ -55,6 +58,8 @@ tools/kormake/
   src/os_posix.c     ... on Linux and macOS
   src/os_win32.c     ... on Windows: UTF-16 at the API, UTF-8 and '/' everywhere else
   src/embed.c        the script embedder
+  src/kvbinlink.c    the shim behind linked tools: its own small OS layer, no Lua
+  scripts/link.lua   linked tools: locations, the tool table, the registry, `kormake link`
   scripts/main.lua   the command line: parse, discover, resolve, emit, run Ninja
   scripts/util.lua   paths, globs, quoting, Ninja escaping
   scripts/sandbox.lua    evaluates kormake.lua, korvid.config and module.lua
@@ -73,7 +78,8 @@ tools/kormake/
 
 **The host** (`kormake.c`) gives the scripts a small API. The global `kfs` holds
 `listdir`, `isdir`, `isfile`, `mtime`, `read`, `write`, `mkdirp`, `rmtree`, `copy`, `cwd`,
-`realpath`, `getenv`, `exec` and `self`. The other globals are `kormake_script(name)`,
+`realpath`, `getenv`, `exec`, `self`, `size`, `rename`, `link`, `readlink`, `lock`, `unlock` and
+`setenv`. The other globals are `kormake_script(name)`,
 which returns an embedded script's source, along with `KORMAKE_VERSION`, `KORMAKE_HOST`
 (`linux`, `macos` or `windows`, fixed at compile time) and `arg`. `kfs.write` writes a
 file only if its content has changed, so regeneration never touches a file Ninja depends
@@ -179,7 +185,44 @@ kormake then writes `compile_commands.json`, both beside `build.ninja` and one l
 **5. Run.** kormake runs `ninja -C build/<target>` with the selection's phonies (for
 `build`), its test stamps (for `test`), Ninja's default (for `build` with nothing
 selected), or `check` (for `test` with nothing selected). If the
-toolchain probe found a Ninja, that one is used.
+toolchain probe found a Ninja, that one is used. Every Ninja run holds the build
+directory's lock (`util.ninja_exec`: `<build>/.korvid.lock`) and sets `KORVID_LINK_HELD`.
+
+**The tool table.** A gen of the host target in `host_config` also writes the anchor's tool
+table (`link.write_table`) to the link cache: which binary each published command is, where
+it is built, and the candidates that lost. The shim reads it.
+
+## Linked tools
+
+The shim (`kvbinlink`) knows nothing of module files: kormake decides, and the shim reads
+what it decided. When a table is missing, stale, or lacks the name being run, the shim asks
+a kormake to write it, in two steps. The engine is not known until a config is read, and
+only a kormake can read one:
+
+1. `<a linked engine's kormake> _link engine <anchor>` reads the anchor's `korvid.config`
+   leniently (`sandbox.eval_config_engine`: only `engine`; any other directive is ignored and
+   `requires_kormake` not enforced) and prints the engine's root. An anchor that is an engine
+   root skips this.
+2. Once that engine is found to be linked, `<that engine's kormake> _link write <anchor>`
+   gens the host target in `host_config`, which writes the table, and prints its path.
+
+`kvbinlink --version` is its `<protocol>.<revision>` (`KVBINLINK_PROTOCOL`,
+`KVBINLINK_REVISION` in the source). `kormake link tools` reads the version from the engine's
+`src/kvbinlink.c`, and never installs a shim over a newer one. Raise the revision for a fix,
+and the protocol for a change to the walk, the table's or the registry's format, or the
+environment.
+
+**Diagnosing.** `NAME --diagnose-tool-lookup` (or `kormake link which NAME`) prints the walk,
+the context, the table (current, or rewritten and why), trust, every candidate with whether
+a rebuild is due, and the choice. `KORVID_LINK_DEBUG=1 NAME ...` traces a real run on
+standard error. Some causes:
+
+- *`NAME: ... is not linked`*: run `kormake link tools` in that engine or project.
+- *A tool that never picks up an edit*: `KORVID_LINK_BUILD=never` is set, or the run is
+  inside a build that holds the lock (`KORVID_LINK_HELD`).
+- *The wrong tool outside a tree*: `kormake link list` shows the defaults.
+- *A table that is rewritten every run*: a watched file (the config, the master file) has a
+  modification time in the future.
 
 ## Testing kormake
 
