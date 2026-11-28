@@ -1,7 +1,8 @@
 #!/bin/sh
 # Builds kormake from source with the host C compiler: the engine's vendored Lua (the lua
 # module's, modules/lua/vendor/lua), the embedded scripts, and the host. Output:
-# tools/kormake/bin/<host>/kormake. Run from anywhere.
+# tools/kormake/bin/<host>/kormake, and the linked tools' shim beside it, kvbinlink. Run
+# from anywhere.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 host=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -20,3 +21,6 @@ for f in "$lua"/*.c; do
 done
 "$cc" -O2 -std=gnu99 -DLUA_USE_POSIX -I"$lua" -I"$tmp" -o "$out/kormake" "$here/src/kormake.c" "$here/src/os_posix.c" $luasrc -lm
 echo "kormake: $out/kormake"
+# The shim behind linked tools (kormake link tools): plain C, no Lua.
+"$cc" -O2 -std=gnu99 -o "$out/kvbinlink" "$here/src/kvbinlink.c"
+echo "kormake: $out/kvbinlink"

@@ -27,6 +27,12 @@ int         kos_rmtree(const char* path);                            /* 0 if rem
 int         kos_touch(const char* path);                             /* mtime to now */
 int         kos_copy(const char* from, const char* to);              /* replaces; keeps exec bits */
 int         kos_rename(const char* from, const char* to);            /* replaces to, in one step */
+/* Linked tools (scripts/link.lua): a name for the shim, and the build directory's lock. */
+int         kos_link(const char* target, const char* path);          /* POSIX: a symbolic link; Windows: a hard link, else a copy */
+int         kos_readlink(const char* path, char* buf, size_t n);     /* a symbolic link's text; fails if path is not one */
+long long   kos_lock(const char* path);                              /* an exclusive lock on path (made if need be), waited for; -1 on failure */
+void        kos_unlock(long long lock);
+int         kos_setenv(const char* name, const char* value);         /* for this process and what it runs; value NULL unsets */
 int         kos_cwd(char* buf, size_t n);
 int         kos_realpath(const char* path, char* buf, size_t n);     /* fails if it does not exist */
 int         kos_self(char* buf, size_t n);                           /* the running executable */

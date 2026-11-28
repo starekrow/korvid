@@ -6,6 +6,7 @@
 #include "os.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <wchar.h>
 
 static DWORD g_error;
@@ -178,6 +179,54 @@ int kos_rename(const char* from, const char* to) {
     if (!ok) fail();
     free(wf);
     free(wt);
+    return ok ? 0 : -1;
+}
+
+int kos_link(const char* target, const char* path) {
+    wchar_t* wt = widen(target);
+    wchar_t* wp = widen(path);
+    BOOL ok = wt && wp && CreateHardLinkW(wp, wt, NULL);
+    free(wt);
+    free(wp);
+    if (ok) return 0;
+    return kos_copy(target, path);
+}
+
+int kos_readlink(const char* path, char* buf, size_t n) {
+    (void)path; (void)buf; (void)n;
+    g_error = ERROR_NOT_A_REPARSE_POINT;
+    return -1;
+}
+
+long long kos_lock(const char* path) {
+    wchar_t* w = widen(path);
+    if (!w) return -1;
+    HANDLE h = CreateFileW(w, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    free(w);
+    if (h == INVALID_HANDLE_VALUE) return fail();
+    OVERLAPPED ov;
+    memset(&ov, 0, sizeof ov);
+    if (!LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, &ov)) { fail(); CloseHandle(h); return -1; }
+    return (long long)(intptr_t)h;
+}
+
+void kos_unlock(long long lock) {
+    if (lock < 0) return;
+    HANDLE h = (HANDLE)(intptr_t)lock;
+    OVERLAPPED ov;
+    memset(&ov, 0, sizeof ov);
+    UnlockFileEx(h, 0, 1, 0, &ov);
+    CloseHandle(h);
+}
+
+int kos_setenv(const char* name, const char* value) {
+    wchar_t* wn = widen(name);
+    wchar_t* wv = value ? widen(value) : NULL;
+    BOOL ok = wn && SetEnvironmentVariableW(wn, wv);
+    if (!ok) fail();
+    free(wn);
+    free(wv);
     return ok ? 0 : -1;
 }
 

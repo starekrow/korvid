@@ -194,6 +194,86 @@ rm "$out/commands.txt.raw"
   rm "$out/$log.raw"
 }
 
+# Linked tools (kormake link tools): the shim, in a home, cache and bin directory of the
+# test's own. The fixture gets this kormake and shim where an engine keeps them; its tools
+# are stubs that print what they were run as, and Ninja is a stub that says what it was
+# asked, so nothing is compiled.
+if [ "$host" != windows ]; then
+  cwd=$root
+  log=link-commands.txt
+  lt="$tmp/lt"
+  mkdir -p "$lt/home" "$lt/bin" "$lt/fake" "$lt/elsewhere" "$lt/onpath"
+  export KORVID_LINK_HOME="$lt/home" KORVID_LINK_BIN="$lt/bin"
+  mkdir -p "$root/tools/kormake/bin/$host" "$root/tools/kormake/src"
+  cp "$KORMAKE" "$root/tools/kormake/bin/$host/kormake"
+  cp "$here/../bin/$host/kvbinlink" "$root/tools/kormake/bin/$host/kvbinlink"
+  cp "$here/../src/kvbinlink.c" "$root/tools/kormake/src/kvbinlink.c"
+  stub() { mkdir -p "$(dirname "$1")"; printf '#!/bin/sh\necho "%s: ran as $0 ($KORVID_LINK_NAME) with $*"\nexit %s\n' "$2" "${3:-0}" >"$1"; chmod +x "$1"; }
+  printf '#!/bin/sh\necho "fake ninja $*"\ncase "$*" in -n*) echo "ninja: no work to do.";; esac\nexit 0\n' >"$lt/fake/ninja"
+  chmod +x "$lt/fake/ninja"
+  stub "$lt/onpath/packer" "the other packer on PATH"
+  # A PATH of the test's own: the links, the fake Ninja, and the system's programs.
+  keep_path=$PATH
+  export PATH="$lt/bin:$lt/fake:/usr/bin:/bin"
+  # A shim run: as its link, from $cwd, standard output and error kept apart.
+  shim() {
+    vars=
+    while [ "${1#*=}" != "$1" ]; do vars="$vars $1"; shift; done
+    echo "\$${vars} $*" >>"$out/$log.raw"
+    rc=0
+    (cd "$cwd" && env $vars "$@") >"$tmp/shim.out" 2>"$tmp/shim.err" || rc=$?
+    sed -e 's/^/  out: /' "$tmp/shim.out" >>"$out/$log.raw"
+    sed -e 's/^/  err: /' "$tmp/shim.err" >>"$out/$log.raw"
+    echo "[exit $rc]" >>"$out/$log.raw"
+    echo >>"$out/$log.raw"
+  }
+  run link tools
+  ls "$lt/bin" >>"$out/$log.raw"
+  stub "$root/build/$host-dev/bin/packer" "the fixture's packer" 4
+  stub "$root/build/$host-dev/bin/stamp" "the fixture's stamp"
+  # Built first (the fake Ninja's words on standard error), then run: its status is the tool's.
+  shim packer one "two words"
+  shim stamper
+  shim KORVID_LINK_BUILD=never packer
+  shim KORVID_LINK_HELD="$root/build/$host-dev" packer
+  shim packer --diagnose-tool-lookup
+  cwd=$root/samples/demo shim stamp --diagnose-tool-lookup
+  shim kormake --diagnose-tool-lookup
+  shim "$lt/home/kvbinlink" nosuch
+  shim "$lt/home/kvbinlink" packer x
+  # Outside any tree: the next program of the name on PATH, or nothing.
+  cwd=$lt/elsewhere shim packer --diagnose-tool-lookup
+  cwd=$lt/elsewhere shim packer
+  cwd=$lt/elsewhere shim PATH="$PATH:$lt/onpath" packer --diagnose-tool-lookup
+  cwd=$lt/elsewhere shim PATH="$PATH:$lt/onpath" packer x
+  # The project: refused until it is linked, then its own packer.
+  cwd=$proj
+  stub "$proj/build/$host-dev/bin/mypacker" "the project's packer"
+  shim KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config packer
+  run $fake link tools
+  shim packer y
+  shim packer --diagnose-tool-lookup
+  # A config that changed: the table is written again.
+  echo "-- touched" >>"$proj/korvid.config"
+  touch -t 203001010000 "$proj/korvid.config"
+  shim KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config packer --diagnose-tool-lookup
+  run link which stamp
+  run link list
+  # A newer shim installed stays: an older engine does not put its own over it.
+  echo "9.0" >"$lt/home/kvbinlink.version"
+  run $fake link tools packer
+  run link remove packer
+  run link remove nosuch
+  cwd=$root
+  run link remove --forget
+  ls "$lt" >>"$out/$log.raw"
+  normalize <"$out/$log.raw" | sed -e "s|$(re "$lt")|{lt}|g" -e "s|$(re "$(cd "$tmp" && pwd -P)")|{tmp}|g" |
+    sed -E -e '/^  out:            ([{]tmp[}]|\/)/d' >"$out/$log"  # the walk past the test's directories is the machine's
+  rm "$out/$log.raw"
+  unset KORVID_LINK_HOME KORVID_LINK_BIN
+  PATH=$keep_path
+fi
+
 if [ -n "$update" ]; then
   rm -rf "$here/expected"
   cp -R "$out" "$here/expected"

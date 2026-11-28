@@ -19,7 +19,7 @@ function M.run(c, build, inst, ninja, target)
   -- what ships. A pack is still built by name (kormake bin/<exe>.kpak).
   packs = {}
   local want = { q("bin/" .. exe_bin) }
-  local rc = kfs.exec(string.format("%s -C %s %s", ninja, q(build), table.concat(want, " ")))
+  local rc = util.ninja_exec(build, string.format("%s -C %s %s", ninja, q(build), table.concat(want, " ")))
   if rc ~= 0 then return rc end
   local dist = util.join(c.base_dir, "dist/" .. exe)
   -- The tree goldberg cooked for this executable (emit named it). A ship game that

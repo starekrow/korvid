@@ -27,6 +27,7 @@ usage: kormake [COMMAND] [NAME...] [TARGET] [OPTIONS]
   test     build and run their tests; --heavy: their heavy tests (tests/heavy/), -- ARGS for those
   package  dist/<exe>/: one executable, its pack, shaders and licenses (an .app on Apple)
   run      kormake run SCRIPT.lua [ARGS...]: the script with kvscript, built for the host
+  link     kormake link tools|list|which|remove [NAME...]: the published tools on your path
   gen      write build.ninja and compile_commands.json only
   check    resolve only: cycles, bindings, duplicates
   graph    the instance graph [--dot] [--why MODULE]
@@ -388,7 +389,7 @@ local function run(cmd, words, opts)
       for _, inst in ipairs(selected) do which[#which + 1] = inst.module.name end
       print(string.format("kormake: building %s for %s", table.concat(which, ", "), target))
     end
-    return kfs.exec(string.format("%s -C %s %s", ninja, util.shell_quote(build), table.concat(targets, " ")))
+    return util.ninja_exec(build, string.format("%s -C %s %s", ninja, util.shell_quote(build), table.concat(targets, " ")))
   end
   if cmd == "package" then
     if not selected or #selected ~= 1 then util.fail("package makes one executable: name it (kormake package NAME [TARGET])") end
@@ -414,7 +415,7 @@ local function run(cmd, words, opts)
       end
       targets[#targets + 1] = util.shell_quote(inst.heavy.target)
     end
-    local rc = kfs.exec(string.format("%s -C %s %s", ninja, util.shell_quote(build), table.concat(targets, " ")))
+    local rc = util.ninja_exec(build, string.format("%s -C %s %s", ninja, util.shell_quote(build), table.concat(targets, " ")))
     if rc ~= 0 then return rc end
     local args = {}
     for _, a in ipairs(opts.rest or {}) do args[#args + 1] = util.shell_quote(a) end
@@ -441,7 +442,7 @@ local function run(cmd, words, opts)
       end
       if #targets == 0 then print("kormake: no tests there"); return 0 end
     end
-    return kfs.exec(string.format("%s -C %s %s", ninja, util.shell_quote(build), table.concat(targets, " ")))
+    return util.ninja_exec(build, string.format("%s -C %s %s", ninja, util.shell_quote(build), table.concat(targets, " ")))
   end
   usage()
   return 2
@@ -460,7 +461,7 @@ local function run_script(args)
   if not c.by_name.kvscript then util.fail("run: this engine has no kvscript module (tools/kvscript)") end
   local build = emit.run(c, g, {})
   local ninja = g.ninja and util.shell_quote(util.native(g.ninja)) or "ninja"
-  local rc = kfs.exec(string.format("%s --quiet -C %s kvscript", ninja, util.shell_quote(build)))
+  local rc = util.ninja_exec(build, string.format("%s --quiet -C %s kvscript", ninja, util.shell_quote(build)))
   if rc ~= 0 then return rc end
   local exe = util.join(build, "bin/kvscript" .. g.toolchain.fields.exe_suffix)
   local words = { util.shell_quote(util.native(exe)), "run", util.shell_quote(script) }
@@ -540,6 +541,7 @@ end
 local ok, result = pcall(function()
   if arg[1] == "run" then return run_script(arg) end
   if arg[1] == "_link" then return link_internal(arg) end
+  if arg[1] == "link" then return kormake.load("link").command(arg) end
   if arg[1] and arg[1]:sub(1, 1) == "_" then
     local rc = internal(arg)
     if rc then return rc end

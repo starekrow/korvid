@@ -49,6 +49,9 @@ for %%f in ("%lua%\*.c") do (
 )
 cl %cflags% /I"%lua%" /I"%tmp%" /Fo"%tmp%\\" /Fe"%out%\kormake.exe" "%here%\src\kormake.c" "%here%\src\os_win32.c" %luasrc% >"%tmp%\kormake.log" || (type "%tmp%\kormake.log" & goto fail)
 echo kormake: %out%\kormake.exe
+rem The shim behind linked tools (kormake link tools): plain C, no Lua.
+cl %cflags% /Fo"%tmp%\\" /Fe"%out%\kvbinlink.exe" "%here%\src\kvbinlink.c" >"%tmp%\kvbinlink.log" || (type "%tmp%\kvbinlink.log" & goto fail)
+echo kormake: %out%\kvbinlink.exe
 endlocal
 exit /b 0
 

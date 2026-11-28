@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -66,6 +67,32 @@ int kos_rmtree(const char* path) {
 int kos_touch(const char* path) { return utime(path, NULL); }
 
 int kos_rename(const char* from, const char* to) { return rename(from, to); }
+
+int kos_link(const char* target, const char* path) { return symlink(target, path); }
+
+int kos_readlink(const char* path, char* buf, size_t n) {
+    ssize_t len = readlink(path, buf, n - 1);
+    if (len < 0) return -1;
+    buf[len] = 0;
+    return 0;
+}
+
+long long kos_lock(const char* path) {
+    int fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    if (fd < 0) return -1;
+    while (flock(fd, LOCK_EX) != 0) {
+        if (errno != EINTR) { close(fd); return -1; }
+    }
+    return fd;
+}
+
+void kos_unlock(long long lock) {
+    if (lock < 0) return;
+    flock((int)lock, LOCK_UN);
+    close((int)lock);
+}
+
+int kos_setenv(const char* name, const char* value) { return value ? setenv(name, value, 1) : unsetenv(name); }
 
 int kos_copy(const char* from, const char* to) {
     int in = open(from, O_RDONLY);

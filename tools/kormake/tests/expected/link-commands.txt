@@ -1,0 +1,192 @@
+$ kormake link tools
+kormake: shim 1.0 installed in {lt}/home
+kormake: linked kormake packer stamp stamper in {lt}/bin (published by the engine at {root})
+[exit 0]
+
+kormake
+packer
+stamp
+stamper
+$ packer one two words
+  out: the fixture's packer: ran as {root}/build/{host}-dev/bin/packer (packer) with one two words
+  err: fake ninja --quiet -C {root}/build/{host}-dev packer
+[exit 4]
+
+$ stamper
+  out: the fixture's stamp: ran as {root}/build/{host}-dev/bin/stamp (stamper) with 
+  err: fake ninja --quiet -C {root}/build/{host}-dev stamp
+[exit 0]
+
+$ KORVID_LINK_BUILD=never packer
+  out: the fixture's packer: ran as {root}/build/{host}-dev/bin/packer (packer) with 
+[exit 4]
+
+$ KORVID_LINK_HELD={root}/build/{host}-dev packer
+  out: the fixture's packer: ran as {root}/build/{host}-dev/bin/packer (packer) with 
+[exit 4]
+
+$ packer --diagnose-tool-lookup
+  out: cwd        {root}
+  out: shim       {lt}/home/kvbinlink (kvbinlink 1.0), registry {lt}/home/registry.txt
+  out: walk       {root}: kormake.lua  <- anchor
+  out: context    engine root {root}, engine {root}
+  out: table      {cache}/roots/{hash}.txt (current)
+  out: kormake    {root}/tools/kormake/bin/{host}/kormake
+  out: trust      engine linked
+  out: candidates
+  out:   1 engine   {root}/build/{host}-dev/bin/packer   built, up to date
+  out: chosen     1: engine module packer publishes "packer"; PATH programs are used only outside a linked tree
+[exit 0]
+
+$ stamp --diagnose-tool-lookup
+  out: cwd        {root}/samples/demo
+  out: shim       {lt}/home/kvbinlink (kvbinlink 1.0), registry {lt}/home/registry.txt
+  out: walk       {root}/samples/demo: nothing
+  out:            {root}/samples: nothing
+  out:            {root}: kormake.lua  <- anchor
+  out: context    engine root {root}, engine {root}
+  out: table      {cache}/roots/{hash}.txt (current)
+  out: kormake    {root}/tools/kormake/bin/{host}/kormake
+  out: trust      engine linked
+  out: candidates
+  out:   1 engine   {root}/build/{host}-dev/bin/stamp   built, up to date
+  out: chosen     1: engine module stamp publishes "stamp"; PATH programs are used only outside a linked tree
+[exit 0]
+
+$ kormake --diagnose-tool-lookup
+  out: cwd        {root}
+  out: shim       {lt}/home/kvbinlink (kvbinlink 1.0), registry {lt}/home/registry.txt
+  out: walk       {root}: kormake.lua  <- anchor
+  out: context    engine root {root}, engine {root}
+  out: trust      engine linked
+  out: candidates
+  out:   1 engine   {root}/tools/kormake/bin/{host}/kormake   exists
+  out: chosen     1: kormake is the engine's own (tools/kormake/bin/linux), not a module; PATH programs are used only outside a linked tree
+[exit 0]
+
+$ {lt}/home/kvbinlink nosuch
+  err: nosuch: not published here (engine root {root} publishes kormake, packer, stamp, stamper)
+[exit 127]
+
+$ {lt}/home/kvbinlink packer x
+  out: the fixture's packer: ran as {root}/build/{host}-dev/bin/packer (packer) with x
+  err: fake ninja --quiet -C {root}/build/{host}-dev packer
+[exit 4]
+
+$ packer --diagnose-tool-lookup
+  out: cwd        {lt}/elsewhere
+  out: shim       {lt}/home/kvbinlink (kvbinlink 1.0), registry {lt}/home/registry.txt
+  out: walk       {lt}/elsewhere: nothing
+  out:            {lt}: nothing
+  out: context    none: no korvid.config or kormake.lua above {lt}/elsewhere
+  out: candidates
+  out:   (none)
+  out: chosen     nothing: not inside a Korvid engine or project (no korvid.config or kormake.lua above {lt}/elsewhere), and there is no other packer on PATH
+[exit 127]
+
+$ packer
+  err: packer: not inside a Korvid engine or project (no korvid.config or kormake.lua above {lt}/elsewhere)
+[exit 127]
+
+$ PATH={lt}/bin:{lt}/fake:/usr/bin:/bin:{lt}/onpath packer --diagnose-tool-lookup
+  out: cwd        {lt}/elsewhere
+  out: shim       {lt}/home/kvbinlink (kvbinlink 1.0), registry {lt}/home/registry.txt
+  out: walk       {lt}/elsewhere: nothing
+  out:            {lt}: nothing
+  out: context    none: no korvid.config or kormake.lua above {lt}/elsewhere
+  out: candidates
+  out:   1 PATH     {lt}/onpath/packer
+  out: chosen     1: not inside a Korvid engine or project (no korvid.config or kormake.lua above {lt}/elsewhere), so the first other packer on PATH
+[exit 0]
+
+$ PATH={lt}/bin:{lt}/fake:/usr/bin:/bin:{lt}/onpath packer x
+  out: the other packer on PATH: ran as {lt}/onpath/packer () with x
+[exit 0]
+
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config packer
+  err: packer: {project} is not linked (run kormake link tools there to use its tools)
+[exit 127]
+
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake link tools
+kormake: shim 1.0 already in {lt}/home
+kormake: already linked: kormake packer stamp stamper
+[exit 0]
+
+$ packer y
+  out: the project's packer: ran as {project}/build/{host}-dev/bin/mypacker (packer) with y
+  err: fake ninja --quiet -C {project}/build/{host}-dev mypacker
+[exit 0]
+
+$ packer --diagnose-tool-lookup
+  out: cwd        {project}
+  out: shim       {lt}/home/kvbinlink (kvbinlink 1.0), registry {lt}/home/registry.txt
+  out: walk       {project}: korvid.config  <- anchor
+  out: context    project {project}, engine {root}
+  out: table      {cache}/roots/{hash}.txt (current)
+  out: kormake    {root}/tools/kormake/bin/{host}/kormake
+  out: trust      engine linked, project linked
+  out: candidates
+  out:   1 project  {project}/build/{host}-dev/bin/mypacker   built, up to date
+  out:   2 engine   {project}/build/{host}-dev/bin/packer   (module packer: lost to project:mypacker)
+  out: chosen     1: project module mypacker publishes "packer", and a project's command wins over the engine's; PATH programs are used only outside a linked tree
+[exit 0]
+
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config packer --diagnose-tool-lookup
+  out: cwd        {project}
+  out: shim       {lt}/home/kvbinlink (kvbinlink 1.0), registry {lt}/home/registry.txt
+  out: walk       {project}: korvid.config  <- anchor
+  out: context    project {project}, engine {root}
+  out: table      {cache}/roots/{hash}.txt (rewritten: {project}/korvid.config changed)
+  out: kormake    {root}/tools/kormake/bin/{host}/kormake
+  out: trust      engine linked, project linked
+  out: candidates
+  out:   1 project  {project}/build/{host}-dev/bin/mypacker   built, up to date
+  out:   2 engine   {project}/build/{host}-dev/bin/packer   (module packer: lost to project:mypacker)
+  out: chosen     1: project module mypacker publishes "packer", and a project's command wins over the engine's; PATH programs are used only outside a linked tree
+[exit 0]
+
+$ kormake link which stamp
+cwd        {project}
+shim       {lt}/home/kvbinlink (kvbinlink 1.0), registry {lt}/home/registry.txt
+walk       {project}: korvid.config  <- anchor
+context    project {project}, engine {root}
+table      {cache}/roots/{hash}.txt (current)
+kormake    {root}/tools/kormake/bin/{host}/kormake
+trust      engine linked, project linked
+candidates
+  1 engine   {project}/build/{host}-dev/bin/stamp   not built, up to date
+chosen     1: engine module stamp publishes "stamp"; PATH programs are used only outside a linked tree
+[exit 0]
+
+$ kormake link list
+shim      {lt}/home/kvbinlink (1.0)
+linked    kormake  in {lt}/bin
+linked    packer  in {lt}/bin
+linked    stamp  in {lt}/bin
+linked    stamper  in {lt}/bin
+engine    {root}
+project   {project}
+[exit 0]
+
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake link tools packer
+kormake: shim 9.0 already in {lt}/home
+kormake: already linked: packer
+[exit 0]
+
+$ kormake link remove packer
+kormake: unlinked packer
+[exit 0]
+
+$ kormake link remove nosuch
+kormake: link remove: nosuch is not linked
+[exit 1]
+
+$ kormake link remove --forget
+kormake: unlinked kormake stamp stamper
+kormake: no link is left; removed {lt}/home
+[exit 0]
+
+bin
+elsewhere
+fake
+onpath

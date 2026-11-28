@@ -147,6 +147,42 @@ static int kfs_rename(lua_State* L) {
     return 0;
 }
 
+/* link(target, path): path names target (kos_link). */
+static int kfs_link(lua_State* L) {
+    const char* target = luaL_checkstring(L, 1);
+    const char* path = luaL_checkstring(L, 2);
+    if (kos_link(target, path) != 0) return luaL_error(L, "cannot link '%s' to '%s': %s", path, target, kos_error());
+    return 0;
+}
+
+/* readlink(path): a symbolic link's text, nil if path is not one. */
+static int kfs_readlink(lua_State* L) {
+    char buf[KORMAKE_PATH_MAX];
+    if (kos_readlink(luaL_checkstring(L, 1), buf, sizeof buf) != 0) { lua_pushnil(L); return 1; }
+    lua_pushstring(L, buf);
+    return 1;
+}
+
+/* lock(path): waits for an exclusive lock on path; unlock(handle) gives it back. */
+static int kfs_lock(lua_State* L) {
+    const char* path = luaL_checkstring(L, 1);
+    long long h = kos_lock(path);
+    if (h < 0) return luaL_error(L, "cannot lock '%s': %s", path, kos_error());
+    lua_pushinteger(L, (lua_Integer)h);
+    return 1;
+}
+
+static int kfs_unlock(lua_State* L) {
+    kos_unlock((long long)luaL_checkinteger(L, 1));
+    return 0;
+}
+
+/* setenv(name, value): for this process and what it runs; nil unsets. */
+static int kfs_setenv(lua_State* L) {
+    kos_setenv(luaL_checkstring(L, 1), luaL_optstring(L, 2, NULL));
+    return 0;
+}
+
 /* copy(from, to): replaces to; an executable stays executable. */
 static int kfs_copy(lua_State* L) {
     const char* from = luaL_checkstring(L, 1);
@@ -192,7 +228,8 @@ static const luaL_Reg kfs[] = {
     {"listdir", kfs_listdir}, {"isdir", kfs_isdir}, {"isfile", kfs_isfile}, {"mtime", kfs_mtime},
     {"read", kfs_read}, {"write", kfs_write}, {"mkdirp", kfs_mkdirp}, {"rmtree", kfs_rmtree},
     {"copy", kfs_copy}, {"cwd", kfs_cwd}, {"realpath", kfs_realpath}, {"getenv", kfs_getenv},
-    {"exec", kfs_exec}, {"self", kfs_self}, {"size", kfs_size}, {"rename", kfs_rename}, {0, 0}
+    {"exec", kfs_exec}, {"self", kfs_self}, {"size", kfs_size}, {"rename", kfs_rename},
+    {"link", kfs_link}, {"readlink", kfs_readlink}, {"lock", kfs_lock}, {"unlock", kfs_unlock}, {"setenv", kfs_setenv}, {0, 0}
 };
 
 /* kormake_script(name): the embedded script's source, for the loader in main.lua. */

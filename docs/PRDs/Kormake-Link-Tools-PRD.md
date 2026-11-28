@@ -83,7 +83,7 @@ $ mkatlas sprites/ --out build/atlas
 
 | piece | what it is | where it lives |
 | --- | --- | --- |
-| the shim | a small C program, `kvlink`, with no Lua and no knowledge of module files | the link home |
+| the shim | a small C program, `kvbinlink`, with no Lua and no knowledge of module files | the link home |
 | links | one per published name, each leading to the shim | the bin directory |
 | the tool table | per anchor: its engine, its kormake, and each published name's binary and how to build it | the cache |
 | the registry | the engines and projects that `link tools` was run from, and the names it linked | the link home |
@@ -121,13 +121,13 @@ Three places, chosen per platform, each with an override:
 
 ### Links
 
-- **Linux and macOS**: a symbolic link, `~/.local/bin/kpack` to `<home>/kvlink`. The shim
+- **Linux and macOS**: a symbolic link, `~/.local/bin/kpack` to `<home>/kvbinlink`. The shim
   takes the tool's name from the base name of `argv[0]`.
 - **Windows**: symbolic links need developer mode, and `.bat` and `.cmd` wrappers mangle
   arguments and turn Ctrl-C into "Terminate batch job?". So each name is a hard link to
-  `kvlink.exe` named `kpack.exe`. Where a hard link cannot be made (a different volume),
+  `kvbinlink.exe` named `kpack.exe`. Where a hard link cannot be made (a different volume),
   it is a copy. The shim takes the name from its own module file name.
-- `kvlink TOOL [ARGS]` is the same as running the link named TOOL, for scripts and for
+- `kvbinlink TOOL [ARGS]` is the same as running the link named TOOL, for scripts and for
   debugging.
 - `link tools` never overwrites a file in the bin directory that is not one of its links
   (a symbolic link to the shim, or on Windows a file that the registry records). It names
@@ -215,7 +215,7 @@ chosen     1: project module kpack publishes "kpack", and a project's tool wins 
 
 The flag is the shim's own, and it is read only as the first argument, so a tool can still
 take `--diagnose-tool-lookup` anywhere later in its arguments. `kormake link which NAME`
-prints the same report through the shim (`kvlink NAME --diagnose-tool-lookup`), so there is
+prints the same report through the shim (`kvbinlink NAME --diagnose-tool-lookup`), so there is
 one implementation of the report.
 
 For the shim to name the candidates that lost, the table holds every candidate for each name,
@@ -250,6 +250,12 @@ Ninja runs (`flock` on Linux and macOS, `LockFileEx` on Windows) and releases it
 starting the tool, so many copies of a tool can still run at once. kormake takes the same
 lock around its own Ninja runs (R11), so a shim and `kormake build` in another terminal take
 turns instead of racing.
+
+A build can run a linked tool itself: a cook script that calls `kpack` by name, for example.
+That shim would wait forever for the lock its own build holds. So while kormake runs Ninja it
+sets `KORVID_LINK_HELD` to the build directory. A shim that finds its tool's build directory
+there skips the Ninja step and runs the binary as it is, since the build around it is already
+building that binary.
 
 ## Publishing
 
@@ -403,15 +409,23 @@ run that repository's code, or the code of whatever engine its `korvid.config` n
 `make` in a cloned repository has the same risk, but there you knew you were running the
 repository's build. So the shim runs only what you have vouched for:
 
-- A tool an **engine** publishes runs only when that engine's real path is in the registry,
+- In an engine's own tree, a tool runs only when that engine's real path is in the registry,
   which is to say you ran `kormake link tools` from it once.
-- A tool a **project** publishes runs only when the project is in the registry, for the same
-  reason.
+- In a project, every tool, the engine's included, runs only when the project is in the
+  registry too. The engine's tools are built in the project's graph there, where a project
+  module that takes an engine module's name (`core`, say) is compiled into them. So running
+  even the engine's `kpack` in a project means running the project's code.
+- `kormake` itself needs only its engine to be linked. It is the engine's own binary, and
+  running it in a project is asking for that project's build.
 - Anything else is treated like no anchor (shim step 2): the next program on `PATH` if there
   is one. If there is none, the shim exits 127 with
   `kpack: /home/me/src/stranger is not linked (run kormake link tools there to use its tools)`.
 
 `kormake link tools` is the only thing that adds to the registry. `gen` never does. The
+registry is `<home>/registry.txt`, one entry a line, tab-separated: `engine PATH`,
+`project PATH` (most recently linked last), `link NAME BINDIR` and `default NAME ANCHOR`.
+The shim's home is the directory the shim itself is in (`KORVID_LINK_HOME` overrides it),
+so a `--system` shim reads the system's registry. The
 lenient `_link engine` step evaluates a `korvid.config` from a directory you have not
 vouched for, but it runs in kormake's sandbox, which has no I/O and no `exec`, and it
 reads the config only to find the engine path before the trust check.
@@ -468,22 +482,24 @@ itself, since writing into a directory on your path should only happen when you 
 
 ## Versions
 
-The shim has a protocol version, a single integer: 1 in this PRD. It covers the walk, the
+The shim has a version, `<protocol>.<revision>` (`kvbinlink --version`): 1.0 in this PRD.
+The protocol is a single integer. It covers the walk, the
 table's major version, the environment variables and the link layout. Each engine
-bootstraps its own copy of `kvlink` beside its kormake (`tools/kormake/bin/<host>/kvlink`),
-and `link tools` copies it into the link home only if its version is higher than the
-installed one's, or there is none. So linking from an old checkout never downgrades the shim
+bootstraps its own copy of `kvbinlink` beside its kormake (`tools/kormake/bin/<host>/kvbinlink`),
+and `link tools` copies it into the link home, recording its version beside it
+(`kvbinlink.version`). It never replaces a newer shim. It replaces one of the same version
+only when the two are different builds, which happens with a fix within a revision. So linking from an old checkout never downgrades the shim
 a newer engine needs. Within a version, any engine's shim does the job for every engine.
 
 On Windows a running `.exe` cannot be replaced. `link tools` renames the old shim and its
-hard links aside (`kvlink.exe.old`), puts the new one in place, and deletes the old files
+hard links aside (`kvbinlink.exe.old`), puts the new one in place, and deletes the old files
 the next time it runs.
 
 ## Requirements
 
 | ID | Requirement | Priority |
 | --- | --- | --- |
-| R1 | `kvlink`, the shim: C beside kormake's host (sharing `os.h`), no Lua, built by both bootstrap scripts | P0 |
+| R1 | `kvbinlink`, the shim: C beside kormake's host (sharing `os.h`), no Lua, built by both bootstrap scripts | P0 |
 | R2 | The shim's walk (same order as kormake's), `KORVID_LINK_DIR`, `-C` for kormake only | P0 |
 | R3 | Fall-through to the next program of that name on `PATH` when there is no anchor or no trust, skipping the shim's own copies | P0 |
 | R4 | `publish` in `module.lua` (true, a name, a list), checked when modules are collected; kormake always published by an engine root | P0 |
@@ -527,7 +543,7 @@ the next time it runs.
 1. **Publish and the table.** `publish`, its checks, private tools seen by projects, the
    table written by `gen`, `_link write` and `_link engine`. Verified by reading tables:
    no shim yet.
-2. **The shim.** `kvlink` on Linux and macOS: the walk, the table, fall-through, the Ninja
+2. **The shim.** `kvbinlink` on Linux and macOS: the walk, the table, fall-through, the Ninja
    step with the lock, `execv`, `--diagnose-tool-lookup`. `kormake link tools`, `list`, `which`, `remove`, the
    registry and trust. kormake takes the lock.
 3. **Windows.** Hard links, `CreateProcess` and the job object, Ctrl-C, replace-aside,

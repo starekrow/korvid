@@ -68,6 +68,24 @@ function M.expand_home(path)
   return path
 end
 
+-- Runs a Ninja command line in the build directory `build`, holding its lock
+-- (<build>/.korvid.lock): Ninja takes none, and two runs in one directory can spoil its
+-- logs. The linked tools' shim takes the same lock; KORVID_LINK_HELD tells a shim run
+-- under this one (a cook that calls a linked tool) to leave the building to it. A run
+-- inside one that holds the lock already takes it again for nothing.
+function M.ninja_exec(build, cmd)
+  if kfs.getenv("KORVID_LINK_HELD") == build then return kfs.exec(cmd) end
+  kfs.mkdirp(build)
+  local h = kfs.lock(M.join(build, ".korvid.lock"))
+  local before = kfs.getenv("KORVID_LINK_HELD")
+  kfs.setenv("KORVID_LINK_HELD", build)
+  local ok, rc = pcall(kfs.exec, cmd)
+  kfs.setenv("KORVID_LINK_HELD", before)
+  kfs.unlock(h)
+  if not ok then error(rc, 0) end
+  return rc
+end
+
 -- One argument for the host's command shell (kfs.exec): sh on POSIX, cmd on Windows,
 -- where a path cannot hold a double quote.
 function M.shell_quote(s)
