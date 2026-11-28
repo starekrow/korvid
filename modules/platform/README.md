@@ -1,12 +1,12 @@
 `user`, `owner`, `error` (errno, by `Err`'s names), `not_found()`, `stat` (a `stat_file`'s answer) |# platform
 
 The operating system as an engine sees it with no display and no devices: a file read
-queue with its mounts, the executable's and the user's directories, and TCP sockets. It
+queue with its mounts, the executable's and the user's directories, TCP sockets and Unix-domain ones. It
 links no external library, so a tool built on the engine (`kpack`) needs nothing
 installed on the build machine beyond the compiler. The window, the keyboard and gamepads
 are `platform_hid`'s; the audio device is `platform_audio`'s. Nothing here blocks the
 thread that calls it unless its name or its header says it is for tools (the blocking
-file calls, `Process::wait`, and the sockets' waiting twins: `write_now`, `accept(seconds)`, `read(buf, cap, seconds)`, `net_connect_local_now`): everything else is polled or pumped once per frame, by the
+file calls, `Process::wait`, and the sockets' waiting twins: `write_now`, `accept(seconds)`, `read(buf, cap, seconds)`, `net_connect_local_now`, and KR49's `net_connect_unix_now`, `write_now_with` and `net_wait`): everything else is polled or pumped once per frame, by the
 frame loop in a game and by the `tool` module in a tool. The module's own threads are
 few and never call a caller's code but to wake it: the queue's task workers once
 `start_tasks` asks for them, the ring's workers where the OS has no ring of its own
@@ -47,6 +47,14 @@ idle time: the module's Work unit `platform.io_idle` serves them in the Work cyc
 arrived and queues what is to be sent, draining the queue when flushed. A queue that
 grows past its limit drops writes and counts them rather than stall the frame. Loopback
 by default. This is the CLI's transport and may be a game's.
+
+**Unix-domain sockets** (`net.h`, KR49) are for the other way of using a socket: a thread of
+its own that speaks a local protocol (D-Bus, a desktop portal). `net_connect_unix_now`
+reaches a name (a path, or Linux's abstract namespace), `net_socket_pair` makes two ends
+in one process, `read_with` and `write_now_with` carry descriptors with the bytes
+(`SCM_RIGHTS`), and `net_wait` sleeps on the socket and a `NetWaker` with no slices, so
+an idle thread costs nothing until the peer speaks or another thread wakes it. Linux and
+macOS; on Windows each says `EAFNOSUPPORT` until something there needs it.
 
 **Watching** (`fs_watch.h`). An `FsWatcher` is given directory trees and polled, like a
 socket: no thread of its own, no blocking. The native backend asks the OS (inotify on
@@ -358,6 +366,9 @@ Header `korvid/platform/net.h`:
 | `NetListener` | record | `open(port, scope, &err)` (port 0: the OS picks, see `port`; `NetScope::Loopback` or `Any`; `error` keeps why it failed), `close()`, `is_open()`, `accept()` (a `Handle`, or null), `accept(seconds)` (waits for one) |
 | `NetSocket` | record | `adopt(handle)`, `read(buf, cap)` (bytes, 0, or -1 closed), `read(buf, cap, seconds)` (waits for bytes or the end), `write(data, size)`, `write_str(s)`, `write_now(data, size, seconds)` (blocks till the kernel has it all; false: over, or with `seconds`, the time ran out and the rest is queued), `flush()`, `pending()`, `room()`, `close()`, `is_open()`, `link()`, `out_limit`, `closed`, `error`, `bytes_in`, `bytes_out`, `dropped` |
 | `net_connect_local(port, &sock)`, `net_connect_local_now(port, &sock, seconds, &err)` | functions | a connect to loopback, for tools and tests: non-blocking, or waiting for the answer (false: refused, or the time ran out) |
+| `net_connect_unix_now(name, NetUnixName::Path or Abstract, &sock, seconds, &err)`, `net_socket_pair(&a, &b, &err)` | functions | a Unix-domain socket by name (ENOENT, ECONNREFUSED, ENAMETOOLONG; Abstract is Linux's), or two connected ends (POSIX; EAFNOSUPPORT on Windows) |
+| `NetSocket::read_with(buf, cap, handles, cap, &got)`, `write_now_with(data, size, handles, count, seconds)`, `handles_dropped` | methods, field | descriptors across a Unix-domain socket: those received become handles (a socket, a pipe, else a file) the caller owns; at most `kNetMaxHandles` (16) a time |
+| `NetWaker` (`open`, `close`, `wake`, `is_open`), `net_wait(sock, want_write, &waker, seconds)`, `kNetReadable`, `kNetWritable`, `kNetWoken` | record, function, constants | a thread's exact wait on its socket, ended by another thread's `wake()`: what happened, or 0 when the time ran out |
 
 Header `korvid/platform/module.h`:
 

@@ -105,6 +105,18 @@ struct NetSocket {
     // Closes the socket and gives the queue's memory back: nothing else to free. What was
     // still pending() is not sent: flush until it is 0 first, to send everything.
     void close();
+
+    // A Unix-domain socket's (KR49, below): read() that also takes the descriptors sent
+    // with the bytes, each made a handle of this process's (a socket, a pipe, or anything
+    // else as a file), close-on-exec. *got says how many went into `handles`; any past
+    // `handle_cap` are closed and counted in handles_dropped. The caller owns those it got.
+    i32  read_with(void* buf, u32 cap, Handle* handles, u32 handle_cap, u32* got);
+    // write_now, with descriptors sent alongside the first byte of `data` (size at least 1;
+    // at most kNetMaxHandles of them, each an open handle: the peer gets its own copy, and
+    // the caller keeps its). What was queued goes first. False as write_now, or with
+    // `error` EINVAL for a handle that is not open, too many, or no bytes to carry them.
+    bool write_now_with(const void* data, u32 size, const Handle* handles, u32 count, f64 seconds = -1.0);
+    u64  handles_dropped = 0; // received past what read_with was given room for, and closed
 };
 
 // Non-blocking connect to 127.0.0.1:port. The socket is usable at once: writes queue,
@@ -123,5 +135,66 @@ bool net_connect_local_now(u16 port, NetSocket* out, f64 seconds, i32* err = nul
 
 // Closes a socket nobody adopted (one accept returned that is being turned away).
 void net_close(Handle fd);
+
+// ---- Unix-domain sockets, for a thread of its own (KR49) ------------------------------
+// A stream socket to a name on this machine, for code that speaks a local protocol (D-Bus,
+// a desktop portal) from a thread of its own rather than once per frame: its wait is exact
+// and ends when another thread wakes it, and descriptors go across with the bytes. The
+// socket is a NetSocket like any other: read, write, flush, write_now and close are the
+// same, and so is the frame loop's watch of it.
+//
+//   NetSocket s; i32 err = 0;
+//   if (!net_connect_unix_now("/run/user/1000/bus", NetUnixName::Path, &s, 2.0, &err)) ... os_error_text(err)
+//   NetWaker wake; wake.open();
+//   for (;;) {                                               // the socket's own thread
+//       u8 r = net_wait(s, s.pending() != 0, &wake, -1.0);  // asleep until one of them
+//       if (r & kNetWoken) ... another thread called wake.wake()
+//       if (r & kNetReadable) { Handle got[kNetMaxHandles]; u32 n = 0; i32 k = s.read_with(buf, cap, got, kNetMaxHandles, &n); ... }
+//       if (r & kNetWritable) s.flush();
+//   }
+//
+// POSIX (Linux and macOS); the abstract namespace is Linux's. On Windows each call fails
+// with EAFNOSUPPORT, a waker does not open, and net_wait returns 0 at once: Windows' AF_UNIX
+// takes paths but passes no descriptors, and it is taken up when something there needs it.
+
+// What a Unix-domain socket's name is: a path in the file system, or (Linux) a name in the
+// abstract namespace, given without its leading NUL.
+enum class NetUnixName : u8 { Path, Abstract };
+
+// Connects to a listening Unix-domain socket, waiting up to `seconds` (less than 0: as
+// long as it takes). False, with *err: ENOENT (no such socket), ECONNREFUSED (nobody
+// listens there), ENAMETOOLONG (longer than the OS takes: 107 bytes on Linux, 103 on
+// macOS), EAFNOSUPPORT (Abstract off Linux), ETIMEDOUT.
+bool net_connect_unix_now(const char* name, NetUnixName kind, NetSocket* out, f64 seconds, i32* err = nullptr);
+
+// Two Unix-domain stream sockets connected to each other (socketpair): a peer in the same
+// process, for tests and for a thread that plays the other end.
+bool net_socket_pair(NetSocket* a, NetSocket* b, i32* err = nullptr);
+
+// The most descriptors one read_with takes or one write_now_with sends.
+constexpr u32 kNetMaxHandles = 16;
+
+// Wakes a net_wait from another thread. Opened and closed by hand; not moved while open.
+struct NetWaker {
+    i64 read_end  = -1; // the OS's: an eventfd on Linux (both ends the same), a pipe on macOS
+    i64 write_end = -1;
+    bool open(i32* err = nullptr);
+    void close();
+    bool is_open() const { return read_end >= 0; }
+    // Any thread, a signal handler too. Wakes the wait under way or the next to begin;
+    // wakes before a wait are one wake.
+    void wake();
+};
+
+// What ended a net_wait: any of them, or 0 when the time ran out.
+constexpr u8 kNetReadable = 1; // bytes to read, the end, or an error for the next read to find
+constexpr u8 kNetWritable = 2; // only when asked for: room for more
+constexpr u8 kNetWoken    = 4; // the waker was woken (and is clear again now)
+
+// Waits until the socket can be read, can be written (when `want_write`), the waker is
+// woken (null: none), or `seconds` pass (less than 0: as long as it takes). Exact: no
+// slices, so a thread asleep here costs nothing until one of them happens. One thread
+// waits on a socket at a time. A socket not open: 0 after the time, as read(seconds).
+u8 net_wait(NetSocket& s, bool want_write, NetWaker* waker, f64 seconds);
 
 } // namespace kv
