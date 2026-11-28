@@ -1,0 +1,13 @@
+korvid-link	1
+anchor	{project}
+engine	{root}
+project	{project}
+kormake	{root}/tools/kormake/bin/{host}/kormake
+ninja	ninja
+watch	{project}/korvid.config	{size}	{mtime}
+watch	{root}/kormake.lua	{size}	{mtime}
+tool	kormake	from=engine	exe={root}/tools/kormake/bin/{host}/kormake
+tool	packer	from=project	module=mypacker	build={project}/build/{host}-dev	target=mypacker	exe={project}/build/{host}-dev/bin/mypacker
+shadowed	packer	from=engine	module=packer	by=project:mypacker	build={project}/build/{host}-dev	target=packer	exe={project}/build/{host}-dev/bin/packer
+tool	stamp	from=engine	module=stamp	build={project}/build/{host}-dev	target=stamp	exe={project}/build/{host}-dev/bin/stamp
+tool	stamper	from=engine	module=stamp	build={project}/build/{host}-dev	target=stamp	exe={project}/build/{host}-dev/bin/stamp

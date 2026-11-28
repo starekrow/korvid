@@ -1,21 +1,21 @@
 $ kormake gen host-dev
-kormake: {root}/build/{host}-dev/build.ninja (9 instances)
-kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system libraries)
+kormake: {root}/build/{host}-dev/build.ninja (10 instances)
+kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system libraries), stamp (no system libraries)
 [exit 0]
 
 $ kormake gen host-ship
-kormake: {root}/build/{host}-ship/build.ninja (10 instances)
-kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system libraries)
+kormake: {root}/build/{host}-ship/build.ninja (11 instances)
+kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system libraries), stamp (no system libraries)
 [exit 0]
 
 $ kormake gen cross-dev
-kormake: {root}/build/cross-dev/build.ninja (10 instances)
-kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system libraries)
+kormake: {root}/build/cross-dev/build.ninja (11 instances)
+kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system libraries), stamp (no system libraries)
 [exit 0]
 
 $ kormake gen host-dev --sanitize undefined,address
-kormake: {root}/build/{host}-dev+address+undefined/build.ninja (9 instances)
-kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system libraries)
+kormake: {root}/build/{host}-dev+address+undefined/build.ninja (10 instances)
+kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system libraries), stamp (no system libraries)
 [exit 0]
 
 $ kormake gen host-dev --sanitize address,thread
@@ -37,7 +37,7 @@ kormake: --sanitize is for build, test and gen
 $ kormake check cross-dev
 kormake: left out of cross-dev: extra: external 'missing' (toolchain toolchain.cross) is not at {root}/packages/missing.
 Fetch it into packages/missing.
-kormake: 11 modules, 10 instances for cross-dev, no problems
+kormake: 12 modules, 11 instances for cross-dev, no problems
 [exit 0]
 
 $ kormake graph cross-dev
@@ -68,7 +68,7 @@ kormake: left out of {host}-dev: extra: external 'missing' (toolchain toolchain.
 Fetch it into packages/missing.
 kormake: cannot build base for {host}-dev: external 'pkg' (toolchain toolchain.host) is not at nowhere, where KORMAKE_PKG_DIR points.
 Set KORMAKE_PKG_DIR to the directory that holds it.
-kormake: 11 modules, 9 instances for {host}-dev, 1 problem
+kormake: 12 modules, 10 instances for {host}-dev, 1 problem
 [exit 1]
 
 $ KORMAKE_PKG_DIR=nowhere kormake graph host-dev
@@ -83,6 +83,30 @@ game@{host}-dev                           exe      deps: gfx, gfx-soft  tools: p
 $ KORMAKE_PKG_DIR=nowhere kormake gen host-dev
 kormake: base: external 'pkg' (toolchain toolchain.host) is not at nowhere, where KORMAKE_PKG_DIR points.
 Set KORMAKE_PKG_DIR to the directory that holds it.
+[exit 1]
+
+$ kormake _link write .
+{cache}/roots/{hash}.txt
+[exit 0]
+
+$ kormake _link engine .
+{root}
+[exit 0]
+
+$ kormake gen host-dev
+kormake: {root}/modules/packer/module.lua: module 'packer' publishes a command, which only a host executable (output = "exe", platforms = { "host" }) may
+[exit 1]
+
+$ kormake gen host-dev
+kormake: {root}/modules/packer/module.lua: publish: 'no/slash' is not a command name (a letter, then letters, digits, '-', '_' or '.')
+[exit 1]
+
+$ kormake gen host-dev
+kormake: {root}/modules/packer/module.lua: publish: kormake is the engine's own command
+[exit 1]
+
+$ kormake gen host-dev
+kormake: both {root}/modules/packer/module.lua and {root}/samples/stamp/module.lua publish the command 'stamper'
 [exit 1]
 
 $ kormake gen host-dev

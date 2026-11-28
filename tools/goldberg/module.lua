@@ -5,6 +5,7 @@
 module "goldberg" {
   output        = "exe",
   platforms     = { "host" },
+  publish       = true, -- on the path through kormake link tools
   deps          = { "core", "platform", "cli", "tool", "lua", "script", "math", "kimb", "kim", "svg",
                     "platform_hid", "render", "asset", "asset_live", "krome", "frameloop" }, -- the window (--window)
   engine_module = true,

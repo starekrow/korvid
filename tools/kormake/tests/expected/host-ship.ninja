@@ -138,6 +138,25 @@ build goldberg/demo.cooked: cook goldberg/demo.roots | always-cook {root}/copy_a
   cmd = '{kormake}' _cook 'goldberg/demo.cook' 'goldberg/demo.cooked'
 build bin/demo: link_host obj/demo/unity.o lib/libkv_base.a || bin/pkg.dll goldberg/demo.cooked
   libs = -lpkg -L'{root}/packages/pkg/lib'
+build host/obj/stamp/unity.o: cxx_host {root}/build/{host}-ship/host/gen/stamp/unity.cc
+  includes = -I'{root}/build/{host}-ship/host/gen/stamp'
+  defines = -DKV_BIND_GFX_GFX_SOFT=1 -DKV_BIND_GFX_COUNT=1
+  cxx = fakecc
+  ar = fakear
+  link = 
+  cxxflags = -std=c++20 -O1
+  ldflags = -lm
+  cc = fakec
+  cflags = -std=c11 -O1
+build host/bin/stamp: link_host host/obj/stamp/unity.o 
+  libs = 
+  cxx = fakecc
+  ar = fakear
+  link = 
+  cxxflags = -std=c++20 -O1
+  ldflags = -lm
+  cc = fakec
+  cflags = -std=c11 -O1
 build obj/base/tests/base_test.o: cxx_host {root}/modules/base/tests/base_test.cc
   includes = -I'{root}/modules/base/include' -I'{root}/modules/base/tests' -isystem'{root}/packages/pkg/include'
   defines = -DBASE=1 -DKV_BIND_GFX_GFX_SOFT=1 -DKV_BIND_GFX_COUNT=1
@@ -190,4 +209,5 @@ build packer: phony host/bin/packer
 build game: phony bin/game bin/game.pak
 build codec: phony lib/libkv_codec.a
 build demo: phony bin/demo
-build build.ninja: regen | {root}/kormake.lua {root}/modules/base/module.lua {root}/modules/compiler/module.lua {root}/modules/extra/module.lua {root}/modules/game/module.lua {root}/modules/gfx/module.lua {root}/modules/gfx-soft/module.lua {root}/modules/packer/module.lua {root}/modules/toolchain-cross/module.lua {root}/modules/toolchain-host/module.lua {root}/samples/codec/module.lua {root}/samples/demo/module.lua
+build stamp: phony host/bin/stamp
+build build.ninja: regen | {root}/kormake.lua {root}/modules/base/module.lua {root}/modules/compiler/module.lua {root}/modules/extra/module.lua {root}/modules/game/module.lua {root}/modules/gfx/module.lua {root}/modules/gfx-soft/module.lua {root}/modules/packer/module.lua {root}/modules/toolchain-cross/module.lua {root}/modules/toolchain-host/module.lua {root}/samples/codec/module.lua {root}/samples/demo/module.lua {root}/samples/stamp/module.lua

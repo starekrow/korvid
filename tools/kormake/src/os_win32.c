@@ -95,6 +95,7 @@ int kos_stat(const char* path, KosStat* out) {
     out->is_dir = (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
     out->is_file = !out->is_dir && !(info.dwFileAttributes & FILE_ATTRIBUTE_DEVICE);
     out->mtime = unix_seconds(info.ftLastWriteTime);
+    out->size = ((long long)info.nFileSizeHigh << 32) | (long long)info.nFileSizeLow;
     return 0;
 }
 
@@ -168,6 +169,16 @@ int kos_rmtree(const char* path) {
     int rc = rmtree_w(w);
     free(w);
     return rc;
+}
+
+int kos_rename(const char* from, const char* to) {
+    wchar_t* wf = widen(from);
+    wchar_t* wt = widen(to);
+    BOOL ok = wf && wt && MoveFileExW(wf, wt, MOVEFILE_REPLACE_EXISTING);
+    if (!ok) fail();
+    free(wf);
+    free(wt);
+    return ok ? 0 : -1;
 }
 
 int kos_touch(const char* path) {

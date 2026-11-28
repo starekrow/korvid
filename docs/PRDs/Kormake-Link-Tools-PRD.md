@@ -333,26 +333,38 @@ same binary the build runs, and the same objects are shared with it.
 ### Format
 
 The table is one plain text file per anchor, `<cache>/roots/<hash>.txt`, where `<hash>` is
-the first 16 hex digits of the SHA-256 of the anchor's real path. kormake writes it on every
-`gen`, including the regenerate rule's, with a write to a temporary file followed by a
-rename, so a shim never reads half of one.
+the 64-bit FNV-1a hash of the anchor's real path, as 16 hex digits. The hash only spreads the
+files out: the table repeats the anchor's path, and the shim checks it. kormake writes the
+table on every `gen` of the host target in `host_config`, including the regenerate rule's,
+to a temporary file that is then renamed over the table, so a shim never reads half of one.
+A cache that cannot be written is a warning, and the build goes on.
+
+Each line is a keyword and its fields, separated by tabs, so paths may hold spaces. A
+`tool` or `shadowed` row is the name, then `key=value` fields:
 
 ```
 korvid-link 1
-anchor   /home/me/code/mygame
-engine   /home/me/code/korvid
-watch    /home/me/code/mygame/korvid.config 412 1764280000.123
-watch    /home/me/code/korvid/kormake.lua 3871 1764275000.000
-ninja    /usr/bin/ninja
-kormake  /home/me/code/korvid/tools/kormake/bin/linux/kormake
-tool kormake  exe=/home/me/code/korvid/tools/kormake/bin/linux/kormake
-tool kpack    build=/home/me/code/mygame/build/linux-dev target=kpack exe=/home/me/code/mygame/build/linux-dev/bin/kpack from=engine
-tool mkatlas  build=/home/me/code/mygame/build/linux-dev target=kvscript exe=/home/me/code/mygame/build/linux-dev/bin/kvscript args="run /home/me/code/mygame/tools/mkatlas.lua" from=project
+anchor      /home/me/code/mygame
+engine      /home/me/code/korvid
+project     /home/me/code/mygame
+kormake     /home/me/code/korvid/tools/kormake/bin/linux/kormake
+ninja       ninja
+watch       /home/me/code/mygame/korvid.config    412    1795826653
+watch       /home/me/code/korvid/kormake.lua      5910   1795826600
+tool        kormake  from=engine   exe=/home/me/code/korvid/tools/kormake/bin/linux/kormake
+tool        kpack    from=project  module=mypack  build=/home/me/code/mygame/build/linux-dev  target=mypack  exe=/home/me/code/mygame/build/linux-dev/bin/mypack
+shadowed    kpack    from=engine   module=kpack   by=project:mypack  build=/home/me/code/mygame/build/linux-dev  target=kpack  exe=/home/me/code/mygame/build/linux-dev/bin/kpack
+tool        kbor     from=engine   module=kbor    build=/home/me/code/mygame/build/linux-dev  target=kbor  exe=/home/me/code/mygame/build/linux-dev/bin/kbor
+tool        kimc     from=engine   module=kimc    unavailable=<why it cannot build here>
 ```
 
-A candidate that lost is written as a `shadowed` row after its name's `tool` row, with the
-same fields and the reason it lost (`shadowed kpack build=... exe=... from=engine
-by=project`). The shim never runs a shadowed row. It reads those rows only for
+`ninja` is the toolchain probe's Ninja when it found one, otherwise `ninja`, which the shim
+looks up on `PATH`. A `watch` line is a file, its size and its modification time in seconds.
+A candidate that lost is written as a `shadowed` row after its name's `tool` row, with
+`by=` naming the side and module that won. When the losing module is still in the graph
+(another module published its command), the row says where it is built. When it lost its
+module name to a project module, it is not built here at all, and the row has no build
+fields. The shim never runs a shadowed row. It reads those rows only for
 `--diagnose-tool-lookup`.
 
 The first line is the format's major version. A shim skips any key or field it does not
@@ -370,10 +382,10 @@ When the table is missing or out of date, a kormake has to read the anchor's con
 shim cannot, because the config is Lua. Which kormake it asks:
 
 1. If the anchor has `kormake.lua`, the anchor is an engine root, so the shim runs that
-   engine's `tools/kormake/bin/<host>/kormake -C <anchor> _link write`.
+   engine's `tools/kormake/bin/<host>/kormake _link write <anchor>`.
 2. Otherwise the anchor has a `korvid.config`, and its engine is not yet known. The shim runs
    any registered engine's kormake (the one most recently linked) with
-   `-C <anchor> _link engine`. This reads the config **leniently**: only `engine` is
+   `_link engine <anchor>`. This reads the config **leniently**: only `engine` is
    evaluated, unknown directives are ignored, and `requires_kormake` is not enforced, so an
    older kormake can read a newer engine's config. It prints the engine root, and the shim
    then runs that engine's kormake with `_link write`, as in 1.

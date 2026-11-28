@@ -1,24 +1,25 @@
 $ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake gen host-dev
-kormake: {project}/build/{host}-dev/build.ninja (9 instances)
-kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system libraries)
+kormake: {project}/build/{host}-dev/build.ninja (11 instances)
+kormake: host tools for {host}-dev: mypacker (no system libraries), compiler (-lpkg), packer (no system libraries), stamp (no system libraries)
 [exit 0]
 
 $ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake graph host-dev
 codec@{host}-dev                          lib      deps:   externals: sysaudio ({project}/modules/codec/module.lua)
 base@{host}-dev                           lib      deps:   externals: pkg
 extra@{host}-dev                          lib      deps: base
+mypacker@{host}-dev                       exe      deps: 
 player@{host}-dev                         exe      deps: base, codec  externals: fakepw ({project}/modules/player/module.lua), shared ({project}/korvid.config)
 [exit 0]
 
 $ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config FAKE_PKG_MISSING=libfakepw-0.3 kormake check host-dev
 kormake: cannot build player for {host}-dev: external 'fakepw' ({project}/modules/player/module.lua): pkg-config does not find 'libfakepw-0.3'.
 {fetch}
-kormake: 11 modules, 9 instances for {host}-dev, 1 problem
+kormake: 13 modules, 11 instances for {host}-dev, 1 problem
 [exit 1]
 
 $ KORMAKE_PKG_CONFIG=pkgs/no-such-program kormake gen host-dev
-kormake: {project}/build/{host}-dev/build.ninja (9 instances)
-kormake: host tools for {host}-dev: compiler (-lpkg), packer (no system libraries)
+kormake: {project}/build/{host}-dev/build.ninja (11 instances)
+kormake: host tools for {host}-dev: mypacker (no system libraries), compiler (-lpkg), packer (no system libraries), stamp (no system libraries)
 [exit 0]
 
   libs = -lsysaudio -lpkg -lfakepw-fallback -lshared -L'/usr/lib/sysaudio' -L'{root}/packages/pkg/lib' -L'{project}/vendor/shared/lib'
@@ -33,5 +34,25 @@ kormake: codec: codegen_sources names 'src/nowhere.cc', which is not one of its 
 
 $ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake gen host-dev
 kormake: module 'demo' is needed by player but does not exist
+[exit 1]
+
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake _link write .
+{cache}/roots/{hash}.txt
+[exit 0]
+
+$ kormake _link engine .
+{root}
+[exit 0]
+
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake graph stamp host-dev
+stamp@{host}-dev                          exe      deps: 
+[exit 0]
+
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake gen host-dev
+kormake: 'player' depends on 'stamp', which is the engine's own ({root}/samples/stamp), not a module a project can use
+[exit 1]
+
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake gen host-dev
+kormake: 'player' names 'stamp' in tools, which is the engine's own ({root}/samples/stamp): a project can run it, not build with it
 [exit 1]
 

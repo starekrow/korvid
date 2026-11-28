@@ -203,6 +203,10 @@ function M.run(c, platform, config, opts)
         if not bound then util.soft_fail("'%s' needs tool interface '%s' but no backend is bound for %s", name, tname, plat) end
         tmod = bound[1]
       end
+      local trec = by_name[tmod]
+      if trec and trec.tool_only and rec.project then
+        util.fail("'%s' names '%s' in tools, which is the engine's own (%s): a project can run it, not build with it", name, tmod, trec.dir)
+      end
       local ti = instance_of(tmod, host_platform, host_config, name .. " (tool)", inst)
       inst.tools[#inst.tools + 1] = { instance = ti, spec = spec, name = tname }
     end

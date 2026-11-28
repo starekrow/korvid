@@ -5,6 +5,7 @@
 module "kbor" {
   output        = "exe",
   platforms     = { "host" },
+  publish       = true, -- on the path through kormake link tools
   deps          = { "core", "platform", "cli", "tool" },
   engine_module = true,
 }

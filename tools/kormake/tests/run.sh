@@ -36,6 +36,9 @@ root=$(native "$(cd "$tmp/fixture" && pwd -P)")
 proj=$(native "$(cd "$tmp/project" && pwd -P)")
 out="$tmp/out"
 mkdir -p "$out"
+# The tool tables every gen of the host target writes (kormake link tools), kept here.
+KORVID_LINK_CACHE=$(native "$tmp/cache")
+export KORVID_LINK_CACHE
 
 # A string as an extended regular expression that matches only itself.
 re() { printf '%s' "$1" | sed -e 's/[][\.*^$+?(){}]/\\&/g'; }
@@ -72,7 +75,10 @@ normalize() {
          -e "s|$(re "$(ninja_path "$proj")")|{project}|g" -e "s|$(re "$proj")|{project}|g" \
          -e "s|$(re "$(ninja_path "$KORMAKE")")|{kormake}|g" -e "s|$(re "$KORMAKE")|{kormake}|g" \
          -e "s/(^|[^a-z])$host-(dev|ship)/\1{host}-\2/g" \
-         -e "s/_${host}([ _]|\$)/_{host}\1/g" | host_spelling # a rule variant's name: tool_x_y_<platform>[_<module>]
+         -e "s/_${host}([ _]|\$)/_{host}\1/g" \
+         -e "s|$(re "$KORVID_LINK_CACHE")|{cache}|g" -e "s|/bin/$host/kormake|/bin/{host}/kormake|g" \
+         -e "s|(^watch	[^	]*)	[-0-9]+	[-0-9]+\$|\1	{size}	{mtime}|" -e "s|/roots/[0-9a-f]{16}\.txt|/roots/{hash}.txt|" \
+         -e "s|(\.exe)?(	\|\$)|\2|g" | host_spelling # a rule variant's name: tool_x_y_<platform>[_<module>]
 }
 # One command, its output and exit status, into commands.txt. With VAR=value words
 # first, the command runs with those set. It runs in $cwd and is logged to $log.
@@ -112,6 +118,24 @@ run build extra host-dev
 run KORMAKE_PKG_DIR=nowhere check host-dev
 run KORMAKE_PKG_DIR=nowhere graph host-dev
 run KORMAKE_PKG_DIR=nowhere gen host-dev
+# The tool table the host target's gen wrote: each published command and its binary.
+run _link write .
+normalize <"$KORVID_LINK_CACHE/roots/$(ls "$KORVID_LINK_CACHE/roots" | head -n 1)" >"$out/link-table.txt"
+rm -rf "$KORVID_LINK_CACHE"
+run _link engine .
+# What a module may not publish: a library, a name that is not a command's, kormake's own,
+# and one command published twice on one side.
+packer="$tmp/fixture/modules/packer/module.lua"
+cp "$packer" "$tmp/packer.keep"
+sed -e 's|output    = "exe",|output    = "lib",|' "$tmp/packer.keep" >"$packer"
+run gen host-dev
+sed -e 's|publish   = true,|publish   = "no/slash",|' "$tmp/packer.keep" >"$packer"
+run gen host-dev
+sed -e 's|publish   = true,|publish   = "kormake",|' "$tmp/packer.keep" >"$packer"
+run gen host-dev
+sed -e 's|publish   = true,|publish   = "stamper",|' "$tmp/packer.keep" >"$packer"
+run gen host-dev
+cp "$tmp/packer.keep" "$packer"
 # A private module with a public module's name: in the engine's own view, a clash.
 cp -R "$tmp/fixture/samples/demo" "$tmp/fixture/samples/base"
 sed -e 's|module "demo"|module "base"|' "$tmp/fixture/samples/demo/module.lua" >"$tmp/fixture/samples/base/module.lua"
@@ -152,6 +176,18 @@ rm "$out/commands.txt.raw"
   player="$tmp/project/modules/player/module.lua"
   cp "$player" "$tmp/player.keep"
   sed -e 's|deps      = { "base", "codec" }|deps      = { "base", "codec", "demo" }|' "$tmp/player.keep" >"$player"
+  run $fake gen host-dev
+  cp "$tmp/player.keep" "$player"
+  # The project's table: its packer wins the name, the engine's private stamp is there
+  # to run, and the engine's packer is the candidate that lost.
+  run $fake _link write .
+  normalize <"$KORVID_LINK_CACHE/roots/$(ls "$KORVID_LINK_CACHE/roots" | grep -v '\.new$' | while read f; do grep -q "^anchor	$proj\$" "$KORVID_LINK_CACHE/roots/$f" && echo "$f"; done)" >"$out/project-link-table.txt"
+  run _link engine .
+  # The engine's private tool can be named, not depended on nor used as a tool.
+  run $fake graph stamp host-dev
+  sed -e 's|deps      = { "base", "codec" }|deps      = { "base", "codec", "stamp" }|' "$tmp/player.keep" >"$player"
+  run $fake gen host-dev
+  sed -e 's|deps      = { "base", "codec" },|deps      = { "base", "codec" }, tools = { "stamp" },|' "$tmp/player.keep" >"$player"
   run $fake gen host-dev
   cp "$tmp/player.keep" "$player"
   normalize <"$out/$log.raw" >"$out/$log"

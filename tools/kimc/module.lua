@@ -5,6 +5,7 @@
 module "kimc" {
   output        = "exe",
   platforms     = { "host" },
+  publish       = true, -- on the path through kormake link tools
   deps          = { "core", "platform", "cli", "tool", "kim", "kimb" },
   engine_module = true,
 }

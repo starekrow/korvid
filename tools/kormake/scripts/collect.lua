@@ -49,6 +49,27 @@ function M.discover(start)
   end
 end
 
+-- The commands a module publishes (its `publish` field): none, its executable's name
+-- (true), a name, or a list of names. Only a host executable publishes, and a command's
+-- name is a plain file name that is not kormake's.
+function M.published(rec)
+  local p = rec.fields.publish
+  if p == nil or p == false then return nil end
+  local f = rec.fields
+  if f.output ~= "exe" or not util.contains(f.platforms or {}, "host") then
+    util.fail("%s: module '%s' publishes a command, which only a host executable (output = \"exe\", platforms = { \"host\" }) may", rec.file, rec.name)
+  end
+  local names = p == true and { f.exe or rec.name } or util.as_list(p)
+  if type(p) ~= "string" and type(p) ~= "table" and p ~= true then util.fail("%s: publish takes true, a name or a list of names", rec.file) end
+  for _, n in ipairs(names) do
+    if type(n) ~= "string" or not n:match("^%a[%w_.%-]*$") then
+      util.fail("%s: publish: '%s' is not a command name (a letter, then letters, digits, '-', '_' or '.')", rec.file, tostring(n))
+    end
+    if n == "kormake" then util.fail("%s: publish: kormake is the engine's own command", rec.file) end
+  end
+  return names
+end
+
 -- The cook when nothing names one: goldberg, built for the host, over every asset root
 -- of the program at once.
 M.DEFAULT_COOK = "goldberg cook --roots {roots} --stamp {stamp} --quiet"
@@ -138,7 +159,11 @@ function M.run(found)
           local want = util.is_abs(override.path) and override.path or util.join(root_dir, override.path)
           if kfs.realpath(want) ~= kfs.realpath(dir) then rec = nil end
         end
-        if rec and project_view and rec.private and rec.name ~= cook_program then rec = nil end
+        -- Hidden from a project, all but the cook's program and the tools the engine
+        -- publishes: those a project can name and run, and no project module may depend on.
+        if rec and project_view and rec.private and rec.name ~= cook_program then
+          if M.published(rec) then rec.tool_only = true else rec = nil end
+        end
         if rec then
           local r = rank[pth.kind]
           local had = by_rank[rec.name]
@@ -153,13 +178,42 @@ function M.run(found)
       end
     end
   end
-  local modules, by_name = {}, {}
+  local modules, by_name, shadowed = {}, {}, {}
   for _, rec in ipairs(found_recs) do
     if by_rank[rec.name].rec == rec then
       convention(rec)
       by_name[rec.name] = rec
       modules[#modules + 1] = rec
+    else
+      rec.shadowed_by = by_rank[rec.name].rec
+      shadowed[#shadowed + 1] = rec
     end
+  end
+  -- The commands published here, by name: each one's candidates, the module that wins
+  -- first. A project's module wins a name over the engine's; two modules of one side that
+  -- publish one name are an error. A module another of its name stepped aside for is a
+  -- candidate that lost, kept to say so (kormake link which).
+  local commands = {}
+  local function offer(rec, lost)
+    for _, n in ipairs(M.published(rec) or {}) do
+      local cmd = commands[n] or { name = n, candidates = {} }
+      commands[n] = cmd
+      for _, other in ipairs(cmd.candidates) do
+        if not other.lost and not lost and (other.rec.project or false) == (rec.project or false) then
+          util.fail("both %s and %s publish the command '%s'", other.rec.file, rec.file, n)
+        end
+      end
+      cmd.candidates[#cmd.candidates + 1] = { rec = rec, lost = lost, from = rec.project and "project" or "engine" }
+    end
+  end
+  for _, rec in ipairs(modules) do offer(rec, false) end
+  for _, rec in ipairs(shadowed) do offer(rec, true) end
+  for _, cmd in pairs(commands) do
+    table.sort(cmd.candidates, function(a, b)
+      if a.lost ~= b.lost then return not a.lost end
+      if (a.rec.project or false) ~= (b.rec.project or false) then return a.rec.project or false end
+      return a.rec.file < b.rec.file
+    end)
   end
   -- Externals defined outside the toolchains: a korvid.config's (external "name" { <platform>
   -- = {...} }) and a module's (externals = { <platform> = { name = {...} } }), per platform.
@@ -210,7 +264,8 @@ function M.run(found)
   end
   return { master = master, modules = modules, by_name = by_name, root_dir = root_dir, base_dir = base,
            build_root = build_root, anchor = found.anchor, start = found.start, config = found.config,
-           default_target = decl.target, project = added, externals = externals,
+           default_target = decl.target, project = added, externals = externals, commands = commands,
+           cook_program = cook_program,
            -- Where a regeneration starts: the config's directory when the config changes the
            -- build (its paths, its build directory), else the root, so a build file written
            -- from examples/ is the one written from the root.

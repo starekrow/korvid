@@ -26,6 +26,7 @@ int kos_stat(const char* path, KosStat* out) {
     out->is_dir = S_ISDIR(st.st_mode);
     out->is_file = S_ISREG(st.st_mode);
     out->mtime = (long long)st.st_mtime;
+    out->size = (long long)st.st_size;
     return 0;
 }
 
@@ -63,6 +64,8 @@ int kos_rmtree(const char* path) {
 }
 
 int kos_touch(const char* path) { return utime(path, NULL); }
+
+int kos_rename(const char* from, const char* to) { return rename(from, to); }
 
 int kos_copy(const char* from, const char* to) {
     int in = open(from, O_RDONLY);

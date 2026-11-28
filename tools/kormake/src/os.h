@@ -13,6 +13,7 @@ typedef struct {
     int       is_dir;
     int       is_file;
     long long mtime;   /* seconds since the Unix epoch */
+    long long size;    /* bytes, for a file */
 } KosStat;
 
 /* The entry point both implementations call after preparing argv as UTF-8. */
@@ -25,6 +26,7 @@ int         kos_mkdir(const char* path);                             /* 0 if mad
 int         kos_rmtree(const char* path);                            /* 0 if removed or absent */
 int         kos_touch(const char* path);                             /* mtime to now */
 int         kos_copy(const char* from, const char* to);              /* replaces; keeps exec bits */
+int         kos_rename(const char* from, const char* to);            /* replaces to, in one step */
 int         kos_cwd(char* buf, size_t n);
 int         kos_realpath(const char* path, char* buf, size_t n);     /* fails if it does not exist */
 int         kos_self(char* buf, size_t n);                           /* the running executable */

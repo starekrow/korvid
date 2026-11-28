@@ -355,6 +355,9 @@ local function run(cmd, words, opts)
     return 0
   end
   local build = emit.run(c, g, opts)
+  -- The host target's graph says which binary each published command is: the shim's
+  -- table, written whenever that graph is (the regenerate rule's gen too).
+  if platform == g.host and config == g.host_config and not opts.sanitize then kormake.load("link").write_table(c, g, build) end
   if cmd ~= "gen" or #names > 0 then choose() end
   -- Ninja: the toolchain probe's when it found one (Visual Studio ships one), else PATH's.
   local ninja = g.ninja and util.shell_quote(util.native(g.ninja)) or "ninja"
@@ -465,6 +468,39 @@ local function run_script(args)
   return kfs.exec(table.concat(words, " "))
 end
 
+-- `kormake _link engine DIR`: the engine root DIR's config names, read leniently (any
+-- kormake can answer for any engine's config), printed for the shim. `kormake _link write
+-- DIR`: this engine's answer for the anchor DIR: gen of the host target, which writes its
+-- tool table; the table's path is printed.
+local function link_internal(args)
+  local dir = args[3] or util.fail("_link %s DIR", tostring(args[2]))
+  if args[2] == "engine" then
+    local real = kfs.realpath(dir) or util.fail("no directory '%s'", dir)
+    local cfg = util.join(real, "korvid.config")
+    if not kfs.isfile(cfg) then
+      if kfs.isfile(util.join(real, "kormake.lua")) then print(real); return 0 end
+      util.fail("%s has neither a korvid.config nor a kormake.lua", real)
+    end
+    local e = kormake.load("sandbox").eval_config_engine(cfg, kfs.read(cfg)) or util.fail("%s names no engine", cfg)
+    e = util.expand_home(e)
+    local root = kfs.realpath(util.is_abs(e) and e or util.join(real, e))
+    if not root or not kfs.isfile(util.join(root, "kormake.lua")) then util.fail("%s: engine '%s' is not a directory with a kormake.lua", cfg, e) end
+    print(root)
+    return 0
+  end
+  if args[2] == "write" then
+    local c = collect.run(collect.discover(dir))
+    local config = c.master.host_config or "dev"
+    local g = resolve.run(c, KORMAKE_HOST, config, {})
+    local build = emit.run(c, g, {})
+    local link = kormake.load("link")
+    if not link.write_table(c, g, build) then return 1 end
+    print(link.table_path(link.paths().cache, c.anchor))
+    return 0
+  end
+  util.fail("_link engine|write DIR")
+end
+
 -- What the Ninja file runs for the host's own steps, so no rule needs a shell: _copy IN OUT
 -- copies a file; _cook runs a cook's commands; _test EXE STAMP runs a test executable in
 -- the build directory and, if it passes, writes the stamp. None reads the master file.
@@ -503,6 +539,7 @@ end
 
 local ok, result = pcall(function()
   if arg[1] == "run" then return run_script(arg) end
+  if arg[1] == "_link" then return link_internal(arg) end
   if arg[1] and arg[1]:sub(1, 1) == "_" then
     local rc = internal(arg)
     if rc then return rc end

@@ -6,6 +6,7 @@
 module "kvimagetool" {
   output        = "exe",
   platforms     = { "host" },
+  publish       = true, -- on the path through kormake link tools
   deps          = { "core", "platform", "cli", "tool", "inflate", "image" },
   engine_module = true,
 }

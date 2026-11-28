@@ -6,6 +6,7 @@
 module "kvscript" {
   output           = "exe",
   platforms        = { "host" },
+  publish          = true, -- on the path through kormake link tools
   deps             = { "core", "platform", "cli", "tool", "inflate", "image", "pack", "math", "lua", "truetype", "script", "patherizer", "svg" },
   engine_module    = true,
 }

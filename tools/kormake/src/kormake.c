@@ -63,6 +63,14 @@ static int kfs_mtime(lua_State* L) {
     return 1;
 }
 
+/* size(path): a file's size in bytes, nil if it is not there. */
+static int kfs_size(lua_State* L) {
+    KosStat st;
+    if (kos_stat(luaL_checkstring(L, 1), &st) != 0) { lua_pushnil(L); return 1; }
+    lua_pushinteger(L, (lua_Integer)st.size);
+    return 1;
+}
+
 static int kfs_read(lua_State* L) {
     FILE* f = kos_fopen(luaL_checkstring(L, 1), "rb");
     if (!f) { lua_pushnil(L); lua_pushstring(L, kos_error()); return 2; }
@@ -131,6 +139,14 @@ static int kfs_rmtree(lua_State* L) {
     return 1;
 }
 
+/* rename(from, to): replaces to in one step, so a reader sees the old file or the new. */
+static int kfs_rename(lua_State* L) {
+    const char* from = luaL_checkstring(L, 1);
+    const char* to = luaL_checkstring(L, 2);
+    if (kos_rename(from, to) != 0) return luaL_error(L, "cannot rename '%s' to '%s': %s", from, to, kos_error());
+    return 0;
+}
+
 /* copy(from, to): replaces to; an executable stays executable. */
 static int kfs_copy(lua_State* L) {
     const char* from = luaL_checkstring(L, 1);
@@ -176,7 +192,7 @@ static const luaL_Reg kfs[] = {
     {"listdir", kfs_listdir}, {"isdir", kfs_isdir}, {"isfile", kfs_isfile}, {"mtime", kfs_mtime},
     {"read", kfs_read}, {"write", kfs_write}, {"mkdirp", kfs_mkdirp}, {"rmtree", kfs_rmtree},
     {"copy", kfs_copy}, {"cwd", kfs_cwd}, {"realpath", kfs_realpath}, {"getenv", kfs_getenv},
-    {"exec", kfs_exec}, {"self", kfs_self}, {0, 0}
+    {"exec", kfs_exec}, {"self", kfs_self}, {"size", kfs_size}, {"rename", kfs_rename}, {0, 0}
 };
 
 /* kormake_script(name): the embedded script's source, for the loader in main.lua. */

@@ -51,6 +51,9 @@ local module_fields = {
   -- for any other module, externals it defines itself, per platform
   -- ({ linux = { pipewire = { pkg_config = "libpipewire-0.3" } } }): collect.lua.
   externals = true,
+  -- publish: the commands a host executable gives the path through linked tools
+  -- (docs/PRDs/Kormake-Link-Tools-PRD.md): true (its executable's name), a name, or a list.
+  publish = true,
 }
 -- What an external a module or a korvid.config defines may set (a toolchain's take the
 -- same). pkg_config: the package pkg-config is asked for (resolve.lua).
@@ -234,6 +237,22 @@ function M.eval_config(path, text)
   local ok, perr = pcall(chunk)
   if not ok then util.fail("%s", tostring(perr)) end
   return m
+end
+
+-- The engine a korvid.config names, read leniently for `kormake _link engine`: any other
+-- directive is ignored (a newer engine's config may hold ones this kormake does not
+-- know), and requires_kormake is not enforced. Nil if it names none.
+function M.eval_config_engine(path, text)
+  local env = base_env()
+  local engine
+  local function any() return any end
+  setmetatable(env, { __index = function() return any end })
+  env.engine = function(v) if type(v) == "string" and v ~= "" then engine = v end return any end
+  local chunk, err = load(text, "=" .. path, "t", env)
+  if not chunk then util.fail("%s", err) end
+  local ok, perr = pcall(chunk)
+  if not ok then util.fail("%s", tostring(perr)) end
+  return engine
 end
 
 return M
