@@ -4,7 +4,7 @@ The script runner, `bin/kvscript`: Lua 5.5 with the engine's modules as librarie
 tools that make a game's assets: cut sprites from a sheet, fit and composite them, draw
 a few letters, read a zip of a pack, write PNGs. Before it they were Python scripts that
 needed Python and Pillow; now they need nothing the engine does not build. It is an engine tool, as
-`kpack` and `picture` are (see `modules/tool`): built for the host, its one command
+`kpack` and `kvimagetool` are (see `modules/tool`): built for the host, its one command
 `kvscript run`, which `kormake run` builds and calls.
 
     kormake run examples/arcfire/tools/cut_art.lua ~/code/asset-packs

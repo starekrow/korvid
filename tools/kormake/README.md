@@ -570,7 +570,7 @@ error of kormake's own, which is printed as `kormake: <message>`.
     kormake arcfire dev                  # one game and what it links
     cd examples/arcfire && kormake dev   # the same, from its directory
     kormake examples/ ship               # every example, with packs
-    kormake kpack picture                # both tools, built for the host
+    kormake kpack kvimagetool            # both tools, built for the host
     kormake test collision               # one module's tests
     kormake test linux-dev               # every test the roots ask for
     kormake test hifi --sanitize address,undefined   # a module's tests, and its closure, under ASan and UBSan

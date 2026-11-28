@@ -1,6 +1,6 @@
 // svg's tests (docs/PRDs/Krome-Slice-5-PRD.md, milestone 3):
 //   - the test files (files/), converted and drawn, against resvg's pictures of them
-//     (references/, made by tools/patherizer-refs.sh), within the picture tool's tolerance;
+//     (references/, made by tools/patherizer-refs.sh), within kvimagetool's tolerance;
 //   - std's icons converted from their files draw the bytes their path data drew through the
 //     builder (patherizer's tests hold those against resvg);
 //   - every refusal names its line, and lenient makes it a warning;

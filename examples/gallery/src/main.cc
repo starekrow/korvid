@@ -1,5 +1,5 @@
 // The renderer's features in fixed scenes, each drawn and written as a screenshot
-// (gallery_<scene>.ppm), then compared with another backend's by the picture tool.
+// (gallery_<scene>.ppm), then compared with another backend's by kvimagetool.
 // It drives the render interface directly: a window, a renderer, a stream
 // of sprite deltas built here, and RenderViews with chosen interpolation points. No sim,
 // no frame loop, no libm in any position, so two backends' pictures differ only where

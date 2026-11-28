@@ -37,7 +37,7 @@ The pictures are taken once Krome has settled (`krome_settled`: fonts in, change
 with the tick count held at 0, so two runs compare:
 
     kromedemo --demo --lua --shots /tmp/lua && kromedemo --demo --shots /tmp/kim
-    picture compare /tmp/lua /tmp/kim     # form, menu and about: largest channel difference 0
+    kvimagetool compare /tmp/lua /tmp/kim    # form, menu and about: largest channel difference 0
 
 (the light pictures differ, since the Lua form has no themes; the gallery's are the same
 screen in both runs, and match).

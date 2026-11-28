@@ -1,6 +1,6 @@
-# picture
+# kvimagetool
 
-The picture tool, `bin/picture`. It compares screenshots picture by picture within a
+The image tool, `bin/kvimagetool`. It compares screenshots picture by picture within a
 tolerance, writes their differences as pictures, and turns screenshots into PNGs to keep
 as references. It is built the way every Korvid tool is (see `modules/tool`): its verbs
 are CLI commands, its work a system reading and writing through the I/O queue. It is
@@ -11,11 +11,11 @@ built for the host (`platforms = { "host" }`) and links no system library: its c
 ## Using it
 
 ```bash
-picture compare A B                         # two pictures, or two directories by name
-picture compare A B --diff DIR              # and each pair that differs at all, amplified x8, as DIR/<name>.diff.png
-picture compare A B --threshold 8 --max-fraction 0.005 --max-channel 255
-picture png A DIR                           # every picture of A as DIR/<name>.png
-picture help
+kvimagetool compare A B                     # two pictures, or two directories by name
+kvimagetool compare A B --diff DIR          # and each pair that differs at all, amplified x8, as DIR/<name>.diff.png
+kvimagetool compare A B --threshold 8 --max-fraction 0.005 --max-channel 255
+kvimagetool png A DIR                       # every picture of A as DIR/<name>.png
+kvimagetool help
 ```
 
 A and B are `.ppm` (binary P6: what `--screenshot` and `gallery` write) or `.png`
@@ -40,7 +40,7 @@ expected; a wrong blend, a missing layer, a sort out of order or a picture upsid
 changes many pixels by a lot. The defaults are a first guess, to be fixed by the first
 comparison of two backends and not loosened after (`docs/PRDs/Engine-Slice-7-PRD.md`, R9).
 
-Engine flags go first: `picture --verbose compare ...`. The exit status is 0 when every
+Engine flags go first: `kvimagetool --verbose compare ...`. The exit status is 0 when every
 pair passes and everything was written, 1 when a pair failed or a file would not read,
 decode or write, 2 for a command line the CLI refused.
 
@@ -49,7 +49,7 @@ decode or write, 2 for a command line the CLI refused.
 ## How it works
 
 A command checks its arguments, lists A (and B) with `io_list_files`, pairs the pictures
-by name and starts a job; `picture.pump` (PreSim, main thread, every tick) runs it:
+by name and starts a job; `kvimagetool.pump` (PreSim, main thread, every tick) runs it:
 every file is read through the I/O queue and decoded to RGB8 as it arrives; once all
 are in, each pair is compared (or each picture encoded), its line printed and any
 picture to write submitted as a write; when the writes are done, the summary is printed
@@ -57,10 +57,10 @@ and `tool_finish` gives the exit status.
 
 ## Quick reference
 
-Commands: `picture compare <a> <b> [--threshold N] [--max-fraction F] [--max-channel N]
-[--diff DIR]`, `picture png <a> <dir>`.
+Commands: `kvimagetool compare <a> <b> [--threshold N] [--max-fraction F] [--max-channel N]
+[--diff DIR]`, `kvimagetool png <a> <dir>`.
 
-Header `korvid/picture/module.h`: `picture_module`, the record; kormake puts it
+Header `korvid/kvimagetool/module.h`: `kvimagetool_module`, the record; kormake puts it
 in the list.
 
 What the module registers with the engine: the two commands, the `.pump` system and its

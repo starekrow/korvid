@@ -224,7 +224,7 @@ progress bars, a daemon mode that keeps the engine up between requests.
 Every tool in `tools/` except kormake: [kpack](../../tools/kpack/README.md) (I/O through
 the queue, one verb per command), [goldberg](../../tools/goldberg/README.md),
 [kbor](../../tools/kbor/README.md), [kimc](../../tools/kimc/README.md),
-[picture](../../tools/picture/README.md) and [kvscript](../../tools/kvscript/README.md).
+[kvimagetool](../../tools/kvimagetool/README.md) and [kvscript](../../tools/kvscript/README.md).
 
 ## See also
 

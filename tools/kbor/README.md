@@ -2,7 +2,7 @@
 
 The KBOR tool, `bin/kbor`: JSON to KBOR and back, and KBOR in its tightest form. The
 format is `docs/design/kbor.md`; the reader and writer are core's (`korvid/core/kbor.h`),
-so this is a command line over them. It is an engine tool like kpack and picture (see
+so this is a command line over them. It is an engine tool like kpack and kvimagetool (see
 `modules/tool`): its verbs are CLI commands, its work a system over the I/O queue. Built
 for the host, linking no system library: `core`, `platform`, `cli`, `tool`.
 

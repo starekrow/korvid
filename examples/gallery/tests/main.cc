@@ -1,6 +1,6 @@
 // The gallery drawn by the CPU renderer with no window (docs/PRDs/CPU-Renderer-PRD.md, SR11,
 // SR13 and SR18): every scene exactly as references/cpu has it, and within the cross-backend
-// tolerance of Vulkan's references (the picture tool's defaults: 8 levels, 0.5% of the
+// tolerance of Vulkan's references (kvimagetool's defaults: 8 levels, 0.5% of the
 // pixels), the game shaders run as Slang's C++. Then with --cpu-shaders none: the shaders
 // scene exactly as references/cpu-none has it (its materials in their blends' pipelines, no
 // post pass), every other scene as before. The scenes are the gallery's own: its source is

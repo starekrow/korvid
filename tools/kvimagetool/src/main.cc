@@ -2,6 +2,6 @@
 
 int main(int argc, char** argv) {
     kv::ToolConfig config;
-    config.name = "picture";
+    config.name = "kvimagetool";
     return kv::tool_main(argc, argv, kv_module_list(), config);
 }

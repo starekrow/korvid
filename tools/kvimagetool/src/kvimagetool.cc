@@ -11,7 +11,7 @@
 // missing layer, a sort out of order or a picture upside down changes many pixels by a
 // lot. The defaults are a first guess, to be fixed by the first comparison of two backends
 // and not loosened after (docs/PRDs/Engine-Slice-7-PRD.md, R9).
-#include "korvid/picture/module.h"
+#include "korvid/kvimagetool/module.h"
 #include "korvid/core/format.h"
 #include "korvid/core/array.h"
 #include "korvid/core/cli.h"
@@ -55,7 +55,7 @@ struct PictureState {
     u32        submitted = 0, completed = 0, failures = 0, writes_out = 0, write_failures = 0;
 };
 
-PictureState* state(Engine& e) { return engine_module_state_as<PictureState>(e, "picture"); }
+PictureState* state(Engine& e) { return engine_module_state_as<PictureState>(e, "kvimagetool"); }
 
 void say(const char* fmt, ...) KV_PRINTF(1, 2);
 void say(const char* fmt, ...) {
@@ -86,8 +86,8 @@ void finish(Engine& e, PictureState& s, int code) {
 }
 
 bool busy(CliContext& ctx, PictureState* s) {
-    if (!s) { ctx.fail("the picture module is not up"); return true; }
-    if (s->op != Op::None) { ctx.fail("picture is busy with another job"); return true; }
+    if (!s) { ctx.fail("the kvimagetool module is not up"); return true; }
+    if (s->op != Op::None) { ctx.fail("kvimagetool is busy with another job"); return true; }
     return false;
 }
 
@@ -119,7 +119,7 @@ void stem_of(const char* path, char* out, usize cap) {
 bool add_pic(PictureState& s, const char* dir, const char* name) {
     Pic p{};
     int n = dir ? format(p.path, sizeof p.path, "%s/%s", dir, name) : format(p.path, sizeof p.path, "%s", name);
-    if (n < 0 || (usize)n >= sizeof p.path) { KV_ERROR("picture", "path too long: '%s'", name); return false; }
+    if (n < 0 || (usize)n >= sizeof p.path) { KV_ERROR("kvimagetool", "path too long: '%s'", name); return false; }
     stem_of(name, p.name, sizeof p.name);
     s.pics.push(p);
     return true;
@@ -154,11 +154,11 @@ bool gather(CliContext& ctx, PictureState& s, const char* path, bool* is_dir) {
 
 // ---- commands ----------------------------------------------------------------------------------
 
-// picture compare <a> <b> [--threshold N] [--max-fraction F] [--max-channel N] [--diff DIR]
+// kvimagetool compare <a> <b> [--threshold N] [--max-fraction F] [--max-channel N] [--diff DIR]
 void cmd_compare(CliContext& ctx, Span<const char* const> args) {
     PictureState* s = state(*ctx.engine);
     if (busy(ctx, s)) return;
-    const char* usage = "picture compare <a> <b> [--threshold N] [--max-fraction F] [--max-channel N] [--diff DIR]";
+    const char* usage = "kvimagetool compare <a> <b> [--threshold N] [--max-fraction F] [--max-channel N] [--diff DIR]";
     const char* pos[2] = {};
     u32 npos = 0;
     s->threshold = 8; s->max_fraction = 0.005f; s->max_channel = 255; s->out[0] = 0;
@@ -195,11 +195,11 @@ void cmd_compare(CliContext& ctx, Span<const char* const> args) {
     s->stage = Stage::Read;
 }
 
-// picture png <a> <dir>: every picture of A as a PNG in dir
+// kvimagetool png <a> <dir>: every picture of A as a PNG in dir
 void cmd_png(CliContext& ctx, Span<const char* const> args) {
     PictureState* s = state(*ctx.engine);
     if (busy(ctx, s)) return;
-    if (args.len != 2) { ctx.fail("picture png <file or dir> <out dir>: every picture as a PNG, to keep as a reference"); return; }
+    if (args.len != 2) { ctx.fail("kvimagetool png <file or dir> <out dir>: every picture as a PNG, to keep as a reference"); return; }
     format(s->a, sizeof s->a, "%s", args[0]);
     format(s->out, sizeof s->out, "%s", args[1]);
     bool dir = false;
@@ -217,17 +217,17 @@ bool decode(PictureState& s, Pic& p, const u8* data, usize size) {
     const char* why = nullptr;
     if (ends_with(p.path, ".png")) {
         PngImage img;
-        if (!png_decode(data, size, s.general, img, &why)) { KV_ERROR("picture", "%s: %s", p.path, why); return false; }
+        if (!png_decode(data, size, s.general, img, &why)) { KV_ERROR("kvimagetool", "%s: %s", p.path, why); return false; }
         usize n = (usize)img.width * img.height;
         u8* rgb = (u8*)alloc_in(s.general, n * 3);
         if (rgb) for (usize i = 0; i < n; ++i) { rgb[i * 3] = img.rgba[i * 4]; rgb[i * 3 + 1] = img.rgba[i * 4 + 1]; rgb[i * 3 + 2] = img.rgba[i * 4 + 2]; }
         free_in(s.general, img.rgba, n * 4);
-        if (!rgb) { KV_ERROR("picture", "%s: out of memory", p.path); return false; }
+        if (!rgb) { KV_ERROR("kvimagetool", "%s: out of memory", p.path); return false; }
         p.width = img.width; p.height = img.height; p.rgb = rgb;
         return true;
     }
     PpmImage img;
-    if (!ppm_decode(data, size, s.general, img, &why)) { KV_ERROR("picture", "%s: %s", p.path, why); return false; }
+    if (!ppm_decode(data, size, s.general, img, &why)) { KV_ERROR("kvimagetool", "%s: %s", p.path, why); return false; }
     p.width = img.width; p.height = img.height; p.rgb = img.rgb;
     return true;
 }
@@ -239,10 +239,10 @@ void write_png(Engine& e, PictureState& s, const char* name, const u8* rgb, u32 
     const char* why = nullptr;
     char path[1024];
     format(path, sizeof path, "%s/%s", s.out, name);
-    if (!png_encode(rgb, w, h, 3, file, &why)) { KV_ERROR("picture", "%s: %s", path, why); ++s.write_failures; return; }
+    if (!png_encode(rgb, w, h, 3, file, &why)) { KV_ERROR("kvimagetool", "%s: %s", path, why); ++s.write_failures; return; }
     IoWriteRequest r;
     r.path = path; r.data = file.data; r.size = file.len; r.alloc = s.general; r.user = 1;
-    if (platform_io(e)->write_file(r).is_null()) { KV_ERROR("picture", "cannot write '%s'", path); ++s.write_failures; }
+    if (platform_io(e)->write_file(r).is_null()) { KV_ERROR("kvimagetool", "cannot write '%s'", path); ++s.write_failures; }
     else ++s.writes_out;
     file.free(); // the write took a copy
 }
@@ -279,7 +279,7 @@ bool compare(Engine& e, PictureState& s, const Pic& a, const Pic& b) {
     if (s.out[0] && worst) {
         // The difference, amplified eight times.
         u8* diff = (u8*)alloc_in(s.general, n * 3);
-        if (!diff) { KV_ERROR("picture", "%s: out of memory for its difference", a.name); ++s.write_failures; return ok; }
+        if (!diff) { KV_ERROR("kvimagetool", "%s: out of memory for its difference", a.name); ++s.write_failures; return ok; }
         for (usize i = 0; i < n * 3; ++i) {
             u32 x = a.rgb[i] > b.rgb[i] ? a.rgb[i] - b.rgb[i] : b.rgb[i] - a.rgb[i];
             diff[i] = (u8)(x * 8 > 255 ? 255 : x * 8);
@@ -294,7 +294,7 @@ bool compare(Engine& e, PictureState& s, const Pic& a, const Pic& b) {
 
 // Every picture is read: compare or encode, and submit what is to be written.
 void work(Engine& e, PictureState& s) {
-    if (s.out[0] && !io_make_dirs(s.out)) { KV_ERROR("picture", "cannot make '%s'", s.out); finish(e, s, 1); return; }
+    if (s.out[0] && !io_make_dirs(s.out)) { KV_ERROR("kvimagetool", "cannot make '%s'", s.out); finish(e, s, 1); return; }
     if (s.op == Op::Png) {
         for (u32 i = 0; i < s.count_a; ++i) {
             const Pic& p = s.pics[i];
@@ -329,7 +329,7 @@ void picture_pump(TickContext& ctx) {
                 IoRequest r;
                 r.path = p.path; r.alloc = s.general; r.user = 2;
                 p.io = io->read_file(r);
-                if (p.io.is_null()) { KV_ERROR("picture", "cannot read '%s'", p.path); p.done = true; ++s.completed; }
+                if (p.io.is_null()) { KV_ERROR("kvimagetool", "cannot read '%s'", p.path); p.done = true; ++s.completed; }
             }
             s.submitted = s.pics.len;
         }
@@ -341,7 +341,7 @@ void picture_pump(TickContext& ctx) {
             io->reap(c.request);
             p->done = true;
             ++s.completed;
-            if (c.status != IoStatus::Done) { KV_ERROR("picture", "cannot read '%s' (errno %d)", p->path, c.error); continue; }
+            if (c.status != IoStatus::Done) { KV_ERROR("kvimagetool", "cannot read '%s' (errno %d)", p->path, c.error); continue; }
             p->ok = decode(s, *p, (const u8*)c.bytes.data, c.bytes.size);
             c.bytes.free();
         }
@@ -354,7 +354,7 @@ void picture_pump(TickContext& ctx) {
             IoCompletion c = io->completions()[i];
             if (c.user != 1) { ++i; continue; }
             io->reap(c.request);
-            if (c.status != IoStatus::Done) { KV_ERROR("picture", "a write failed (errno %d)", c.error); ++s.write_failures; }
+            if (c.status != IoStatus::Done) { KV_ERROR("kvimagetool", "a write failed (errno %d)", c.error); ++s.write_failures; }
             --s.writes_out;
         }
         if (s.writes_out) return;
@@ -392,9 +392,9 @@ void picture_shutdown(Engine&, ModuleInstance& self) {
 }
 
 constinit const CliCommandDesc k_commands[] = {
-    {.name = "picture compare", .help = "picture compare <a> <b> [--threshold N (8)] [--max-fraction F (0.005)] [--max-channel N (255)] [--diff DIR]: "
+    {.name = "kvimagetool compare", .help = "kvimagetool compare <a> <b> [--threshold N (8)] [--max-fraction F (0.005)] [--max-channel N (255)] [--diff DIR]: "
                                         "two pictures, or two directories by name, within a tolerance; exit 1 if any pair fails", .fn = cmd_compare},
-    {.name = "picture png", .help = "picture png <file or dir> <out dir>: every picture as a PNG, to keep as a reference", .fn = cmd_png},
+    {.name = "kvimagetool png", .help = "kvimagetool png <file or dir> <out dir>: every picture as a PNG, to keep as a reference", .fn = cmd_png},
 };
 constinit const SystemDesc k_systems[] = {
     {.name = ".pump", .phase = Phase::PreSim, .fn = picture_pump, .main_thread = true, .runs = RunWhen::Always},
@@ -402,8 +402,8 @@ constinit const SystemDesc k_systems[] = {
 
 } // namespace
 
-KV_MODULE_DEFINE(picture_module) = {
-    .name     = "picture",
+KV_MODULE_DEFINE(kvimagetool_module) = {
+    .name     = "kvimagetool",
     .systems  = k_systems,
     .commands = k_commands,
     .startup  = picture_startup,

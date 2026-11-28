@@ -150,6 +150,6 @@ them for the target.
 | [goldberg](../tools/goldberg/README.md) | the asset orchestrator: cooks a program's assets and keeps them right |
 | [kpack](../tools/kpack/README.md) | builds, lists, verifies and extracts `.kpak` packs |
 | [kvscript](../tools/kvscript/README.md) | Lua with the engine's modules, for asset-making scripts |
-| [picture](../tools/picture/README.md) | compares screenshots within a tolerance |
+| [kvimagetool](../tools/kvimagetool/README.md) | compares screenshots within a tolerance |
 | [kbor](../tools/kbor/README.md) | JSON to KBOR and back |
 | [kimc](../tools/kimc/README.md) | `.kim` to `.kimb`, and checks |

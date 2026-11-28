@@ -3,7 +3,7 @@
 //   - the fill rules on self-crossing and nested outlines;
 //   - gradients against their formulas;
 //   - the corpus and std's icons against resvg's pictures (references/, made by
-//     tools/patherizer-refs.sh), within the picture tool's tolerance;
+//     tools/patherizer-refs.sh), within kvimagetool's tolerance;
 //   - the corpus's bytes hashed: the same on every platform.
 //
 // `patherizer_tests --write-svg DIR` writes the corpus as SVG files, for resvg.
@@ -405,7 +405,7 @@ u64 hash(const u8* p, usize n, u64 h = 0xcbf29ce484222325ull) {
 }
 
 // Against resvg's picture: premultiplied channels within 8 levels, all but 0.5% of the
-// pixels (the picture tool's defaults); the largest difference.
+// pixels (kvimagetool's defaults); the largest difference.
 bool against_reference(TestCtx& c, const char* name, u32 size, const Picture& got, u32* worst_out) {
     char dir[512], path[700];
     refs_dir(dir, sizeof dir);

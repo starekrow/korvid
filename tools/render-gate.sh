@@ -96,10 +96,10 @@ fi
 if [ $cpu -eq 1 ]; then
 step "gallery (headless): exact against references/cpu, within tolerance of references/vulkan"
 (cd "$dev" && ./gallery$exe --headless --out "$native_out" >"$OLDPWD/$out/gallery.log" 2>&1) || fail "gallery did not run (see $out/gallery.log)"
-if "$dev/picture$exe" compare "$out" "$refs" --threshold 0 --max-fraction 0 --max-channel 0 >"$out/compare.log" 2>&1; then
+if "$dev/kvimagetool$exe" compare "$out" "$refs" --threshold 0 --max-fraction 0 --max-channel 0 >"$out/compare.log" 2>&1; then
     pass "$(tail -1 "$out/compare.log")"
 else fail "gallery differs from references/cpu"; cat "$out/compare.log"; fi
-if "$dev/picture$exe" compare "$out" examples/gallery/references/vulkan >"$out/compare-vulkan.log" 2>&1; then
+if "$dev/kvimagetool$exe" compare "$out" examples/gallery/references/vulkan >"$out/compare-vulkan.log" 2>&1; then
     pass "against Vulkan's: $(tail -1 "$out/compare-vulkan.log")"
 else fail "gallery outside the tolerance of Vulkan's"; cat "$out/compare-vulkan.log"; fi
 else
@@ -108,9 +108,9 @@ step "gallery: exact against references/$backend"
 if [ ! -d "$refs" ]; then
     if [ $baseline -eq 1 ]; then
         echo "no committed references for $backend. Make them from this run and commit them:"
-        echo "    $dev/picture$exe png $out $refs"
+        echo "    $dev/kvimagetool$exe png $out $refs"
     else fail "no references in $refs"; fi
-elif "$dev/picture$exe" compare "$out" "$refs" --threshold 0 --max-fraction 0 --max-channel 0 >"$out/compare.log" 2>&1; then
+elif "$dev/kvimagetool$exe" compare "$out" "$refs" --threshold 0 --max-fraction 0 --max-channel 0 >"$out/compare.log" 2>&1; then
     pass "$(tail -1 "$out/compare.log")"
 else fail "gallery differs"; cat "$out/compare.log"; fi
 fi
