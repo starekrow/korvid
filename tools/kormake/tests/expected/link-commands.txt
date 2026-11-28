@@ -145,6 +145,77 @@ $ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config packer --diagnose-tool-lookup
   out: chosen     1: project module mypacker publishes "packer", and a project's command wins over the engine's; PATH programs are used only outside a linked tree
 [exit 0]
 
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake gen host-dev
+kormake: kvscript, mkatlas are published but not linked (kormake link tools)
+kormake: {project}/build/{host}-dev/build.ninja (12 instances)
+kormake: host tools for {host}-dev: mypacker (no system libraries), compiler (-lpkg), packer (no system libraries), kvscript (no system libraries), stamp (no system libraries)
+[exit 0]
+
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake gen host-dev
+kormake: {project}/build/{host}-dev/build.ninja (12 instances)
+kormake: host tools for {host}-dev: mypacker (no system libraries), compiler (-lpkg), packer (no system libraries), kvscript (no system libraries), stamp (no system libraries)
+[exit 0]
+
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake link tools mkatlas
+kormake: shim 1.0 already in {lt}/home
+kormake: linked mkatlas in {lt}/bin (published by project and its engine)
+[exit 0]
+
+$ mkatlas --out atlas
+  out: kvscript: ran as {project}/build/{host}-dev/bin/kvscript (mkatlas) with run {project}/scripts/mkatlas.lua --out atlas
+  err: fake ninja --quiet -C {project}/build/{host}-dev kvscript
+[exit 0]
+
+$ mkatlas --diagnose-tool-lookup
+  out: cwd        {project}
+  out: shim       {lt}/home/kvbinlink (kvbinlink 1.0), registry {lt}/home/registry.txt
+  out: walk       {project}: korvid.config  <- anchor
+  out: context    project {project}, engine {root}
+  out: table      {cache}/roots/{hash}.txt (current)
+  out: kormake    {root}/tools/kormake/bin/{host}/kormake
+  out: trust      engine linked, project linked
+  out: candidates
+  out:   1 project  {project}/build/{host}-dev/bin/kvscript run {project}/scripts/mkatlas.lua   built, up to date
+  out: chosen     1: {project}/korvid.config publishes the script {project}/scripts/mkatlas.lua, run by kvscript; PATH programs are used only outside a linked tree
+[exit 0]
+
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake link default packer
+kormake: outside any tree, packer now runs from project {project}
+[exit 0]
+
+$ KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config kormake link default nosuch
+kormake: link default: nosuch is not published here (project {project} publishes kormake, kvscript, mkatlas, packer, stamp, stamper)
+[exit 1]
+
+$ packer z
+  out: the project's packer: ran as {project}/build/{host}-dev/bin/mypacker (packer) with z
+  err: fake ninja --quiet -C {project}/build/{host}-dev mypacker
+[exit 0]
+
+$ packer --diagnose-tool-lookup
+  out: cwd        {lt}/elsewhere
+  out: shim       {lt}/home/kvbinlink (kvbinlink 1.0), registry {lt}/home/registry.txt
+  out: walk       {lt}/elsewhere: nothing
+  out:            {lt}: nothing
+  out: default    {project} (kormake link default)
+  out: context    project {project}, engine {root}
+  out: table      {cache}/roots/{hash}.txt (current)
+  out: kormake    {root}/tools/kormake/bin/{host}/kormake
+  out: trust      engine linked, project linked
+  out: candidates
+  out:   1 project  {project}/build/{host}-dev/bin/mypacker   built, up to date
+  out:   2 engine   {project}/build/{host}-dev/bin/packer   (module packer: lost to project:mypacker)
+  out: chosen     1: project module mypacker publishes "packer", and a project's command wins over the engine's; PATH programs are used only outside a linked tree
+[exit 0]
+
+$ kormake link default --clear packer
+kormake: no default now for packer
+[exit 0]
+
+$ packer
+  err: packer: not inside a Korvid engine or project (no korvid.config or kormake.lua above {lt}/elsewhere)
+[exit 127]
+
 $ kormake link which stamp
 cwd        {project}
 shim       {lt}/home/kvbinlink (kvbinlink 1.0), registry {lt}/home/registry.txt
@@ -164,6 +235,7 @@ linked    kormake  in {lt}/bin
 linked    packer  in {lt}/bin
 linked    stamp  in {lt}/bin
 linked    stamper  in {lt}/bin
+linked    mkatlas  in {lt}/bin
 engine    {root}
 project   {project}
 [exit 0]
@@ -182,7 +254,7 @@ kormake: link remove: nosuch is not linked
 [exit 1]
 
 $ kormake link remove --forget
-kormake: unlinked kormake stamp stamper
+kormake: unlinked kormake stamp stamper mkatlas
 kormake: no link is left; removed {lt}/home
 [exit 0]
 

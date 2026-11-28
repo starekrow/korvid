@@ -257,6 +257,25 @@ if [ "$host" != windows ]; then
   echo "-- touched" >>"$proj/korvid.config"
   touch -t 203001010000 "$proj/korvid.config"
   shim KORMAKE_PKG_CONFIG=pkgs/fake-pkg-config packer --diagnose-tool-lookup
+  # A script the config publishes, run by the engine's kvscript (here a stub module, and a
+  # stub that prints what it was given), and gen's note that it has no link, said once.
+  mkdir -p "$root/samples/kvscript" "$proj/scripts"
+  printf 'module "kvscript" { output = "exe", platforms = { "host" }, publish = true }\n' >"$root/samples/kvscript/module.lua"
+  echo '-- makes an atlas' >"$proj/scripts/mkatlas.lua"
+  echo 'command "mkatlas" { script = "scripts/mkatlas.lua" }' >>"$proj/korvid.config"
+  stub "$proj/build/$host-dev/bin/kvscript" "kvscript"
+  run $fake gen host-dev
+  run $fake gen host-dev
+  run $fake link tools mkatlas
+  shim mkatlas --out atlas
+  shim mkatlas --diagnose-tool-lookup
+  # Out of tree, a default: the project's packer, until it is cleared.
+  run $fake link default packer
+  run $fake link default nosuch
+  cwd=$lt/elsewhere shim packer z
+  cwd=$lt/elsewhere shim packer --diagnose-tool-lookup
+  run link default --clear packer
+  cwd=$lt/elsewhere shim packer
   run link which stamp
   run link list
   # A newer shim installed stays: an older engine does not put its own over it.

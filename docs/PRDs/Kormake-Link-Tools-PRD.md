@@ -307,7 +307,9 @@ command "mkatlas" { script = "tools/mkatlas.lua" }   -- path relative to this fi
 ```
 
 Its row runs the root's `kvscript` with `run <script> ARGS`, exactly as `kormake run` does,
-from the current directory. The build step is kvscript's.
+from the current directory. The build step is kvscript's. In the table it is a `tool` row
+for kvscript's binary, with `config=` (the file that published it) and `script=` (the
+script's absolute path) added.
 
 ### Which binary a name means
 
@@ -423,7 +425,8 @@ repository's build. So the shim runs only what you have vouched for:
 
 `kormake link tools` is the only thing that adds to the registry. `gen` never does. The
 registry is `<home>/registry.txt`, one entry a line, tab-separated: `engine PATH`,
-`project PATH` (most recently linked last), `link NAME BINDIR` and `default NAME ANCHOR`.
+`project PATH` (most recently linked last), `link NAME BINDIR`, `default NAME ANCHOR`, and
+`noted NAME ANCHOR` for a name `gen` has already said is not linked.
 The shim's home is the directory the shim itself is in (`KORVID_LINK_HOME` overrides it),
 so a `--system` shim reads the system's registry. The
 lenient `_link engine` step evaluates a `korvid.config` from a directory you have not
@@ -476,7 +479,8 @@ kormake link remove [NAME...] [--forget]
   shim and the link home go when no link is left. The cache is left alone, since it is
   only a cache.
 
-`gen` warns once, with the command to run, when the root publishes a name that has no link:
+`gen` warns once, with the command to run, when the root publishes a name that has no link,
+and only once you use linked tools there (its engine, and its project, are linked):
 `kormake: mkatlas is published but not linked (kormake link tools)`. It never makes links
 itself, since writing into a directory on your path should only happen when you ask for it.
 

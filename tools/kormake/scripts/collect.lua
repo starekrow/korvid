@@ -208,6 +208,26 @@ function M.run(found)
   end
   for _, rec in ipairs(modules) do offer(rec, false) end
   for _, rec in ipairs(shadowed) do offer(rec, true) end
+  -- A korvid.config's scripts: run by kvscript, on the config's side (a project's, or the
+  -- engine's in its own tree).
+  for _, name in ipairs(util.sorted_keys(decl.commands or {})) do
+    if not name:match("^%a[%w_.%-]*$") or name == "kormake" then
+      util.fail("%s: command '%s' is not a name a command may have", found.config, name)
+    end
+    local s = util.expand_home(decl.commands[name].script)
+    local script = util.is_abs(s) and s or util.join(found.anchor, s)
+    if not kfs.isfile(script) then util.fail("%s: command '%s': no script at %s", found.config, name, script) end
+    local cmd = commands[name] or { name = name, candidates = {} }
+    commands[name] = cmd
+    local project = project_view or nil
+    for _, other in ipairs(cmd.candidates) do
+      if not other.lost and (other.rec.project or false) == (project or false) then
+        util.fail("both %s and %s publish the command '%s'", other.rec.file, found.config, name)
+      end
+    end
+    cmd.candidates[#cmd.candidates + 1] = { rec = { name = "kvscript", file = found.config, project = project }, script = script, lost = false,
+                                            from = project and "project" or "engine" }
+  end
   for _, cmd in pairs(commands) do
     table.sort(cmd.candidates, function(a, b)
       if a.lost ~= b.lost then return not a.lost end

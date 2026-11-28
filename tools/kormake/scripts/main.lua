@@ -27,7 +27,7 @@ usage: kormake [COMMAND] [NAME...] [TARGET] [OPTIONS]
   test     build and run their tests; --heavy: their heavy tests (tests/heavy/), -- ARGS for those
   package  dist/<exe>/: one executable, its pack, shaders and licenses (an .app on Apple)
   run      kormake run SCRIPT.lua [ARGS...]: the script with kvscript, built for the host
-  link     kormake link tools|list|which|remove [NAME...]: the published tools on your path
+  link     kormake link tools|list|which|default|remove [NAME...]: the published tools on your path
   gen      write build.ninja and compile_commands.json only
   check    resolve only: cycles, bindings, duplicates
   graph    the instance graph [--dot] [--why MODULE]
@@ -358,7 +358,11 @@ local function run(cmd, words, opts)
   local build = emit.run(c, g, opts)
   -- The host target's graph says which binary each published command is: the shim's
   -- table, written whenever that graph is (the regenerate rule's gen too).
-  if platform == g.host and config == g.host_config and not opts.sanitize then kormake.load("link").write_table(c, g, build) end
+  if platform == g.host and config == g.host_config and not opts.sanitize then
+    local link = kormake.load("link")
+    link.write_table(c, g, build)
+    link.note_unlinked(c)
+  end
   if cmd ~= "gen" or #names > 0 then choose() end
   -- Ninja: the toolchain probe's when it found one (Visual Studio ships one), else PATH's.
   local ninja = g.ninja and util.shell_quote(util.native(g.ninja)) or "ninja"

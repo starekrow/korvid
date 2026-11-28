@@ -228,6 +228,18 @@ function M.eval_config(path, text)
       m.externals[name] = copy_data(t)
     end
   end
+  -- command "mkatlas" { script = "tools/mkatlas.lua" }: a Lua script published as a
+  -- command (kormake link tools), run with the engine's kvscript as `kormake run` runs one.
+  env.command = function(name)
+    return function(t)
+      if type(name) ~= "string" or name == "" or type(t) ~= "table" then util.fail("%s: command takes a name and a table", path) end
+      for k in pairs(t) do if k ~= "script" then util.fail("%s: command '%s' has an unknown field '%s'", path, name, tostring(k)) end end
+      if type(t.script) ~= "string" or t.script == "" then util.fail("%s: command '%s' needs script = \"<path to a .lua file>\"", path, name) end
+      m.commands = m.commands or {}
+      if m.commands[name] then util.fail("%s: command '%s' is defined twice", path, name) end
+      m.commands[name] = { script = t.script }
+    end
+  end
   env.modulepath = function(t)
     m.modulepaths = m.modulepaths or {}
     for _, p in ipairs(util.as_list(t)) do m.modulepaths[#m.modulepaths + 1] = p end

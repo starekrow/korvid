@@ -85,28 +85,33 @@ function M.table_text(c, g, build)
   watched[#watched + 1] = util.join(c.root_dir, "kormake.lua")
   for _, f in ipairs(watched) do line("watch", f, tostring(kfs.size(f) or -1), tostring(kfs.mtime(f) or -1)) end
   line("tool", "kormake", "from=engine", "exe=" .. M.kormake_of(c.root_dir))
-  local function where(rec)
+  local function where(rec, script)
+    if script and not c.by_name.kvscript then return { "unavailable=this engine has no kvscript module (tools/kvscript), which runs scripts" } end
     local key = rec.name .. "@" .. g.host .. "-" .. g.host_config
     local inst = g.by_key[key]
     if not inst or inst.dropped or inst.problem then
       return { "unavailable=" .. field((inst and (inst.dropped or inst.problem)) or g.unavailable[rec.name] or "not in this graph") }
     end
     local exe = g.tool_path(inst)
-    return { "build=" .. build, "target=" .. rec.name, "exe=" .. util.join(build, exe) }
+    local out = { "build=" .. build, "target=" .. rec.name, "exe=" .. util.join(build, exe) }
+    if script then out[#out + 1] = "script=" .. script end
+    return out
   end
   for _, name in ipairs(util.sorted_keys(c.commands or {})) do
     local cmd = c.commands[name]
     local winner
     for _, cand in ipairs(cmd.candidates) do
       local parts = { "tool", name, "from=" .. cand.from, "module=" .. cand.rec.name }
+      if cand.script then parts[4] = "config=" .. cand.rec.file end
       if not cand.lost and not winner then
         winner = cand
-        for _, w in ipairs(where(cand.rec)) do parts[#parts + 1] = w end
+        for _, w in ipairs(where(cand.rec, cand.script)) do parts[#parts + 1] = w end
       else
         parts[1] = "shadowed"
         local by = cand.lost and cand.rec.shadowed_by or winner.rec
-        parts[#parts + 1] = "by=" .. (by.project and "project" or "engine") .. ":" .. by.name
-        if not cand.lost then for _, w in ipairs(where(cand.rec)) do parts[#parts + 1] = w end end
+        local by_name = (not cand.lost and winner.script) and "korvid.config" or by.name
+        parts[#parts + 1] = "by=" .. (by.project and "project" or "engine") .. ":" .. by_name
+        if not cand.lost then for _, w in ipairs(where(cand.rec, cand.script)) do parts[#parts + 1] = w end end
       end
       line(table.unpack(parts))
     end
@@ -299,7 +304,10 @@ local function link_tools(dir, names, opts)
       kfs.link(shim, path)
       made[#made + 1] = n
     end
-    if not skipped[#skipped] or not skipped[#skipped]:find("^" .. n .. " ") then put(reg, "link", n, p.bin) end
+    if not skipped[#skipped] or not skipped[#skipped]:find("^" .. n .. " ") then
+      put(reg, "link", n, p.bin)
+      drop(reg, function(e) return e.kind == "noted" and e.a == n end)
+    end
   end
   M.write_registry(p.home, reg)
   local whose = c.project and ("published by " .. util.basename(c.anchor) .. " and its engine") or ("published by the engine at " .. c.root_dir)
@@ -343,6 +351,63 @@ local function link_which(dir, names)
     if rc ~= 0 then worst = rc end
   end
   return worst
+end
+
+-- Out of tree, NAME runs this context's tool (every name it publishes, with no NAME); with
+-- --clear, it falls through to PATH again. A context not linked yet is linked first: a
+-- default is a choice to trust it.
+local function link_default(dir, names, opts)
+  local p = M.paths(opts.system)
+  if opts.clear then
+    local reg = M.read_registry(p.home)
+    local cleared = {}
+    for _, e in ipairs(reg.entries) do
+      if e.kind == "default" and (#names == 0 or util.contains(names, e.a)) then cleared[#cleared + 1] = e.a end
+    end
+    for _, n in ipairs(names) do if not util.contains(cleared, n) then util.fail("link default --clear: %s has no default", n) end end
+    drop(reg, function(e) return e.kind == "default" and util.contains(cleared, e.a) end)
+    M.write_registry(p.home, reg)
+    if #cleared > 0 then print("kormake: no default now for " .. table.concat(cleared, " ")) end
+    return 0
+  end
+  local c, published = context(dir)
+  local want = #names > 0 and names or published
+  local here = c.project and ("project " .. c.anchor) or ("engine " .. c.root_dir)
+  for _, n in ipairs(want) do
+    if not util.contains(published, n) then
+      util.fail("link default: %s is not published here (%s publishes %s)", n, here, table.concat(published, ", "))
+    end
+  end
+  local reg = M.read_registry(p.home)
+  if not find(reg, "engine", c.root_dir) or (c.project and not find(reg, "project", c.anchor)) then
+    local rc = link_tools(dir, {}, opts)
+    if rc ~= 0 then return rc end
+    reg = M.read_registry(p.home)
+  end
+  for _, n in ipairs(want) do put(reg, "default", n, c.anchor) end
+  M.write_registry(p.home, reg)
+  print(string.format("kormake: outside any tree, %s now run%s from %s", table.concat(want, " "), #want == 1 and "s" or "", here))
+  return 0
+end
+
+-- gen's note, once a name: a command published here that has no link, where linked tools
+-- are in use (this engine or project is linked). The registry remembers it was said.
+function M.note_unlinked(c)
+  local ok = pcall(function()
+    local p = M.paths()
+    local reg = M.read_registry(p.home)
+    if not find(reg, "engine", c.root_dir) then return end
+    if c.project and not find(reg, "project", c.anchor) then return end
+    local fresh = {}
+    for _, n in ipairs(util.sorted_keys(c.commands or {})) do
+      if not find(reg, "link", n) and not find(reg, "noted", n) then fresh[#fresh + 1] = n end
+    end
+    if #fresh == 0 then return end
+    for _, n in ipairs(fresh) do put(reg, "noted", n, c.anchor) end
+    M.write_registry(p.home, reg)
+    io.stderr:write(string.format("kormake: %s %s published but not linked (kormake link tools)\n", table.concat(fresh, ", "), #fresh == 1 and "is" or "are"))
+  end)
+  return ok
 end
 
 local function link_remove(dir, names, opts)
@@ -396,6 +461,7 @@ function M.command(args)
     elseif a == "--force" then opts.force = true
     elseif a == "--forget" then opts.forget = true
     elseif a == "--path" then opts.path = true
+    elseif a == "--clear" then opts.clear = true
     elseif a:sub(1, 1) == "-" then util.fail("link: unknown option '%s'", a)
     else names[#names + 1] = a end
     i = i + 1
@@ -405,7 +471,8 @@ function M.command(args)
   if sub == "list" then return link_list() end
   if sub == "which" then return link_which(kfs.realpath(dir) or dir, names) end
   if sub == "remove" then return link_remove(dir, names, opts) end
-  util.fail("usage: kormake link tools|list|which|remove [NAME...] (tools/kormake/README.md)")
+  if sub == "default" then return link_default(dir, names, opts) end
+  util.fail("usage: kormake link tools|list|which|default|remove [NAME...] (tools/kormake/README.md)")
 end
 
 return M

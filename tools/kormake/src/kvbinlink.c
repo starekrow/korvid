@@ -292,7 +292,7 @@ static const char* any_engine(void) {
 typedef struct {
     int  shadowed;
     char name[128], from[16], module[128], by[160];
-    char build[PATH_CAP], target[128], exe[PATH_CAP], unavailable[512], args[PATH_CAP];
+    char build[PATH_CAP], target[128], exe[PATH_CAP], unavailable[512], script[PATH_CAP], config[PATH_CAP];
 } Row;
 
 typedef struct {
@@ -319,7 +319,7 @@ static void field(Row* r, const char* kv) {
     const char* v = eq + 1;
 #define F(key, dst) if (k == strlen(key) && strncmp(kv, key, k) == 0) { copy(dst, sizeof dst, v); return; }
     F("from", r->from) F("module", r->module) F("by", r->by) F("build", r->build) F("target", r->target)
-    F("exe", r->exe) F("unavailable", r->unavailable) F("args", r->args)
+    F("exe", r->exe) F("unavailable", r->unavailable) F("script", r->script) F("config", r->config)
 #undef F
 }
 
@@ -585,8 +585,8 @@ static int rewrite_table(const char* engine, const char* anchor) {
 
 static void print_row(int i, const char* side, const Row* r, const char* state) {
     if (!g_diag) return;
-    printf("  %d %-8s %s%s%s\n", i, side, r->exe[0] ? r->exe : r->unavailable[0] ? "(cannot build here)" : "(not built here)",
-           state[0] ? "   " : "", state);
+    printf("  %d %-8s %s%s%s%s%s\n", i, side, r->exe[0] ? r->exe : r->unavailable[0] ? "(cannot build here)" : "(not built here)",
+           r->script[0] ? " run " : "", r->script, state[0] ? "   " : "", state);
 }
 
 /* Whether a build would do anything for the row: a dry Ninja run. */
@@ -780,7 +780,7 @@ int main(int argc, char** argv) {
             if (r == row) chosen = i;
             char state[640];
             if (r->unavailable[0]) snprintf(state, sizeof state, "cannot build here: %s", r->unavailable);
-            else if (r->shadowed) snprintf(state, sizeof state, "(module %s: lost to %s)", r->module, r->by);
+            else if (r->shadowed) snprintf(state, sizeof state, "(%s %s: lost to %s)", r->script[0] ? "script" : "module", r->script[0] ? r->script : r->module, r->by);
             else snprintf(state, sizeof state, "%s", rebuild_state(r));
             print_row(i, side, r, state);
         }
@@ -796,7 +796,9 @@ int main(int argc, char** argv) {
         }
         int has_shadow = 0;
         for (int j = 0; j < g_table.nrows; ++j) if (g_table.rows[j].shadowed && strcmp(g_table.rows[j].name, name) == 0) has_shadow = 1;
-        if (strcmp(row->from, "project") == 0)
+        if (row->script[0])
+            report("chosen", "%d: %s publishes the script %s, run by kvscript; PATH programs are used only outside a linked tree", chosen, row->config, row->script);
+        else if (strcmp(row->from, "project") == 0)
             report("chosen", "%d: project module %s publishes \"%s\"%s; PATH programs are used only outside a linked tree", chosen, row->module, name,
                    has_shadow ? ", and a project's command wins over the engine's" : "");
         else
@@ -847,8 +849,17 @@ int main(int argc, char** argv) {
 #else
     setenv("KORVID_LINK_NAME", name, 1);
 #endif
-    debug("running %s", row->exe);
+    debug("running %s%s%s", row->exe, row->script[0] ? " run " : "", row->script);
     args[0] = row->exe;
+    if (row->script[0]) {
+        /* A script command: kvscript run SCRIPT ARGS, as `kormake run` runs it. */
+        char** sargv = (char**)calloc((size_t)nargs + 3, sizeof(char*));
+        sargv[0] = row->exe;
+        sargv[1] = (char*)"run";
+        sargv[2] = row->script;
+        for (int i = 1; i < nargs; ++i) sargv[i + 2] = args[i];
+        args = sargv;
+    }
     run_instead(row->exe, args);
     say("cannot run %s: %s", row->exe, strerror(errno));
     return 126;
